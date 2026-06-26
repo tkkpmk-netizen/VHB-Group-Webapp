@@ -5,6 +5,7 @@ description = "VHB Super App — FastAPI backend"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.18.4",
+    "asteval>=1.0.9",
     "asyncpg>=0.31.0",
     "fastapi>=0.138.0",
     "pwdlib[argon2]>=0.3.0",

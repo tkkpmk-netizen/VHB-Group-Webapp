@@ -7,7 +7,7 @@ import { chipColor } from "@/lib/field-colors";
 
 export type DropdownOption = {
   value: string;
-  label: string;
+  label: React.ReactNode;
   color?: string;
 };
 

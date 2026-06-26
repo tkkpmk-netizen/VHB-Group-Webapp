@@ -1,14 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Copy, GripVertical, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  GripVertical,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
-import { CellEditor } from "@/components/table/cell-editor";
+import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import { ColumnMenu } from "@/components/table/column-menu";
 import { Dropdown } from "@/components/ui/dropdown";
+import { countryByCode, parsePhone } from "@/lib/countries";
+import { applyFilterTree, applySorts, groupRows } from "@/lib/view";
+import type { SharedViewProps } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
@@ -24,12 +33,75 @@ const FIELD_TYPES: { value: string; label: string; choices: boolean }[] = [
   { value: "url", label: "URL", choices: false },
   { value: "email", label: "Email", choices: false },
   { value: "phone", label: "Phone", choices: false },
+  { value: "country", label: "Country", choices: false },
+  { value: "relation", label: "Relation", choices: false },
+  { value: "rollup", label: "Rollup", choices: false },
+  { value: "formula", label: "Formula", choices: false },
+  { value: "people", label: "People", choices: false },
+  { value: "progress", label: "Progress", choices: false },
+  { value: "created_time", label: "Created time", choices: false },
+  { value: "created_by", label: "Created by", choices: false },
+  { value: "last_edited_time", label: "Last edited time", choices: false },
+  { value: "last_edited_by", label: "Last edited by", choices: false },
   { value: "select", label: "Select", choices: true },
   { value: "multi_select", label: "Multi-select", choices: true },
   { value: "status", label: "Status", choices: true },
   { value: "priority", label: "Priority", choices: true },
   { value: "rating", label: "Rating (1-5)", choices: false },
 ];
+
+const NUM_TYPES = new Set(["number", "rating"]);
+
+function calcOptions(type: string) {
+  const base = [
+    { value: "", label: "None" },
+    { value: "count", label: "Count all" },
+    { value: "filled", label: "Filled" },
+    { value: "empty", label: "Empty" },
+    { value: "unique", label: "Unique" },
+    { value: "percent_filled", label: "% Filled" },
+  ];
+  if (NUM_TYPES.has(type))
+    return [
+      ...base,
+      { value: "sum", label: "Sum" },
+      { value: "avg", label: "Average" },
+      { value: "min", label: "Min" },
+      { value: "max", label: "Max" },
+    ];
+  return base;
+}
+
+function isEmptyVal(v: unknown): boolean {
+  return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+}
+
+function computeCalc(field: Field, rows: Row[], op: string): string {
+  if (!op) return "";
+  const vals = rows.map((r) => (r.data as Record<string, unknown>)[field.id]);
+  const filled = vals.filter((v) => !isEmptyVal(v));
+  if (op === "count") return String(rows.length);
+  if (op === "filled") return String(filled.length);
+  if (op === "empty") return String(rows.length - filled.length);
+  if (op === "unique")
+    return String(new Set(filled.map((v) => JSON.stringify(v))).size);
+  if (op === "percent_filled")
+    return rows.length
+      ? `${Math.round((filled.length / rows.length) * 100)}%`
+      : "0%";
+  const nums = filled
+    .map((v) => Number(v))
+    .filter((n) => !Number.isNaN(n));
+  if (nums.length === 0) return "—";
+  if (op === "sum") return nums.reduce((a, b) => a + b, 0).toLocaleString("en-US");
+  if (op === "avg")
+    return (nums.reduce((a, b) => a + b, 0) / nums.length).toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+    });
+  if (op === "min") return String(Math.min(...nums));
+  if (op === "max") return String(Math.max(...nums));
+  return "";
+}
 
 function slug(label: string, i: number): string {
   const s = label
@@ -67,7 +139,22 @@ function buildOptions(
 }
 
 
-export function TableView({ databaseId }: { databaseId: string }) {
+export function TableView({
+  databaseId,
+  filterRoot,
+  sorts,
+  groupFieldId,
+  hideEmpty,
+  frozenUpTo,
+  setFrozenUpTo,
+  calc,
+  setCalc,
+  hidden,
+  search,
+  filterToMatches,
+  matchedIds,
+  flashId,
+}: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [addAnchor, setAddAnchor] = useState<{ x: number; y: number } | null>(
@@ -81,6 +168,9 @@ export function TableView({ databaseId }: { databaseId: string }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragColId, setDragColId] = useState<string | null>(null);
   const [dragRowId, setDragRowId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [editCell, setEditCell] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [resizing, setResizing] = useState<{
     fieldId: string;
     startX: number;
@@ -92,13 +182,14 @@ export function TableView({ databaseId }: { databaseId: string }) {
   const [fOptions, setFOptions] = useState("");
   const [fFormat, setFFormat] = useState("integer");
   const [fCurrency, setFCurrency] = useState("VND");
+  const [fTargetDb, setFTargetDb] = useState<string | null>(null);
+  const [fTwoWay, setFTwoWay] = useState(false);
 
+  // Databases list — only used to pick a relation field's target database.
   const dbQ = useQuery<Db[]>({
     queryKey: ["databases"],
     queryFn: () => apiFetch<Db[]>("/databases"),
   });
-  const dbName = dbQ.data?.find((d) => d.id === databaseId)?.name ?? "Database";
-
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
@@ -114,15 +205,16 @@ export function TableView({ databaseId }: { databaseId: string }) {
   };
 
   const addField = useMutation({
-    mutationFn: () =>
-      apiFetch<Field>(`/databases/${databaseId}/fields`, {
+    mutationFn: () => {
+      const options =
+        fType === "relation"
+          ? { target_database_id: fTargetDb, two_way: fTwoWay }
+          : buildOptions(fType, fOptions, fFormat, fCurrency);
+      return apiFetch<Field>(`/databases/${databaseId}/fields`, {
         method: "POST",
-        body: JSON.stringify({
-          name: fName.trim(),
-          type: fType,
-          options: buildOptions(fType, fOptions, fFormat, fCurrency),
-        }),
-      }),
+        body: JSON.stringify({ name: fName.trim(), type: fType, options }),
+      });
+    },
     onSuccess: () => {
       setAdding(false);
       setFName("");
@@ -130,6 +222,8 @@ export function TableView({ databaseId }: { databaseId: string }) {
       setFOptions("");
       setFFormat("integer");
       setFCurrency("VND");
+      setFTargetDb(null);
+      setFTwoWay(false);
       invalidate();
     },
   });
@@ -239,6 +333,24 @@ export function TableView({ databaseId }: { databaseId: string }) {
     return typeof w === "number" ? w : 200;
   }
 
+  // Sticky offsets for frozen (pinned) leftmost columns.
+  function frozenStyle(colIdx: number): React.CSSProperties | undefined {
+    if (colIdx > frozenUpTo) return undefined;
+    const list = (fieldsQ.data ?? []).filter((f) => !hidden.has(f.id));
+    let left = 40; // checkbox column width
+    for (let i = 0; i < colIdx; i++) left += colWidth(list[i]);
+    return {
+      position: "sticky",
+      left,
+      zIndex: 2,
+      background: "var(--color-card)",
+    };
+  }
+  const checkboxFrozen: React.CSSProperties | undefined =
+    frozenUpTo >= 0
+      ? { position: "sticky", left: 0, zIndex: 3, background: "var(--color-card)" }
+      : undefined;
+
   function handleRowClick(idx: number, id: string, shift: boolean) {
     const rs = rowsQ.data ?? [];
     if (shift && anchor !== null) {
@@ -293,6 +405,23 @@ export function TableView({ databaseId }: { databaseId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
   });
 
+  async function insertField(side: "left" | "right", targetId: string) {
+    const created = await apiFetch<Field>(`/databases/${databaseId}/fields`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Untitled", type: "text", options: {} }),
+    });
+    const ids = (fieldsQ.data ?? [])
+      .map((f) => f.id)
+      .filter((id) => id !== created.id);
+    const tIdx = ids.indexOf(targetId);
+    ids.splice(side === "left" ? tIdx : tIdx + 1, 0, created.id);
+    await apiFetch<void>(`/databases/${databaseId}/fields/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+    qc.invalidateQueries({ queryKey: ["fields", databaseId] });
+  }
+
   function moveBefore(ids: string[], fromId: string, toId: string): string[] {
     if (fromId === toId) return ids;
     const arr = ids.filter((i) => i !== fromId);
@@ -304,6 +433,82 @@ export function TableView({ databaseId }: { databaseId: string }) {
   const fields = fieldsQ.data ?? [];
   const rows = rowsQ.data ?? [];
   const choiceType = ["select", "multi_select"].includes(fType);
+
+  // View tools: filter → sort → search → optional group.
+  const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
+  let visible = applySorts(
+    applyFilterTree(rows, byId, filterRoot),
+    byId,
+    sorts,
+  );
+  const searchActive = search.trim().length > 0;
+  if (searchActive && filterToMatches && matchedIds)
+    visible = visible.filter((r) => matchedIds.has(r.id));
+  let groups =
+    groupFieldId && byId[groupFieldId]
+      ? groupRows(visible, byId[groupFieldId])
+      : null;
+  if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
+  const displayFields = fields.filter((f) => !hidden.has(f.id));
+  const subOwner = fields.find(
+    (f) =>
+      (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
+      !(f.options as { mirror?: boolean })?.mirror,
+  );
+  const subParent = fields.find(
+    (f) =>
+      (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
+      (f.options as { mirror?: boolean })?.mirror,
+  );
+  // Hierarchy mode: when sub-items on and not grouping, show a parent→child tree.
+  const treeMode = !!subOwner && !!subParent && !groups;
+  const rowById = new Map(visible.map((r) => [r.id, r]));
+  const childrenOf = (row: Row): Row[] => {
+    if (!subOwner) return [];
+    const ids = (row.data as Record<string, unknown>)[subOwner.id];
+    return Array.isArray(ids)
+      ? ids.map((id) => rowById.get(String(id))).filter((r): r is Row => !!r)
+      : [];
+  };
+  const topLevel = treeMode
+    ? visible.filter((r) => {
+        const p = (r.data as Record<string, unknown>)[subParent!.id];
+        return !Array.isArray(p) || p.length === 0;
+      })
+    : visible;
+
+  async function addSubRow(parent: Row) {
+    if (!subOwner) return;
+    const child = await apiFetch<Row>(`/databases/${databaseId}/rows`, {
+      method: "POST",
+      body: JSON.stringify({ data: {} }),
+    });
+    const cur = ((parent.data as Record<string, unknown>)[subOwner.id] ??
+      []) as string[];
+    await apiFetch<Row>(`/rows/${parent.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ data: { [subOwner.id]: [...cur, child.id] } }),
+    });
+    setExpanded((p) => new Set(p).add(parent.id));
+    qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+  }
+
+  // Commit a cell; setting a Country auto-fills phone dial codes in the row.
+  function commitCell(row: Row, field: Field, value: unknown) {
+    const data: Record<string, unknown> = { [field.id]: value };
+    if (field.type === "country" && typeof value === "string" && value) {
+      const c = countryByCode(value);
+      if (c) {
+        for (const f of fields) {
+          if (f.type !== "phone") continue;
+          const cur = (row.data as Record<string, unknown>)[f.id];
+          const number = parsePhone(typeof cur === "string" ? cur : "").number;
+          data[f.id] = `+${c.dial}${number ? " " + number : ""}`;
+        }
+      }
+    }
+    updateCell.mutate({ rowId: row.id, data });
+  }
 
   // --- Excel-style cell range selection ---
   const [range, setRange] = useState<{
@@ -350,6 +555,7 @@ export function TableView({ databaseId }: { databaseId: string }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setRange(null);
+        setEditCell(null);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C") && range) {
@@ -382,19 +588,165 @@ export function TableView({ databaseId }: { databaseId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [range, rowsQ.data, fieldsQ.data]);
 
+  function toggleExpand(id: string) {
+    setExpanded((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function renderRow(row: Row, idx: number, depth = 0) {
+    const kids = childrenOf(row);
+    const isOpen = expanded.has(row.id);
+    return (
+      <tr
+        key={row.id}
+        data-row-id={row.id}
+        onDragOver={(e) => dragRowId && e.preventDefault()}
+        onDrop={() => {
+          if (dragRowId) {
+            reorderRows.mutate(
+              moveBefore(rows.map((r) => r.id), dragRowId, row.id),
+            );
+            setDragRowId(null);
+          }
+        }}
+        className={`group border-b last:border-0 transition-colors ${
+          flashId === row.id
+            ? "bg-primary/20"
+            : searchActive && !filterToMatches && matchedIds?.has(row.id)
+              ? "bg-primary/5"
+              : selected.has(row.id)
+                ? "bg-accent/30"
+                : ""
+        }`}
+      >
+        <td
+          className="whitespace-nowrap bg-card px-2 text-center"
+          style={checkboxFrozen}
+        >
+          <span
+            draggable
+            onDragStart={() => setDragRowId(row.id)}
+            title="Drag to reorder row"
+            className="mr-1 inline-block cursor-grab text-muted-foreground opacity-0 group-hover:opacity-100 active:cursor-grabbing"
+          >
+            <GripVertical className="inline size-3.5" />
+          </span>
+          <input
+            type="checkbox"
+            checked={selected.has(row.id)}
+            onChange={() => {}}
+            onClick={(e) => handleRowClick(idx, row.id, e.shiftKey)}
+            className="size-4 align-middle accent-[var(--color-primary)]"
+          />
+        </td>
+        {displayFields.map((f, colIdx) => {
+          const cellKey = `${row.id}:${f.id}`;
+          const isEditing = editCell === cellKey;
+          return (
+            <td
+              key={f.id}
+              onMouseDown={() => {
+                if (isEditing) return; // editing this cell: let the input handle it
+                setEditCell(null);
+                setRange({ r1: idx, c1: colIdx, r2: idx, c2: colIdx });
+                setDragging(true);
+              }}
+              onMouseEnter={() => {
+                if (dragging)
+                  setRange((r) => (r ? { ...r, r2: idx, c2: colIdx } : r));
+              }}
+              style={frozenStyle(colIdx)}
+              className={`overflow-hidden border-r px-1 align-middle ${
+                inRange(idx, colIdx) ? "bg-primary/10" : "bg-card"
+              }`}
+            >
+              <div
+                className="flex items-center"
+                style={treeMode && colIdx === 0 ? { paddingLeft: depth * 18 } : undefined}
+              >
+                {treeMode && colIdx === 0 && (
+                  <>
+                    <button
+                      onClick={() => kids.length && toggleExpand(row.id)}
+                      className={`mr-0.5 shrink-0 ${kids.length ? "text-muted-foreground hover:text-foreground" : "invisible"}`}
+                    >
+                      {isOpen ? (
+                        <ChevronDown className="size-3.5" />
+                      ) : (
+                        <ChevronRight className="size-3.5" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => addSubRow(row)}
+                      title="Add sub-item"
+                      className="mr-1 shrink-0 text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100"
+                    >
+                      <Plus className="size-3.5" />
+                    </button>
+                  </>
+                )}
+                <div className="relative min-w-0 flex-1">
+                  {f.type === "unique_id" ? (
+                    <span className="px-2 text-sm text-muted-foreground">
+                      {((f.options as { prefix?: string })?.prefix ?? "") + row.seq}
+                    </span>
+                  ) : (
+                    <CellEditor
+                      key={isEditing ? "edit" : "view"}
+                      field={f}
+                      value={(row.data as Record<string, unknown>)[f.id] ?? null}
+                      onCommit={(v) => commitCell(row, f, v)}
+                      autoEdit={isEditing}
+                    />
+                  )}
+                  {/* Single click = select only; double-click activates editing. */}
+                  {!isEditing && f.type !== "unique_id" && (
+                    <div
+                      className="absolute inset-0 z-[1] cursor-cell"
+                      onDoubleClick={() => setEditCell(cellKey)}
+                    />
+                  )}
+                </div>
+              </div>
+            </td>
+          );
+        })}
+        <td className="whitespace-nowrap px-2 text-center">
+          <button
+            onClick={() => deleteRow.mutate(row.id)}
+            title="Delete row"
+            className="opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            <Trash2 className="inline size-3.5 text-muted-foreground hover:text-destructive" />
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
+  // Recursive render for tree (sub-item) mode.
+  function renderTree(
+    rowsToRender: Row[],
+    depth: number,
+    counter: { i: number },
+  ): React.ReactNode[] {
+    const out: React.ReactNode[] = [];
+    for (const row of rowsToRender) {
+      counter.i += 1;
+      out.push(renderRow(row, counter.i, depth));
+      if (expanded.has(row.id)) {
+        out.push(...renderTree(childrenOf(row), depth + 1, counter));
+      }
+    }
+    return out;
+  }
+
   return (
     <div className="space-y-4">
-      <div>
-        <Link
-          href="/databases"
-          className="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-          Databases
-        </Link>
-        <h1 className="text-2xl font-bold">{dbName}</h1>
-      </div>
-
       {/* Add field popover */}
       {adding &&
         addAnchor &&
@@ -460,10 +812,36 @@ export function TableView({ databaseId }: { databaseId: string }) {
                   className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
               )}
+              {fType === "relation" && (
+                <>
+                  <Dropdown
+                    value={fTargetDb}
+                    placeholder="Target database…"
+                    options={(dbQ.data ?? []).map((d) => ({
+                      value: d.id,
+                      label: d.name,
+                    }))}
+                    onChange={setFTargetDb}
+                  />
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={fTwoWay}
+                      onChange={(e) => setFTwoWay(e.target.checked)}
+                      className="size-4 accent-[var(--color-primary)]"
+                    />
+                    Two-way (create back-link)
+                  </label>
+                </>
+              )}
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={() => addField.mutate()}
-                  disabled={!fName.trim() || addField.isPending}
+                  disabled={
+                    !fName.trim() ||
+                    addField.isPending ||
+                    (fType === "relation" && !fTargetDb)
+                  }
                   className="flex-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
                 >
                   Add column
@@ -508,21 +886,21 @@ export function TableView({ databaseId }: { databaseId: string }) {
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border bg-card">
         <table
-          className="table-fixed border-collapse text-sm"
+          className="table-fixed select-none border-collapse text-sm"
           style={{
-            width: 40 + fields.reduce((s, f) => s + colWidth(f), 0) + 48,
+            width: 40 + displayFields.reduce((s, f) => s + colWidth(f), 0) + 48,
           }}
         >
           <colgroup>
             <col style={{ width: 40 }} />
-            {fields.map((f) => (
+            {displayFields.map((f) => (
               <col key={f.id} style={{ width: colWidth(f) }} />
             ))}
             <col style={{ width: 48 }} />
           </colgroup>
           <thead>
             <tr className="border-b bg-muted/40">
-              <th className="px-2 py-2">
+              <th className="bg-muted/40 px-2 py-2" style={checkboxFrozen}>
                 <input
                   type="checkbox"
                   checked={rows.length > 0 && selected.size === rows.length}
@@ -536,7 +914,7 @@ export function TableView({ databaseId }: { databaseId: string }) {
                   className="size-4 accent-[var(--color-primary)]"
                 />
               </th>
-              {fields.map((f) => (
+              {displayFields.map((f, colIdx) => (
                 <th
                   key={f.id}
                   onDragOver={(e) => dragColId && e.preventDefault()}
@@ -548,7 +926,8 @@ export function TableView({ databaseId }: { databaseId: string }) {
                       setDragColId(null);
                     }
                   }}
-                  className="relative px-3 py-2 text-left font-medium"
+                  style={frozenStyle(colIdx)}
+                  className="relative bg-muted/40 px-3 py-2 text-left font-medium"
                 >
                   <button
                     draggable
@@ -605,89 +984,89 @@ export function TableView({ databaseId }: { databaseId: string }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, idx) => (
-              <tr
-                key={row.id}
-                onDragOver={(e) => dragRowId && e.preventDefault()}
-                onDrop={() => {
-                  if (dragRowId) {
-                    reorderRows.mutate(
-                      moveBefore(rows.map((r) => r.id), dragRowId, row.id),
-                    );
-                    setDragRowId(null);
-                  }
-                }}
-                className={`group border-b last:border-0 ${
-                  selected.has(row.id) ? "bg-accent/30" : ""
-                }`}
-              >
-                <td className="whitespace-nowrap px-2 text-center">
-                  <span
-                    draggable
-                    onDragStart={() => setDragRowId(row.id)}
-                    title="Drag to reorder row"
-                    className="mr-1 inline-block cursor-grab text-muted-foreground opacity-0 group-hover:opacity-100 active:cursor-grabbing"
-                  >
-                    <GripVertical className="inline size-3.5" />
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(row.id)}
-                    onChange={() => {}}
-                    onClick={(e) => handleRowClick(idx, row.id, e.shiftKey)}
-                    className="size-4 align-middle accent-[var(--color-primary)]"
-                  />
-                </td>
-                {fields.map((f, colIdx) => (
+            {treeMode && renderTree(topLevel, 0, { i: -1 })}
+            {!treeMode &&
+              !groups &&
+              visible.map((row, idx) => renderRow(row, idx))}
+            {!treeMode &&
+              groups &&
+              groupFieldId &&
+              (() => {
+                let i = -1;
+                return groups.map((g) => {
+                  const isCollapsed = collapsed.has(g.key);
+                  return (
+                    <Fragment key={g.key}>
+                      <tr className="border-y bg-muted/40">
+                        <td colSpan={displayFields.length + 2} className="p-0">
+                          <button
+                            onClick={() =>
+                              setCollapsed((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(g.key)) next.delete(g.key);
+                                else next.add(g.key);
+                                return next;
+                              })
+                            }
+                            className="sticky left-0 flex items-center gap-2 px-3 py-2 text-sm font-semibold"
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="size-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="size-4 text-muted-foreground" />
+                            )}
+                            <ValueChip field={byId[groupFieldId]} value={g.value} />
+                            <span className="text-xs font-normal text-muted-foreground">
+                              {g.rows.length}
+                            </span>
+                          </button>
+                        </td>
+                      </tr>
+                      {!isCollapsed &&
+                        g.rows.map((row) => {
+                          i += 1;
+                          return renderRow(row, i);
+                        })}
+                    </Fragment>
+                  );
+                });
+              })()}
+          </tbody>
+          {displayFields.length > 0 && (
+            <tfoot>
+              <tr className="border-t bg-muted/20">
+                <td className="bg-muted/20" style={checkboxFrozen} />
+                {displayFields.map((f, colIdx) => (
                   <td
                     key={f.id}
-                    onMouseDown={() => {
-                      setRange({ r1: idx, c1: colIdx, r2: idx, c2: colIdx });
-                      setDragging(true);
-                    }}
-                    onMouseEnter={() => {
-                      if (dragging)
-                        setRange((r) =>
-                          r ? { ...r, r2: idx, c2: colIdx } : r,
-                        );
-                    }}
-                    className={`overflow-hidden border-r px-1 align-middle ${
-                      inRange(idx, colIdx) ? "bg-primary/10" : ""
-                    }`}
+                    style={frozenStyle(colIdx)}
+                    className="border-r bg-muted/20 px-1"
                   >
-                    {f.type === "unique_id" ? (
-                      <span className="px-2 text-sm text-muted-foreground">
-                        {((f.options as { prefix?: string })?.prefix ?? "") +
-                          row.seq}
-                      </span>
-                    ) : (
-                      <CellEditor
-                        field={f}
-                        value={
-                          (row.data as Record<string, unknown>)[f.id] ?? null
-                        }
-                        onCommit={(v) =>
-                          updateCell.mutate({
-                            rowId: row.id,
-                            data: { [f.id]: v },
-                          })
-                        }
-                      />
-                    )}
+                    <Dropdown
+                      value={calc[f.id] ?? ""}
+                      allowClear={false}
+                      options={calcOptions(f.type)}
+                      onChange={(v) =>
+                        setCalc((c) => ({ ...c, [f.id]: v ?? "" }))
+                      }
+                      trigger={
+                        calc[f.id] ? (
+                          <span className="text-xs font-medium">
+                            {computeCalc(f, visible, calc[f.id])}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            Calculate
+                          </span>
+                        )
+                      }
+                    />
                   </td>
                 ))}
-                <td className="px-2 text-center">
-                  <button
-                    onClick={() => deleteRow.mutate(row.id)}
-                    title="Delete row"
-                    className="opacity-0 transition-opacity group-hover:opacity-100"
-                  >
-                    <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-                  </button>
-                </td>
+                <td className="bg-muted/20" />
               </tr>
-            ))}
-          </tbody>
+            </tfoot>
+          )}
         </table>
 
         {fields.length === 0 && (
@@ -713,8 +1092,15 @@ export function TableView({ databaseId }: { databaseId: string }) {
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
+          onInsert={(side) => insertField(side, menu.field.id)}
+          frozen={fields.findIndex((f) => f.id === menu.field.id) <= frozenUpTo}
+          onFreezeToggle={() => {
+            const i = fields.findIndex((f) => f.id === menu.field.id);
+            setFrozenUpTo(i <= frozenUpTo ? i - 1 : i);
+          }}
         />
       )}
+
     </div>
   );
 }

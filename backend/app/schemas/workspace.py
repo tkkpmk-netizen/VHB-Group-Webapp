@@ -13,6 +13,14 @@ class WorkspaceOut(BaseModel):
     member_count: int = 0
 
 
+class MemberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    full_name: str | None = None
+
+
 class DatabaseCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     icon: str | None = Field(default=None, max_length=16)

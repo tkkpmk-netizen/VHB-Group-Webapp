@@ -8,6 +8,7 @@ from app import __version__
 from app.api.auth import router as auth_router
 from app.api.databases import router as databases_router
 from app.api.engine import router as engine_router
+from app.api.views import router as views_router
 from app.api.workspaces import router as workspaces_router
 from app.core.config import get_settings
 
@@ -27,6 +28,7 @@ app.include_router(auth_router)
 app.include_router(workspaces_router)
 app.include_router(databases_router)
 app.include_router(engine_router)
+app.include_router(views_router)
 
 
 class HealthResponse(BaseModel):

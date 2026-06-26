@@ -50,3 +50,13 @@ class RowOut(BaseModel):
 
 class ReorderRequest(BaseModel):
     ids: list[uuid.UUID]
+
+
+class FormulaPreview(BaseModel):
+    expression: str
+
+
+class FormulaPreviewResult(BaseModel):
+    value: Any
+    type: str
+    error: str | None = None
