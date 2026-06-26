@@ -1,5 +1,5 @@
 import { AppShell } from "@/components/layout/app-shell";
-import { TableView } from "@/components/table/table-view";
+import { DatabaseView } from "@/components/table/database-view";
 
 export default async function DatabaseDetailPage({
   params,
@@ -10,7 +10,7 @@ export default async function DatabaseDetailPage({
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-[1800px]">
-        <TableView databaseId={id} />
+        <DatabaseView databaseId={id} />
       </div>
     </AppShell>
   );

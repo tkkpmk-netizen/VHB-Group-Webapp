@@ -1,12 +1,91 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Star } from "lucide-react";
 import { Dropdown, MultiDropdown } from "@/components/ui/dropdown";
+import { apiFetch } from "@/lib/api/client";
+import { chipColor } from "@/lib/field-colors";
+import {
+  COUNTRY_OPTIONS,
+  countryByCode,
+  DIAL_OPTIONS,
+  flagEmoji,
+  parsePhone,
+} from "@/lib/countries";
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
+type RowT = components["schemas"]["RowOut"];
+type Member = components["schemas"]["MemberOut"];
+
+/** Workspace members (deduped by React Query across all People/By cells). */
+function useMembers() {
+  return useQuery<Member[]>({
+    queryKey: ["members"],
+    queryFn: () => apiFetch<Member[]>("/workspaces/me/members"),
+  });
+}
+
+const memberLabel = (m: Member) => m.full_name || m.email;
+
+/** Relation option label: ID (dimmed) + name (bold). */
+function RelationLabel({
+  row,
+  idField,
+  titleField,
+}: {
+  row: RowT;
+  idField?: Field;
+  titleField?: Field;
+}) {
+  const prefix = (idField?.options as { prefix?: string })?.prefix ?? "";
+  const id = idField ? `${prefix}${row.seq}` : `#${row.seq}`;
+  const nameVal = titleField
+    ? (row.data as Record<string, unknown>)[titleField.id]
+    : "";
+  const name = typeof nameVal === "string" && nameVal ? nameVal : "Untitled";
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-xs text-muted-foreground">{id}</span>
+      <span className="font-semibold">{name}</span>
+    </span>
+  );
+}
 type Choice = { id: string; label: string; color?: string; group?: string };
+
+/** Rich display of a value (flag for country, colored badge for select) —
+ *  used for group headers so they match the cell appearance. */
+export function ValueChip({ field, value }: { field: Field; value: unknown }) {
+  if (value == null || value === "")
+    return <span className="text-muted-foreground">Empty</span>;
+  const t = field.type;
+  if (t === "country") {
+    const c = countryByCode(String(value));
+    return (
+      <span>
+        {flagEmoji(String(value))} {c?.name ?? String(value)}
+      </span>
+    );
+  }
+  if (["select", "status", "priority"].includes(t)) {
+    const raw = (field.options as { choices?: Choice[] })?.choices ?? [];
+    const ch = raw.find((c) => c.id === value);
+    if (ch) {
+      const col = chipColor(ch.color);
+      return (
+        <span
+          className="rounded-full px-2 py-0.5 text-xs font-medium"
+          style={{ backgroundColor: col.bg, color: col.fg }}
+        >
+          {ch.label}
+        </span>
+      );
+    }
+  }
+  return <span>{String(value)}</span>;
+}
 
 function choiceOptions(field: Field) {
   const raw = (field.options as { choices?: Choice[] })?.choices;
@@ -18,10 +97,10 @@ function choiceOptions(field: Field) {
 }
 
 const SELECT_LIKE = new Set(["select", "status", "priority"]);
-const TEXT_TYPES = new Set(["text", "long_text", "phone", "email", "url"]);
+const TEXT_TYPES = new Set(["text", "long_text", "email", "url"]);
 
 const inputCls =
-  "w-full rounded bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-accent/40";
+  "w-full select-text rounded bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-accent/40";
 const displayCls = "min-h-[34px] cursor-text truncate px-2 py-1.5 text-sm";
 const dash = <span className="text-muted-foreground">—</span>;
 
@@ -29,6 +108,8 @@ type CellProps = {
   field: Field;
   value: unknown;
   onCommit: (value: unknown) => void;
+  /** When the cell is double-click-activated, text/number/phone open their input. */
+  autoEdit?: boolean;
 };
 
 type NumberOptions = {
@@ -64,20 +145,41 @@ function displayNumber(field: Field, value: unknown): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
-function formatDate(field: Field, value: string): string {
-  const fmt = (field.options as { date_format?: string })?.date_format ?? "iso";
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return value;
-  const [, y, mo, d] = m;
-  if (fmt === "dmy") return `${d}/${mo}/${y}`;
-  if (fmt === "mdy") return `${mo}/${d}/${y}`;
-  if (fmt === "ymd") return `${y}/${mo}/${d}`;
-  return `${y}-${mo}-${d}`;
+type DateValue = { start: string; end: string | null };
+
+function parseDateValue(v: unknown): DateValue {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const o = v as { start?: string; end?: string | null };
+    return { start: o.start ?? "", end: o.end ?? null };
+  }
+  if (typeof v === "string") return { start: v, end: null };
+  return { start: "", end: null };
 }
 
-function TextCell({ field, value, onCommit }: CellProps) {
-  const [editing, setEditing] = useState(false);
-  const [local, setLocal] = useState("");
+/** Format a single ISO date/datetime string per the column's date_format. */
+function formatOne(field: Field, s: string): string {
+  const fmt = (field.options as { date_format?: string })?.date_format ?? "iso";
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  if (!m) return s;
+  const [, y, mo, d, hh, mm] = m;
+  let out =
+    fmt === "dmy"
+      ? `${d}/${mo}/${y}`
+      : fmt === "mdy"
+        ? `${mo}/${d}/${y}`
+        : fmt === "ymd"
+          ? `${y}/${mo}/${d}`
+          : `${y}-${mo}-${d}`;
+  if (hh != null && mm != null) out += ` ${hh}:${mm}`;
+  return out;
+}
+
+function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
+  // autoEdit cells remount via key when activated, so initial state is enough.
+  const [editing, setEditing] = useState(autoEdit ?? false);
+  const [local, setLocal] = useState(
+    autoEdit && typeof value === "string" ? value : "",
+  );
   const multiline = field.type === "long_text";
   const inputType =
     field.type === "email" ? "email" : field.type === "url" ? "url" : "text";
@@ -140,9 +242,11 @@ function TextCell({ field, value, onCommit }: CellProps) {
   );
 }
 
-function NumberCell({ field, value, onCommit }: CellProps) {
-  const [editing, setEditing] = useState(false);
-  const [local, setLocal] = useState("");
+function NumberCell({ field, value, onCommit, autoEdit }: CellProps) {
+  const [editing, setEditing] = useState(autoEdit ?? false);
+  const [local, setLocal] = useState(
+    autoEdit && value != null ? String(value) : "",
+  );
   if (editing) {
     return (
       <input
@@ -174,25 +278,112 @@ function NumberCell({ field, value, onCommit }: CellProps) {
 }
 
 function DateCell({ field, value, onCommit }: CellProps) {
-  const [editing, setEditing] = useState(false);
-  if (editing) {
-    return (
-      <input
-        type="date"
-        autoFocus
-        defaultValue={typeof value === "string" ? value : ""}
-        onBlur={(e) => {
-          setEditing(false);
-          onCommit(e.target.value || null);
-        }}
-        className={inputCls}
-      />
-    );
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState<string | null>(null);
+  const [withTime, setWithTime] = useState(false);
+  const [withEnd, setWithEnd] = useState(false);
+
+  const norm = parseDateValue(value);
+
+  function openEditor(e: React.MouseEvent) {
+    const r = e.currentTarget.getBoundingClientRect();
+    setPos({ x: r.left, y: r.bottom + 4 });
+    const n = parseDateValue(value);
+    setStart(n.start);
+    setEnd(n.end);
+    setWithTime(n.start.includes("T") || (n.end?.includes("T") ?? false));
+    setWithEnd(n.end != null);
+    setOpen(true);
   }
+
+  function emit(ns: string, ne: string | null, t: boolean, hasEnd: boolean) {
+    const fix = (s: string) =>
+      !s ? "" : t ? (s.includes("T") ? s : `${s.slice(0, 10)}T00:00`) : s.slice(0, 10);
+    const fstart = fix(ns);
+    if (!fstart) {
+      onCommit(null);
+      return;
+    }
+    onCommit({ start: fstart, end: hasEnd ? fix(ne || ns) : null });
+  }
+
+  const inputType = withTime ? "datetime-local" : "date";
+  const toInput = (s: string | null) =>
+    !s ? "" : withTime && !s.includes("T") ? `${s.slice(0, 10)}T00:00` : s;
+
   return (
-    <div onClick={() => setEditing(true)} className={displayCls}>
-      {typeof value === "string" && value ? formatDate(field, value) : dash}
-    </div>
+    <>
+      <div onClick={openEditor} className={`${displayCls} cursor-pointer`}>
+        {norm.start
+          ? formatOne(field, norm.start) +
+            (norm.end ? ` → ${formatOne(field, norm.end)}` : "")
+          : dash}
+      </div>
+      {open &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <div
+              className="fixed z-50 w-64 space-y-2 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg"
+              style={{
+                top: pos.y,
+                left:
+                  typeof window !== "undefined"
+                    ? Math.min(pos.x, window.innerWidth - 280)
+                    : pos.x,
+              }}
+            >
+              <input
+                type={inputType}
+                value={toInput(start)}
+                onChange={(e) => {
+                  setStart(e.target.value);
+                  emit(e.target.value, end, withTime, withEnd);
+                }}
+                className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+              />
+              {withEnd && (
+                <input
+                  type={inputType}
+                  value={toInput(end)}
+                  onChange={(e) => {
+                    setEnd(e.target.value);
+                    emit(start, e.target.value, withTime, true);
+                  }}
+                  className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                />
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={withTime}
+                  onChange={(e) => {
+                    setWithTime(e.target.checked);
+                    emit(start, end, e.target.checked, withEnd);
+                  }}
+                  className="size-4 accent-[var(--color-primary)]"
+                />
+                Include time
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={withEnd}
+                  onChange={(e) => {
+                    setWithEnd(e.target.checked);
+                    emit(start, end, withTime, e.target.checked);
+                  }}
+                  className="size-4 accent-[var(--color-primary)]"
+                />
+                End date
+              </label>
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -221,6 +412,132 @@ function RatingCell({ value, onCommit }: CellProps) {
   );
 }
 
+function PhoneCell({ value, onCommit, autoEdit }: CellProps) {
+  const [editing, setEditing] = useState(autoEdit ?? false);
+  const parsed = parsePhone(typeof value === "string" ? value : "");
+  const [dial, setDial] = useState(parsed.dial);
+  const [num, setNum] = useState(parsed.number);
+
+  function join(d: string, n: string): string | null {
+    const v = `${d ? d + " " : ""}${n}`.trim();
+    return v || null;
+  }
+
+  if (!editing) {
+    const shown = `${parsed.dial} ${parsed.number}`.trim();
+    return (
+      <div
+        onClick={() => {
+          const p = parsePhone(typeof value === "string" ? value : "");
+          setDial(p.dial);
+          setNum(p.number);
+          setEditing(true);
+        }}
+        className={displayCls}
+      >
+        {shown || dash}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 px-1 py-0.5">
+      <div className="w-24 shrink-0">
+        <Dropdown
+          value={dial || null}
+          allowClear={false}
+          placeholder="+code"
+          options={DIAL_OPTIONS}
+          onChange={(v) => {
+            setDial(v || "");
+            onCommit(join(v || "", num));
+          }}
+        />
+      </div>
+      <input
+        autoFocus
+        type="tel"
+        value={num}
+        onChange={(e) => setNum(e.target.value)}
+        onBlur={() => {
+          let d = dial;
+          let n = num.trim();
+          if (n.startsWith("+") || !dial) {
+            const p = parsePhone(n);
+            if (p.dial) {
+              d = p.dial;
+              n = p.number;
+            }
+          }
+          setDial(d);
+          setNum(n);
+          onCommit(join(d, n));
+          setEditing(false);
+        }}
+        className={inputCls}
+      />
+    </div>
+  );
+}
+
+function CountryCell({ value, onCommit }: CellProps) {
+  return (
+    <div className="py-0.5">
+      <Dropdown
+        value={typeof value === "string" ? value : null}
+        options={COUNTRY_OPTIONS}
+        onChange={onCommit}
+      />
+    </div>
+  );
+}
+
+function RelationCell({ field, value, onCommit }: CellProps) {
+  const targetDb = (field.options as { target_database_id?: string })
+    ?.target_database_id;
+  const rowsQ = useQuery<RowT[]>({
+    queryKey: ["rows", targetDb],
+    queryFn: () => apiFetch<RowT[]>(`/databases/${targetDb}/rows`),
+    enabled: !!targetDb,
+  });
+  const fieldsQ = useQuery<Field[]>({
+    queryKey: ["fields", targetDb],
+    queryFn: () => apiFetch<Field[]>(`/databases/${targetDb}/fields`),
+    enabled: !!targetDb,
+  });
+  const tFields = fieldsQ.data ?? [];
+  const idField = tFields.find((f) => f.type === "unique_id");
+  const titleField = tFields.find((f) =>
+    ["text", "long_text"].includes(f.type),
+  );
+  const options = (rowsQ.data ?? []).map((r) => ({
+    value: r.id,
+    label: <RelationLabel row={r} idField={idField} titleField={titleField} />,
+  }));
+  return (
+    <div className="py-0.5">
+      <MultiDropdown
+        values={Array.isArray(value) ? (value as string[]) : []}
+        options={options}
+        onChange={onCommit}
+        placeholder="Link rows"
+      />
+    </div>
+  );
+}
+
+function RollupCell({ value }: CellProps) {
+  const text =
+    value === null || value === undefined || value === ""
+      ? ""
+      : Array.isArray(value)
+        ? value.join(", ")
+        : String(value);
+  return (
+    <div className="px-2 py-1.5 text-sm font-medium">{text || dash}</div>
+  );
+}
+
 function SelectCell({ field, value, onCommit }: CellProps) {
   return (
     <div className="py-0.5">
@@ -245,7 +562,79 @@ function MultiCell({ field, value, onCommit }: CellProps) {
   );
 }
 
-export function CellEditor({ field, value, onCommit }: CellProps) {
+function PeopleCell({ value, onCommit }: CellProps) {
+  const { data: members = [] } = useMembers();
+  const options = members.map((m) => ({ value: m.id, label: memberLabel(m) }));
+  return (
+    <div className="py-0.5">
+      <MultiDropdown
+        values={Array.isArray(value) ? (value as string[]) : []}
+        options={options}
+        onChange={onCommit}
+        placeholder="Assign people"
+      />
+    </div>
+  );
+}
+
+/** Read-only creator/editor name (created_by, last_edited_by). */
+function UserCell({ value }: CellProps) {
+  const { data: members = [] } = useMembers();
+  if (!value) return <div className={displayCls}>{dash}</div>;
+  const m = members.find((x) => x.id === value);
+  return <div className="px-2 py-1.5 text-sm">{m ? memberLabel(m) : String(value)}</div>;
+}
+
+/** Read-only timestamp (created_time, last_edited_time). */
+function TimeCell({ value }: CellProps) {
+  if (!value || typeof value !== "string")
+    return <div className={displayCls}>{dash}</div>;
+  const d = new Date(value);
+  const text = Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+  return <div className="px-2 py-1.5 text-sm text-muted-foreground">{text}</div>;
+}
+
+function ProgressCell({ value, onCommit, autoEdit }: CellProps) {
+  const [editing, setEditing] = useState(autoEdit ?? false);
+  const [local, setLocal] = useState(
+    autoEdit && value != null ? String(value) : "",
+  );
+  const n = typeof value === "number" ? value : 0;
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        inputMode="numeric"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          const x = Number(local);
+          onCommit(
+            local === "" || Number.isNaN(x) ? null : Math.max(0, Math.min(100, x)),
+          );
+        }}
+        className={inputCls}
+      />
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-[var(--color-primary)]"
+          style={{ width: `${n}%` }}
+        />
+      </div>
+      <span className="w-9 shrink-0 text-right text-xs text-muted-foreground">
+        {n}%
+      </span>
+    </div>
+  );
+}
+
+export function CellEditor({ field, value, onCommit, autoEdit }: CellProps) {
   if (field.type === "checkbox") {
     return (
       <input
@@ -257,7 +646,9 @@ export function CellEditor({ field, value, onCommit }: CellProps) {
     );
   }
   if (field.type === "number")
-    return <NumberCell field={field} value={value} onCommit={onCommit} />;
+    return (
+      <NumberCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
   if (field.type === "rating")
     return <RatingCell field={field} value={value} onCommit={onCommit} />;
   if (field.type === "date")
@@ -266,8 +657,30 @@ export function CellEditor({ field, value, onCommit }: CellProps) {
     return <SelectCell field={field} value={value} onCommit={onCommit} />;
   if (field.type === "multi_select")
     return <MultiCell field={field} value={value} onCommit={onCommit} />;
+  if (field.type === "phone")
+    return (
+      <PhoneCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
+  if (field.type === "country")
+    return <CountryCell field={field} value={value} onCommit={onCommit} />;
+  if (field.type === "relation")
+    return <RelationCell field={field} value={value} onCommit={onCommit} />;
+  if (field.type === "rollup" || field.type === "formula")
+    return <RollupCell field={field} value={value} onCommit={onCommit} />;
+  if (field.type === "people")
+    return <PeopleCell field={field} value={value} onCommit={onCommit} />;
+  if (field.type === "progress")
+    return (
+      <ProgressCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
+  if (field.type === "created_time" || field.type === "last_edited_time")
+    return <TimeCell field={field} value={value} onCommit={onCommit} />;
+  if (field.type === "created_by" || field.type === "last_edited_by")
+    return <UserCell field={field} value={value} onCommit={onCommit} />;
   if (TEXT_TYPES.has(field.type))
-    return <TextCell field={field} value={value} onCommit={onCommit} />;
+    return (
+      <TextCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
 
   return <span className="px-2 text-sm text-muted-foreground">—</span>;
 }

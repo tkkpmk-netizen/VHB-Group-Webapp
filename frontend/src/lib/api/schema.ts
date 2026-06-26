@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/me/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Workspace Members */
+        get: operations["my_workspace_members_workspaces_me_members_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases": {
         parameters: {
             query?: never;
@@ -107,6 +124,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/{database_id}/formula-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Formula Preview */
+        post: operations["formula_preview_databases__database_id__formula_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases/{database_id}/fields": {
         parameters: {
             query?: never;
@@ -119,6 +153,26 @@ export interface paths {
         put?: never;
         /** Create Field */
         post: operations["create_field_databases__database_id__fields_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/{database_id}/sub-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Sub Items
+         * @description Create a two-way self-relation: 'Sub-item' (owner) + 'Parent item' (mirror).
+         */
+        post: operations["enable_sub_items_databases__database_id__sub_items_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -213,6 +267,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/{database_id}/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Views */
+        get: operations["list_views_databases__database_id__views_get"];
+        put?: never;
+        /** Create View */
+        post: operations["create_view_databases__database_id__views_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/views/{view_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete View */
+        delete: operations["delete_view_views__view_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update View */
+        patch: operations["update_view_views__view_id__patch"];
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -297,7 +387,7 @@ export interface components {
          * FieldType
          * @enum {string}
          */
-        FieldType: "text" | "long_text" | "number" | "checkbox" | "date" | "url" | "email" | "phone" | "select" | "multi_select" | "status" | "priority" | "rating" | "unique_id" | "relation";
+        FieldType: "text" | "long_text" | "number" | "checkbox" | "date" | "url" | "email" | "phone" | "select" | "multi_select" | "status" | "priority" | "rating" | "country" | "unique_id" | "relation" | "rollup" | "formula" | "people" | "progress" | "created_time" | "created_by" | "last_edited_time" | "last_edited_by";
         /** FieldUpdate */
         FieldUpdate: {
             /** Name */
@@ -306,6 +396,20 @@ export interface components {
             options?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /** FormulaPreview */
+        FormulaPreview: {
+            /** Expression */
+            expression: string;
+        };
+        /** FormulaPreviewResult */
+        FormulaPreviewResult: {
+            /** Value */
+            value: unknown;
+            /** Type */
+            type: string;
+            /** Error */
+            error?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -330,6 +434,18 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** MemberOut */
+        MemberOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email */
+            email: string;
+            /** Full Name */
+            full_name?: string | null;
         };
         /** ReorderRequest */
         ReorderRequest: {
@@ -420,6 +536,54 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** ViewCreate */
+        ViewCreate: {
+            /** Name */
+            name: string;
+            /** @default table */
+            type: components["schemas"]["ViewType"];
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ViewOut */
+        ViewOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Database Id
+             * Format: uuid
+             */
+            database_id: string;
+            /** Name */
+            name: string;
+            type: components["schemas"]["ViewType"];
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Order */
+            order: number;
+        };
+        /**
+         * ViewType
+         * @enum {string}
+         */
+        ViewType: "table" | "board" | "calendar" | "gallery" | "gantt";
+        /** ViewUpdate */
+        ViewUpdate: {
+            /** Name */
+            name?: string | null;
+            type?: components["schemas"]["ViewType"] | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -551,6 +715,26 @@ export interface operations {
             };
         };
     };
+    my_workspace_members_workspaces_me_members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"][];
+                };
+            };
+        };
+    };
     list_databases_databases_get: {
         parameters: {
             query?: never;
@@ -633,6 +817,41 @@ export interface operations {
             };
         };
     };
+    formula_preview_databases__database_id__formula_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormulaPreview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormulaPreviewResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_fields_databases__database_id__fields_get: {
         parameters: {
             query?: never;
@@ -686,6 +905,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FieldOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_sub_items_databases__database_id__sub_items_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -947,6 +1199,136 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_views_databases__database_id__views_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_view_databases__database_id__views_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_view_views__view_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_view_views__view_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewOut"];
+                };
             };
             /** @description Validation Error */
             422: {
