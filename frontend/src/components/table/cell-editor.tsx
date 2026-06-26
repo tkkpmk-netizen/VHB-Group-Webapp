@@ -229,7 +229,7 @@ function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
           setLocal(text);
           setEditing(true);
         }}
-        className={`flex-1 ${displayCls}`}
+        className={`flex-1 ${displayCls(field)}`}
       >
         {text || dash}
       </div>
