@@ -100,7 +100,7 @@ export function FilterGroupEditor({
       <div className="space-y-2">
         {group.rules.map((node, i) => (
           <div key={i} className="flex items-start gap-2">
-            <div className="w-14 shrink-0 pt-1.5 text-xs text-muted-foreground">
+            <div className="w-16 shrink-0 pt-1.5 text-xs text-muted-foreground">
               {i === 0 ? (
                 "Where"
               ) : i === 1 ? (
@@ -128,8 +128,8 @@ export function FilterGroupEditor({
                   onChange={(g) => setRule(i, g)}
                 />
               ) : (
-                <div className="flex items-center gap-1">
-                  <div className="w-24 shrink-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="w-32 shrink-0">
                     <Dropdown
                       value={node.fieldId || null}
                       options={fieldOptions(fields)}
@@ -143,7 +143,7 @@ export function FilterGroupEditor({
                       }}
                     />
                   </div>
-                  <div className="w-24 shrink-0">
+                  <div className="w-28 shrink-0">
                     <Dropdown
                       value={node.op}
                       allowClear={false}
@@ -151,7 +151,7 @@ export function FilterGroupEditor({
                       onChange={(v) => setRule(i, { ...node, op: v ?? node.op })}
                     />
                   </div>
-                  <div className="flex-1">
+                  <div className="min-w-0 flex-1">
                     <FilterValue
                       field={byId[node.fieldId]}
                       op={node.op}

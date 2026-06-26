@@ -60,6 +60,20 @@ function matches(f: Field, row: Row, col: Col): boolean {
   return v === col.value || toText(f, v) === toText(f, col.value);
 }
 
+/** Human-readable value for a card field (dates as short locale dates, the
+ *  rest via toText so objects never render as "[object Object]"). */
+function cardValue(f: Field, v: unknown): string {
+  if (f.type === "date") {
+    const s =
+      typeof v === "object" && v
+        ? ((v as { start?: string }).start ?? "")
+        : String(v);
+    const d = s ? new Date(s) : null;
+    return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString() : s;
+  }
+  return toText(f, v);
+}
+
 export function BoardView({
   databaseId,
   boardField,
@@ -159,27 +173,37 @@ export function BoardView({
   };
 
   function Card({ r }: { r: Row }) {
+    const shown = cardFields
+      .map((f) => ({ f, v: (r.data as Record<string, unknown>)[f.id] }))
+      .filter(({ v }) => !isEmpty(v));
     return (
       <div
         draggable
         onDragStart={() => setDragRow(r.id)}
-        className="cursor-grab space-y-1.5 rounded-lg border bg-card p-2.5 shadow-sm active:cursor-grabbing"
+        className="group cursor-grab rounded-lg border border-border/70 bg-card p-3 shadow-sm transition-shadow hover:border-border hover:shadow-md active:cursor-grabbing"
       >
-        <div className="text-sm font-medium">{cardTitle(r)}</div>
-        {cardFields.map((f) => {
-          const v = (r.data as Record<string, unknown>)[f.id];
-          if (isEmpty(v)) return null;
-          return (
-            <div key={f.id} className="flex items-center gap-1 text-xs">
-              <span className="text-muted-foreground">{f.name}:</span>
-              {CHIP_TYPES.has(f.type) ? (
-                <ValueChip field={f} value={Array.isArray(v) ? v[0] : v} />
-              ) : (
-                <span className="truncate">{String(v)}</span>
-              )}
-            </div>
-          );
-        })}
+        <div className="flex items-start justify-between gap-2">
+          <span className="truncate text-sm font-semibold leading-snug">
+            {cardTitle(r)}
+          </span>
+          <span className="shrink-0 text-[11px] font-medium text-muted-foreground/70">
+            #{r.seq}
+          </span>
+        </div>
+        {shown.length > 0 && (
+          <div className="mt-2 space-y-1.5">
+            {shown.map(({ f, v }) => (
+              <div key={f.id} className="flex items-center gap-1.5 text-xs">
+                <span className="shrink-0 text-muted-foreground">{f.name}</span>
+                {CHIP_TYPES.has(f.type) ? (
+                  <ValueChip field={f} value={Array.isArray(v) ? v[0] : v} />
+                ) : (
+                  <span className="truncate font-medium">{cardValue(f, v)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -192,15 +216,26 @@ export function BoardView({
       <div
         onDragOver={(e) => dragRow && e.preventDefault()}
         onDrop={() => dropOn(col, sub)}
-        className="flex max-h-[72vh] w-72 shrink-0 flex-col rounded-xl border bg-muted/30"
+        className="flex max-h-[72vh] w-72 shrink-0 flex-col rounded-xl bg-muted/40"
       >
-        <div className="flex items-center gap-2 px-3 py-2">
-          {col.chip ? (
-            <ValueChip field={field!} value={col.value} />
-          ) : (
-            <span className="text-sm text-muted-foreground">{col.label}</span>
-          )}
-          <span className="text-xs text-muted-foreground">{cards.length}</span>
+        <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {col.chip ? (
+              <ValueChip field={field!} value={col.value} />
+            ) : (
+              <span className="truncate text-sm font-semibold">{col.label}</span>
+            )}
+            <span className="rounded-full bg-background px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+              {cards.length}
+            </span>
+          </div>
+          <button
+            onClick={() => addCard.mutate(placement(col, sub))}
+            title="Add card"
+            className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+          >
+            <Plus className="size-4" />
+          </button>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
           {cards.map((r) => (
@@ -208,7 +243,7 @@ export function BoardView({
           ))}
           <button
             onClick={() => addCard.mutate(placement(col, sub))}
-            className="flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+            className="flex w-full items-center gap-1.5 rounded-lg border border-dashed border-transparent px-2 py-2 text-xs font-medium text-muted-foreground hover:border-border hover:bg-background"
           >
             <Plus className="size-3.5" /> New
           </button>

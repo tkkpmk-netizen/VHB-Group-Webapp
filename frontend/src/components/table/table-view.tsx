@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -16,7 +16,7 @@ import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import { ColumnMenu } from "@/components/table/column-menu";
 import { Dropdown } from "@/components/ui/dropdown";
 import { countryByCode, parsePhone } from "@/lib/countries";
-import { applyFilterTree, applySorts, groupRows } from "@/lib/view";
+import { applyFilterTree, applySorts, groupRows, operatorsFor } from "@/lib/view";
 import type { SharedViewProps } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
 
@@ -139,17 +139,102 @@ function buildOptions(
 }
 
 
+/** "New" with a dropdown to bulk-add up to 100 rows (with confirmation). */
+function BulkAddRows({ onAdd }: { onAdd: (n: number) => void }) {
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [n, setN] = useState(10);
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <>
+      <button
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setAnchor({ x: r.left, y: r.top });
+          setConfirm(false);
+        }}
+        title="Add multiple rows"
+        className="rounded-md border p-1 text-muted-foreground hover:bg-muted"
+      >
+        <ChevronDown className="size-4" />
+      </button>
+      {anchor &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setAnchor(null)} />
+            <div
+              className="fixed z-50 w-56 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg"
+              style={{ left: anchor.x, bottom: window.innerHeight - anchor.y + 6 }}
+            >
+              {!confirm ? (
+                <>
+                  <label className="text-xs text-muted-foreground">
+                    How many rows? (max 100)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={n}
+                    onChange={(e) =>
+                      setN(Math.max(1, Math.min(100, Number(e.target.value) || 1)))
+                    }
+                    className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <button
+                    onClick={() => setConfirm(true)}
+                    className="mt-2 w-full rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+                  >
+                    Add {n} rows
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm">
+                    Add <b>{n}</b> empty rows?
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => setAnchor(null)}
+                      className="flex-1 rounded-md border px-2 py-1.5 text-sm hover:bg-muted"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        onAdd(n);
+                        setAnchor(null);
+                      }}
+                      className="flex-1 rounded-md bg-primary px-2 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+                    >
+                      Confirm
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 export function TableView({
   databaseId,
   filterRoot,
+  setFilterRoot,
   sorts,
+  setSorts,
   groupFieldId,
+  setGroupFieldId,
   hideEmpty,
   frozenUpTo,
   setFrozenUpTo,
   calc,
   setCalc,
   hidden,
+  setHidden,
+  limit,
   search,
   filterToMatches,
   matchedIds,
@@ -171,6 +256,9 @@ export function TableView({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editCell, setEditCell] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [pages, setPages] = useState(0); // extra "load more" clicks
+  const [childShown, setChildShown] = useState<Record<string, number>>({}); // per-parent sub-item window
+  const clickedActive = useRef(false); // was the cell already selected on mousedown?
   const [resizing, setResizing] = useState<{
     fieldId: string;
     startX: number;
@@ -235,6 +323,15 @@ export function TableView({
         body: JSON.stringify({ data: {} }),
       }),
     onSuccess: invalidate,
+  });
+
+  const bulkAdd = useMutation({
+    mutationFn: (count: number) =>
+      apiFetch<unknown>(`/databases/${databaseId}/rows/bulk`, {
+        method: "POST",
+        body: JSON.stringify({ count }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
   });
 
   const deleteRow = useMutation({
@@ -333,22 +430,34 @@ export function TableView({
     return typeof w === "number" ? w : 200;
   }
 
-  // Sticky offsets for frozen (pinned) leftmost columns.
+  // Sticky offsets for frozen (pinned) leftmost columns. border-collapse + sticky
+  // drops cell borders, so we re-draw them (and a freeze divider) via box-shadow.
   function frozenStyle(colIdx: number): React.CSSProperties | undefined {
     if (colIdx > frozenUpTo) return undefined;
     const list = (fieldsQ.data ?? []).filter((f) => !hidden.has(f.id));
     let left = 40; // checkbox column width
     for (let i = 0; i < colIdx; i++) left += colWidth(list[i]);
+    const isLast = colIdx === frozenUpTo;
     return {
       position: "sticky",
       left,
       zIndex: 2,
       background: "var(--color-card)",
+      boxShadow: isLast
+        ? "inset 0 -1px 0 0 var(--color-border), 4px 0 6px -3px rgba(0,0,0,0.25)"
+        : "inset -1px 0 0 0 var(--color-border), inset 0 -1px 0 0 var(--color-border)",
     };
   }
   const checkboxFrozen: React.CSSProperties | undefined =
     frozenUpTo >= 0
-      ? { position: "sticky", left: 0, zIndex: 3, background: "var(--color-card)" }
+      ? {
+          position: "sticky",
+          left: 0,
+          zIndex: 3,
+          background: "var(--color-card)",
+          boxShadow:
+            "inset -1px 0 0 0 var(--color-border), inset 0 -1px 0 0 var(--color-border)",
+        }
       : undefined;
 
   function handleRowClick(idx: number, id: string, shift: boolean) {
@@ -444,12 +553,15 @@ export function TableView({
   const searchActive = search.trim().length > 0;
   if (searchActive && filterToMatches && matchedIds)
     visible = visible.filter((r) => matchedIds.has(r.id));
+  // Pagination window — recomputed from the live limit so changing it takes effect.
+  const shown = limit * (pages + 1);
   let groups =
     groupFieldId && byId[groupFieldId]
       ? groupRows(visible, byId[groupFieldId])
       : null;
   if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
   const displayFields = fields.filter((f) => !hidden.has(f.id));
+  const calcFields = displayFields.filter((f) => calc[f.id]);
   const subOwner = fields.find(
     (f) =>
       (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
@@ -476,6 +588,8 @@ export function TableView({
         return !Array.isArray(p) || p.length === 0;
       })
     : visible;
+  // Pagination count: tree paginates top-level rows; flat paginates all.
+  const topCount = treeMode ? topLevel.length : visible.length;
 
   async function addSubRow(parent: Row) {
     if (!subOwner) return;
@@ -490,6 +604,12 @@ export function TableView({
       body: JSON.stringify({ data: { [subOwner.id]: [...cur, child.id] } }),
     });
     setExpanded((p) => new Set(p).add(parent.id));
+    // Drop straight into the new sub-item's title (ClickUp-style), so the
+    // user can type its name immediately instead of hunting for the cell.
+    const titleField = fields.find((f) =>
+      ["text", "long_text"].includes(f.type),
+    );
+    if (titleField) setEditCell(`${child.id}:${titleField.id}`);
     qc.invalidateQueries({ queryKey: ["rows", databaseId] });
   }
 
@@ -524,6 +644,17 @@ export function TableView({
     const [r1, r2] = [Math.min(range.r1, range.r2), Math.max(range.r1, range.r2)];
     const [c1, c2] = [Math.min(range.c1, range.c2), Math.max(range.c1, range.c2)];
     return r >= r1 && r <= r2 && c >= c1 && c <= c2;
+  }
+
+  // The single focused cell (ClickUp-style selected cell border).
+  function isActiveCell(r: number, c: number): boolean {
+    return (
+      !!range &&
+      range.r1 === range.r2 &&
+      range.c1 === range.c2 &&
+      range.r1 === r &&
+      range.c1 === c
+    );
   }
 
   function cellText(f: Field, row: Row): string {
@@ -620,7 +751,7 @@ export function TableView({
               ? "bg-primary/5"
               : selected.has(row.id)
                 ? "bg-accent/30"
-                : ""
+                : "hover:bg-muted/60"
         }`}
       >
         <td
@@ -646,6 +777,7 @@ export function TableView({
         {displayFields.map((f, colIdx) => {
           const cellKey = `${row.id}:${f.id}`;
           const isEditing = editCell === cellKey;
+          const wrap = (f.options as { wrap?: boolean })?.wrap === true;
           return (
             <td
               key={f.id}
@@ -660,8 +792,14 @@ export function TableView({
                   setRange((r) => (r ? { ...r, r2: idx, c2: colIdx } : r));
               }}
               style={frozenStyle(colIdx)}
-              className={`overflow-hidden border-r px-1 align-middle ${
-                inRange(idx, colIdx) ? "bg-primary/10" : "bg-card"
+              className={`border-r px-1 align-middle ${
+                wrap ? "" : "overflow-hidden"
+              } ${
+                inRange(idx, colIdx) ? "bg-primary/10" : ""
+              } ${
+                isActiveCell(idx, colIdx)
+                  ? "ring-2 ring-inset ring-[var(--color-primary)]"
+                  : ""
               }`}
             >
               <div
@@ -703,10 +841,17 @@ export function TableView({
                       autoEdit={isEditing}
                     />
                   )}
-                  {/* Single click = select only; double-click activates editing. */}
+                  {/* 1st click selects; click again on the selected cell, or
+                      double-click, enters edit. */}
                   {!isEditing && f.type !== "unique_id" && (
                     <div
                       className="absolute inset-0 z-[1] cursor-cell"
+                      onMouseDown={() => {
+                        clickedActive.current = isActiveCell(idx, colIdx);
+                      }}
+                      onClick={() => {
+                        if (clickedActive.current) setEditCell(cellKey);
+                      }}
                       onDoubleClick={() => setEditCell(cellKey)}
                     />
                   )}
@@ -728,6 +873,35 @@ export function TableView({
     );
   }
 
+  async function addRowInGroup(value: unknown) {
+    const data =
+      groupFieldId && value != null && value !== ""
+        ? { [groupFieldId]: value }
+        : {};
+    await apiFetch<Row>(`/databases/${databaseId}/rows`, {
+      method: "POST",
+      body: JSON.stringify({ data }),
+    });
+    qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+  }
+
+  // Inline "+ New" row (ClickUp-style) — the whole row is clickable.
+  function renderAddRow(key: string, onClick: () => void) {
+    return (
+      <tr
+        key={key}
+        onClick={onClick}
+        className="cursor-pointer border-b last:border-0 hover:bg-muted/60"
+      >
+        <td colSpan={displayFields.length + 2} className="px-2 py-1.5">
+          <span className="flex items-center gap-1.5 pl-1 text-sm text-muted-foreground">
+            <Plus className="size-4" /> New
+          </span>
+        </td>
+      </tr>
+    );
+  }
+
   // Recursive render for tree (sub-item) mode.
   function renderTree(
     rowsToRender: Row[],
@@ -739,14 +913,38 @@ export function TableView({
       counter.i += 1;
       out.push(renderRow(row, counter.i, depth));
       if (expanded.has(row.id)) {
-        out.push(...renderTree(childrenOf(row), depth + 1, counter));
+        const kids = childrenOf(row);
+        const cShown = childShown[row.id] ?? 5; // preload 5 sub-items
+        out.push(...renderTree(kids.slice(0, cShown), depth + 1, counter));
+        if (kids.length > cShown) {
+          out.push(
+            <tr
+              key={`more-${row.id}`}
+              onClick={() =>
+                setChildShown((s) => ({
+                  ...s,
+                  [row.id]: (s[row.id] ?? 5) + limit,
+                }))
+              }
+              className="cursor-pointer border-b hover:bg-muted/60"
+            >
+              <td
+                colSpan={displayFields.length + 2}
+                className="px-2 py-1.5 text-sm font-medium text-primary"
+                style={{ paddingLeft: (depth + 1) * 18 + 8 }}
+              >
+                Load more sub-items ({kids.length - cShown} left)
+              </td>
+            </tr>,
+          );
+        }
       }
     }
     return out;
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Add field popover */}
       {adding &&
         addAnchor &&
@@ -884,7 +1082,7 @@ export function TableView({
       )}
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-xl border bg-card">
+      <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-xl border bg-card [scrollbar-gutter:stable]">
         <table
           className="table-fixed select-none border-collapse text-sm"
           style={{
@@ -898,7 +1096,7 @@ export function TableView({
             ))}
             <col style={{ width: 48 }} />
           </colgroup>
-          <thead>
+          <thead className="sticky top-0 z-20 bg-card">
             <tr className="border-b bg-muted/40">
               <th className="bg-muted/40 px-2 py-2" style={checkboxFrozen}>
                 <input
@@ -940,10 +1138,6 @@ export function TableView({
                           : { field: f, x: r.left, y: r.bottom + 4 },
                       );
                     }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setMenu({ field: f, x: e.clientX, y: e.clientY });
-                    }}
                     title="Click to edit · drag to reorder"
                     className="flex w-full cursor-grab items-center gap-1 truncate text-left hover:text-primary active:cursor-grabbing"
                   >
@@ -984,10 +1178,10 @@ export function TableView({
             </tr>
           </thead>
           <tbody>
-            {treeMode && renderTree(topLevel, 0, { i: -1 })}
+            {treeMode && renderTree(topLevel.slice(0, shown), 0, { i: -1 })}
             {!treeMode &&
               !groups &&
-              visible.map((row, idx) => renderRow(row, idx))}
+              visible.slice(0, shown).map((row, idx) => renderRow(row, idx))}
             {!treeMode &&
               groups &&
               groupFieldId &&
@@ -1027,43 +1221,36 @@ export function TableView({
                           i += 1;
                           return renderRow(row, i);
                         })}
+                      {!isCollapsed &&
+                        renderAddRow(`add-${g.key}`, () => addRowInGroup(g.value))}
                     </Fragment>
                   );
                 });
               })()}
           </tbody>
-          {displayFields.length > 0 && (
-            <tfoot>
-              <tr className="border-t bg-muted/20">
-                <td className="bg-muted/20" style={checkboxFrozen} />
-                {displayFields.map((f, colIdx) => (
-                  <td
-                    key={f.id}
-                    style={frozenStyle(colIdx)}
-                    className="border-r bg-muted/20 px-1"
-                  >
-                    <Dropdown
-                      value={calc[f.id] ?? ""}
-                      allowClear={false}
-                      options={calcOptions(f.type)}
-                      onChange={(v) =>
-                        setCalc((c) => ({ ...c, [f.id]: v ?? "" }))
-                      }
-                      trigger={
-                        calc[f.id] ? (
-                          <span className="text-xs font-medium">
-                            {computeCalc(f, visible, calc[f.id])}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            Calculate
-                          </span>
-                        )
-                      }
-                    />
-                  </td>
-                ))}
-                <td className="bg-muted/20" />
+          {displayFields.length > 0 && !groups && (
+            <tfoot className="sticky bottom-0 z-30 bg-card">
+              <tr className="border-t bg-card">
+                <td colSpan={displayFields.length + 2} className="p-0">
+                  <div className="sticky left-0 flex w-max items-center gap-2 bg-card px-2 py-1.5">
+                    {shown < topCount && (
+                      <button
+                        onClick={() => setPages((p) => p + 1)}
+                        className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10"
+                      >
+                        <ChevronDown className="size-4" /> Load more ({topCount - shown}{" "}
+                        left)
+                      </button>
+                    )}
+                    <button
+                      onClick={() => addRow.mutate()}
+                      className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted"
+                    >
+                      <Plus className="size-4" /> New
+                    </button>
+                    <BulkAddRows onAdd={(c) => bulkAdd.mutate(c)} />
+                  </div>
+                </td>
               </tr>
             </tfoot>
           )}
@@ -1076,14 +1263,17 @@ export function TableView({
         )}
       </div>
 
-      <button
-        onClick={() => addRow.mutate()}
-        disabled={fields.length === 0 || addRow.isPending}
-        className="flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
-      >
-        <Plus className="size-4" />
-        New row
-      </button>
+      {/* Calculate summary — outside the table, only configured columns. */}
+      {calcFields.length > 0 && (
+        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+          {calcFields.map((f) => (
+            <span key={f.id} className="font-semibold">
+              <span className="mr-1 font-normal text-muted-foreground">{f.name}:</span>
+              {computeCalc(f, visible, calc[f.id])}
+            </span>
+          ))}
+        </div>
+      )}
 
       {menu && (
         <ColumnMenu
@@ -1098,6 +1288,33 @@ export function TableView({
             const i = fields.findIndex((f) => f.id === menu.field.id);
             setFrozenUpTo(i <= frozenUpTo ? i - 1 : i);
           }}
+          sortDir={sorts.find((s) => s.fieldId === menu.field.id)?.dir ?? null}
+          grouped={groupFieldId === menu.field.id}
+          onSort={(dir) => setSorts([{ fieldId: menu.field.id, dir }])}
+          onGroup={() =>
+            setGroupFieldId(groupFieldId === menu.field.id ? null : menu.field.id)
+          }
+          onFilter={() =>
+            setFilterRoot({
+              ...filterRoot,
+              rules: [
+                ...filterRoot.rules,
+                {
+                  fieldId: menu.field.id,
+                  op: operatorsFor(menu.field.type)[0].value,
+                  value: "",
+                },
+              ],
+            })
+          }
+          onHide={() => {
+            const next = new Set(hidden);
+            next.add(menu.field.id);
+            setHidden(next);
+          }}
+          calcValue={calc[menu.field.id] ?? ""}
+          calcOptions={calcOptions(menu.field.type)}
+          onCalc={(v) => setCalc((c) => ({ ...c, [menu.field.id]: v }))}
         />
       )}
 

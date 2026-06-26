@@ -35,6 +35,10 @@ class RowCreate(BaseModel):
     data: dict[str, Any] = PField(default_factory=dict)
 
 
+class BulkRowCreate(BaseModel):
+    count: int = PField(ge=1, le=100)
+
+
 class RowUpdate(BaseModel):
     data: dict[str, Any]
 

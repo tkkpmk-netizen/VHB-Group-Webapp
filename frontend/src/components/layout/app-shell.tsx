@@ -141,11 +141,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [error, router]);
 
   return (
-    <div className="flex h-full w-full">
+    <div className="flex h-screen w-full">
       {!collapsed && <Sidebar workspaceName={workspace?.name} />}
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onToggleSidebar={() => setCollapsed((c) => !c)} />
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <main className="flex-1 overflow-auto overscroll-none p-6">{children}</main>
       </div>
     </div>
   );

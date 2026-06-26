@@ -101,7 +101,13 @@ const TEXT_TYPES = new Set(["text", "long_text", "email", "url"]);
 
 const inputCls =
   "w-full select-text rounded bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-accent/40";
-const displayCls = "min-h-[34px] cursor-text truncate px-2 py-1.5 text-sm";
+const isWrap = (field: Field) =>
+  (field.options as { wrap?: boolean })?.wrap === true;
+// Display container: truncates to one line unless the column has Wrap text on.
+const displayCls = (field: Field) =>
+  `min-h-[34px] cursor-text px-2 py-1.5 text-sm ${
+    isWrap(field) ? "whitespace-pre-wrap break-words" : "truncate"
+  }`;
 const dash = <span className="text-muted-foreground">—</span>;
 
 type CellProps = {
@@ -270,7 +276,7 @@ function NumberCell({ field, value, onCommit, autoEdit }: CellProps) {
         setLocal(value == null ? "" : String(value));
         setEditing(true);
       }}
-      className={displayCls}
+      className={displayCls(field)}
     >
       {displayNumber(field, value) || dash}
     </div>
@@ -315,7 +321,7 @@ function DateCell({ field, value, onCommit }: CellProps) {
 
   return (
     <>
-      <div onClick={openEditor} className={`${displayCls} cursor-pointer`}>
+      <div onClick={openEditor} className={`${displayCls(field)} cursor-pointer`}>
         {norm.start
           ? formatOne(field, norm.start) +
             (norm.end ? ` → ${formatOne(field, norm.end)}` : "")
@@ -412,7 +418,7 @@ function RatingCell({ value, onCommit }: CellProps) {
   );
 }
 
-function PhoneCell({ value, onCommit, autoEdit }: CellProps) {
+function PhoneCell({ field, value, onCommit, autoEdit }: CellProps) {
   const [editing, setEditing] = useState(autoEdit ?? false);
   const parsed = parsePhone(typeof value === "string" ? value : "");
   const [dial, setDial] = useState(parsed.dial);
@@ -433,7 +439,7 @@ function PhoneCell({ value, onCommit, autoEdit }: CellProps) {
           setNum(p.number);
           setEditing(true);
         }}
-        className={displayCls}
+        className={displayCls(field)}
       >
         {shown || dash}
       </div>
@@ -480,19 +486,21 @@ function PhoneCell({ value, onCommit, autoEdit }: CellProps) {
   );
 }
 
-function CountryCell({ value, onCommit }: CellProps) {
+function CountryCell({ field, value, onCommit, autoEdit }: CellProps) {
   return (
     <div className="py-0.5">
       <Dropdown
         value={typeof value === "string" ? value : null}
         options={COUNTRY_OPTIONS}
         onChange={onCommit}
+        autoOpen={autoEdit}
+        wrap={isWrap(field)}
       />
     </div>
   );
 }
 
-function RelationCell({ field, value, onCommit }: CellProps) {
+function RelationCell({ field, value, onCommit, autoEdit }: CellProps) {
   const targetDb = (field.options as { target_database_id?: string })
     ?.target_database_id;
   const rowsQ = useQuery<RowT[]>({
@@ -521,12 +529,14 @@ function RelationCell({ field, value, onCommit }: CellProps) {
         options={options}
         onChange={onCommit}
         placeholder="Link rows"
+        autoOpen={autoEdit}
+        wrap={isWrap(field)}
       />
     </div>
   );
 }
 
-function RollupCell({ value }: CellProps) {
+function RollupCell({ field, value }: CellProps) {
   const text =
     value === null || value === undefined || value === ""
       ? ""
@@ -534,35 +544,39 @@ function RollupCell({ value }: CellProps) {
         ? value.join(", ")
         : String(value);
   return (
-    <div className="px-2 py-1.5 text-sm font-medium">{text || dash}</div>
+    <div className={`${displayCls(field)} font-medium`}>{text || dash}</div>
   );
 }
 
-function SelectCell({ field, value, onCommit }: CellProps) {
+function SelectCell({ field, value, onCommit, autoEdit }: CellProps) {
   return (
     <div className="py-0.5">
       <Dropdown
         value={typeof value === "string" ? value : null}
         options={choiceOptions(field)}
         onChange={onCommit}
+        autoOpen={autoEdit}
+        wrap={isWrap(field)}
       />
     </div>
   );
 }
 
-function MultiCell({ field, value, onCommit }: CellProps) {
+function MultiCell({ field, value, onCommit, autoEdit }: CellProps) {
   return (
     <div className="py-0.5">
       <MultiDropdown
         values={Array.isArray(value) ? (value as string[]) : []}
         options={choiceOptions(field)}
         onChange={onCommit}
+        autoOpen={autoEdit}
+        wrap={isWrap(field)}
       />
     </div>
   );
 }
 
-function PeopleCell({ value, onCommit }: CellProps) {
+function PeopleCell({ field, value, onCommit }: CellProps) {
   const { data: members = [] } = useMembers();
   const options = members.map((m) => ({ value: m.id, label: memberLabel(m) }));
   return (
@@ -572,26 +586,29 @@ function PeopleCell({ value, onCommit }: CellProps) {
         options={options}
         onChange={onCommit}
         placeholder="Assign people"
+        wrap={isWrap(field)}
       />
     </div>
   );
 }
 
 /** Read-only creator/editor name (created_by, last_edited_by). */
-function UserCell({ value }: CellProps) {
+function UserCell({ field, value }: CellProps) {
   const { data: members = [] } = useMembers();
-  if (!value) return <div className={displayCls}>{dash}</div>;
+  if (!value) return <div className={displayCls(field)}>{dash}</div>;
   const m = members.find((x) => x.id === value);
-  return <div className="px-2 py-1.5 text-sm">{m ? memberLabel(m) : String(value)}</div>;
+  return <div className={displayCls(field)}>{m ? memberLabel(m) : String(value)}</div>;
 }
 
 /** Read-only timestamp (created_time, last_edited_time). */
-function TimeCell({ value }: CellProps) {
+function TimeCell({ field, value }: CellProps) {
   if (!value || typeof value !== "string")
-    return <div className={displayCls}>{dash}</div>;
+    return <div className={displayCls(field)}>{dash}</div>;
   const d = new Date(value);
   const text = Number.isNaN(d.getTime()) ? value : d.toLocaleString();
-  return <div className="px-2 py-1.5 text-sm text-muted-foreground">{text}</div>;
+  return (
+    <div className={`${displayCls(field)} text-muted-foreground`}>{text}</div>
+  );
 }
 
 function ProgressCell({ value, onCommit, autoEdit }: CellProps) {
@@ -654,17 +671,25 @@ export function CellEditor({ field, value, onCommit, autoEdit }: CellProps) {
   if (field.type === "date")
     return <DateCell field={field} value={value} onCommit={onCommit} />;
   if (SELECT_LIKE.has(field.type))
-    return <SelectCell field={field} value={value} onCommit={onCommit} />;
+    return (
+      <SelectCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
   if (field.type === "multi_select")
-    return <MultiCell field={field} value={value} onCommit={onCommit} />;
+    return (
+      <MultiCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
   if (field.type === "phone")
     return (
       <PhoneCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
     );
   if (field.type === "country")
-    return <CountryCell field={field} value={value} onCommit={onCommit} />;
+    return (
+      <CountryCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
   if (field.type === "relation")
-    return <RelationCell field={field} value={value} onCommit={onCommit} />;
+    return (
+      <RelationCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
   if (field.type === "rollup" || field.type === "formula")
     return <RollupCell field={field} value={value} onCommit={onCommit} />;
   if (field.type === "people")

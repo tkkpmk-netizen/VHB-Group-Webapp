@@ -131,3 +131,40 @@ body {
   background-color: var(--color-background);
   color: var(--color-foreground);
 }
+
+/* Scrollbars: thin, and only visible while scrolling (JS toggles `.is-scrolling`)
+   or on hover. Thumb fades via a background-color transition; the transparent
+   border keeps it slim so it never overlaps content. */
+* {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: transparent transparent; /* Firefox: hidden until active */
+}
+.is-scrolling,
+*:hover {
+  scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 45%, transparent)
+    transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+  border: 3px solid transparent; /* slims the thumb to ~3px via padding-box */
+  background-clip: padding-box;
+  transition: background-color 0.35s ease;
+}
+.is-scrolling::-webkit-scrollbar-thumb,
+*:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--color-muted-foreground) 45%, transparent);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--color-muted-foreground) 70%, transparent);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}

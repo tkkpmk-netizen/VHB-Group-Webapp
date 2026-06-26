@@ -11,6 +11,7 @@ from app.deps.workspace import get_current_workspace
 from app.models.database import Database
 from app.models.view import View, ViewType
 from app.models.workspace import Workspace
+from app.schemas.engine import ReorderRequest
 from app.schemas.view import ViewCreate, ViewOut, ViewUpdate
 
 router = APIRouter(tags=["views"])
@@ -73,6 +74,26 @@ async def create_view(
     await db.commit()
     await db.refresh(view)
     return view
+
+
+@router.post(
+    "/databases/{database_id}/views/reorder",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reorder_views(
+    database_id: uuid.UUID,
+    payload: ReorderRequest,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await _scoped_database(database_id, workspace, db)
+    result = await db.execute(select(View).where(View.database_id == database_id))
+    views = {v.id: v for v in result.scalars().all()}
+    for index, vid in enumerate(payload.ids):
+        view = views.get(vid)
+        if view is not None:
+            view.order = index
+    await db.commit()
 
 
 async def _scoped_view(

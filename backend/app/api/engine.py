@@ -16,6 +16,7 @@ from app.models.field import Field, FieldType, Row, RowLink
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.engine import (
+    BulkRowCreate,
     FieldCreate,
     FieldOut,
     FieldUpdate,
@@ -536,6 +537,42 @@ async def create_row(
     _inject_formulas(fields, [row])
     _inject_system(fields, [row])
     return row
+
+
+@router.post(
+    "/databases/{database_id}/rows/bulk",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_rows_bulk(
+    database_id: uuid.UUID,
+    payload: BulkRowCreate,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    await _scoped_database(database_id, workspace, db)
+    fields = await _list_fields(db, database_id)
+    next_seq = (
+        await db.scalar(
+            select(func.coalesce(func.max(Row.seq), 0)).where(
+                Row.database_id == database_id
+            )
+        )
+    ) or 0
+    uid = str(current_user.id)
+    for i in range(1, payload.count + 1):
+        data: dict[str, Any] = {}
+        _apply_auto_by(fields, data, uid, created=True)
+        db.add(
+            Row(
+                database_id=database_id,
+                data=data,
+                seq=next_seq + i,
+                order=next_seq + i,
+            )
+        )
+    await db.commit()
+    return {"created": payload.count}
 
 
 @router.patch("/rows/{row_id}", response_model=RowOut)

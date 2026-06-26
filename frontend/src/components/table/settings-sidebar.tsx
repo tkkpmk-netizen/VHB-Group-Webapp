@@ -1,20 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { createPortal } from "react-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Eye,
   EyeOff,
   GitBranch,
   Group as GroupIcon,
+  Layers,
   ListFilter,
   ListOrdered,
   GripVertical,
-  Plus,
+  Star,
   Table,
   Trash2,
   X,
@@ -31,11 +32,31 @@ import { countRules, type FilterGroup, type SortRule } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
-type Page = "main" | "view" | "visibility" | "filter" | "sort" | "group" | "fields";
+type View = components["schemas"]["ViewOut"];
+type Page =
+  | "main"
+  | "view"
+  | "views"
+  | "visibility"
+  | "filter"
+  | "sort"
+  | "group"
+  | "fields";
+
+const LAYOUTS: { value: View["type"]; label: string }[] = [
+  { value: "table", label: "Table" },
+  { value: "board", label: "Board" },
+  { value: "calendar", label: "Calendar" },
+  { value: "gallery", label: "Gallery" },
+  { value: "gantt", label: "Timeline" },
+];
 
 export function SettingsSidebar({
   databaseId,
+  viewId,
   viewType,
+  activeId,
+  setActiveId,
   fields,
   hidden,
   setHidden,
@@ -45,6 +66,8 @@ export function SettingsSidebar({
   setBoardField,
   boardSubgroup,
   setBoardSubgroup,
+  limit,
+  setLimit,
   filterRoot,
   setFilterRoot,
   sorts,
@@ -57,7 +80,10 @@ export function SettingsSidebar({
   onClose,
 }: {
   databaseId: string;
+  viewId: string;
   viewType: string;
+  activeId: string;
+  setActiveId: (id: string) => void;
   fields: Field[];
   hidden: Set<string>;
   setHidden: (s: Set<string>) => void;
@@ -67,6 +93,8 @@ export function SettingsSidebar({
   setBoardField: (id: string | null) => void;
   boardSubgroup: string | null;
   setBoardSubgroup: (id: string | null) => void;
+  limit: number;
+  setLimit: (n: number) => void;
   filterRoot: FilterGroup;
   setFilterRoot: (g: FilterGroup) => void;
   sorts: SortRule[];
@@ -83,6 +111,69 @@ export function SettingsSidebar({
   const [editFieldId, setEditFieldId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [renameView, setRenameView] = useState<{ id: string; name: string } | null>(null);
+  const [confirmDelView, setConfirmDelView] = useState<string | null>(null);
+  const [dragViewId, setDragViewId] = useState<string | null>(null);
+
+  // --- View management (Views page) ---
+  const viewsQ = useQuery<View[]>({
+    queryKey: ["views", databaseId],
+    queryFn: () => apiFetch<View[]>(`/databases/${databaseId}/views`),
+  });
+  const views = viewsQ.data ?? [];
+  const invalidateViews = () =>
+    qc.invalidateQueries({ queryKey: ["views", databaseId] });
+
+  const patchView = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
+      apiFetch<View>(`/views/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => {
+      setRenameView(null);
+      invalidateViews();
+    },
+  });
+  const createView = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch<View>(`/databases/${databaseId}/views`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidateViews, // stay on current view; the copy appears in the list
+  });
+  const deleteView = useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/views/${id}`, { method: "DELETE" }),
+    onSuccess: (_d, id) => {
+      setConfirmDelView(null);
+      if (id === activeId) {
+        const next = views.find((v) => v.id !== id);
+        if (next) setActiveId(next.id);
+      }
+      invalidateViews();
+    },
+  });
+  const reorderViews = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiFetch<void>(`/databases/${databaseId}/views/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    onSuccess: invalidateViews,
+  });
+  function moveView(fromId: string, toId: string) {
+    if (fromId === toId) return;
+    const ids = views.map((v) => v.id).filter((i) => i !== fromId);
+    const to = ids.indexOf(toId);
+    ids.splice(to < 0 ? ids.length : to, 0, fromId);
+    reorderViews.mutate(ids);
+  }
+  function setDefaultView(id: string) {
+    // Default = first view; move it to the front.
+    const ids = [id, ...views.map((v) => v.id).filter((i) => i !== id)];
+    reorderViews.mutate(ids);
+  }
+  function duplicateView(v: View) {
+    createView.mutate({ name: `${v.name} copy`, type: v.type, config: v.config });
+  }
 
   const reorder = useMutation({
     mutationFn: (ids: string[]) =>
@@ -167,6 +258,23 @@ export function SettingsSidebar({
       <>
         {header("View settings")}
         <div className="flex-1 space-y-1 overflow-y-auto p-2">
+          <label className="mb-1 flex items-center gap-3 rounded-md px-2 py-2 text-sm">
+            <span className="text-muted-foreground">
+              <ListOrdered className="size-4" />
+            </span>
+            <span className="flex-1">Load limit</span>
+            <div className="w-28">
+              <Dropdown
+                value={String(limit)}
+                allowClear={false}
+                options={[10, 20, 50, 100, 200].map((n) => ({
+                  value: String(n),
+                  label: `${n} rows`,
+                }))}
+                onChange={(v) => v && setLimit(Number(v))}
+              />
+            </div>
+          </label>
           {viewType === "board" && (
             <div className="mb-1 space-y-2 rounded-lg border bg-muted/30 p-2">
               <p className="text-xs font-semibold uppercase text-muted-foreground">
@@ -194,7 +302,13 @@ export function SettingsSidebar({
               </label>
             </div>
           )}
-          {row(<Table className="size-4" />, "Layout / View", () => setPage("view"), "Table")}
+          {row(
+            <Table className="size-4" />,
+            "Layout",
+            () => setPage("view"),
+            LAYOUTS.find((l) => l.value === viewType)?.label,
+          )}
+          {row(<Layers className="size-4" />, "Views", () => setPage("views"), String(views.length))}
           {row(<Eye className="size-4" />, "Property visibility", () => setPage("visibility"), String(shownCount))}
           {row(<ListFilter className="size-4" />, "Filter", () => setPage("filter"), countRules(filterRoot) ? String(countRules(filterRoot)) : undefined)}
           {row(<ArrowUpDown className="size-4" />, "Sort", () => setPage("sort"), sorts.length ? String(sorts.length) : undefined)}
@@ -217,24 +331,134 @@ export function SettingsSidebar({
       </>
     );
   } else if (page === "view") {
+    // Layout = the current view's type.
+    body = (
+      <>
+        {header("Layout", () => setPage("main"))}
+        <div className="flex-1 space-y-1 overflow-y-auto p-3">
+          <p className="px-1 pb-1 text-xs text-muted-foreground">
+            Choose how this view displays its rows.
+          </p>
+          {LAYOUTS.map((l) => {
+            const isCurrent = l.value === viewType;
+            const supported = l.value === "table" || l.value === "board";
+            return (
+              <button
+                key={l.value}
+                disabled={!supported}
+                onClick={() =>
+                  !isCurrent && patchView.mutate({ id: viewId, body: { type: l.value } })
+                }
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm ${
+                  isCurrent
+                    ? "bg-primary/10 text-primary"
+                    : supported
+                      ? "hover:bg-muted"
+                      : "text-muted-foreground opacity-50"
+                }`}
+              >
+                <Table className="size-4" /> {l.label}
+                {isCurrent && <span className="ml-auto text-xs">current</span>}
+                {!supported && <span className="ml-auto text-xs">soon</span>}
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  } else if (page === "views") {
     body = (
       <>
         {header("Views", () => setPage("main"))}
-        <div className="flex-1 space-y-1 overflow-y-auto p-3">
-          <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-sm">
-            <Table className="size-4" /> Table
-            <span className="ml-auto text-xs text-muted-foreground">current</span>
-          </div>
-          <button
-            disabled
-            title="Coming soon"
-            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground opacity-60"
-          >
-            <Plus className="size-4" /> Add view
-            <span className="ml-auto text-xs">soon</span>
-          </button>
+        <div className="flex-1 space-y-1 overflow-y-auto p-2">
+          {views.map((v) => (
+            <div
+              key={v.id}
+              draggable
+              onDragStart={() => setDragViewId(v.id)}
+              onDragOver={(e) => dragViewId && e.preventDefault()}
+              onDrop={() => {
+                if (dragViewId) moveView(dragViewId, v.id);
+                setDragViewId(null);
+              }}
+              className={`rounded-md ${v.id === activeId ? "bg-muted" : "hover:bg-muted"}`}
+            >
+              <div className="flex items-center gap-1 px-1 py-1.5">
+                <GripVertical className="size-3.5 cursor-grab text-muted-foreground" />
+                {renameView?.id === v.id ? (
+                  <input
+                    autoFocus
+                    value={renameView.name}
+                    onChange={(e) => setRenameView({ id: v.id, name: e.target.value })}
+                    onBlur={() =>
+                      renameView.name.trim()
+                        ? patchView.mutate({ id: v.id, body: { name: renameView.name.trim() } })
+                        : setRenameView(null)
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                      if (e.key === "Escape") setRenameView(null);
+                    }}
+                    className="flex-1 rounded border bg-background px-1.5 py-0.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                ) : (
+                  <button
+                    onClick={() => setActiveId(v.id)}
+                    onDoubleClick={() => setRenameView({ id: v.id, name: v.name })}
+                    className="flex-1 truncate text-left text-sm"
+                  >
+                    {v.name}
+                    <span className="ml-1 text-xs capitalize text-muted-foreground">
+                      {v.type}
+                    </span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setDefaultView(v.id)}
+                  title="Set as default"
+                  className={`rounded p-1 hover:bg-accent ${
+                    views[0]?.id === v.id ? "text-primary" : "text-muted-foreground"
+                  }`}
+                >
+                  <Star className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => duplicateView(v)}
+                  title="Duplicate"
+                  className="rounded p-1 text-muted-foreground hover:bg-accent"
+                >
+                  <Copy className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => setConfirmDelView(v.id)}
+                  disabled={views.length <= 1}
+                  title="Delete view"
+                  className="rounded p-1 text-muted-foreground hover:text-destructive disabled:opacity-30"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+              {confirmDelView === v.id && (
+                <div className="flex items-center justify-end gap-2 px-2 pb-2 text-xs">
+                  <span className="mr-auto text-muted-foreground">Delete this view?</span>
+                  <button
+                    onClick={() => setConfirmDelView(null)}
+                    className="rounded px-2 py-1 hover:bg-accent"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => deleteView.mutate(v.id)}
+                    className="rounded bg-destructive px-2 py-1 font-medium text-destructive-foreground hover:opacity-90"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
           <p className="px-2 pt-2 text-xs text-muted-foreground">
-            Board / Calendar / Gallery views coming later.
+            ⭐ first view = default · drag to reorder · double-click to rename.
           </p>
         </div>
       </>
@@ -359,13 +583,11 @@ export function SettingsSidebar({
     );
   }
 
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-80 flex-col border-l bg-popover text-popover-foreground shadow-xl">
-        {body}
-      </div>
-    </>,
-    document.body,
+  // In-flow right panel (ClickUp-style) — sits beside the table, never covering
+  // the top bar. The parent lays it out in a flex row.
+  return (
+    <div className="flex h-full w-80 shrink-0 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-sm">
+      {body}
+    </div>
   );
 }
