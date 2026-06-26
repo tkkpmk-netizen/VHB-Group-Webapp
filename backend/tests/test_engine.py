@@ -417,3 +417,24 @@ async def test_views_isolated_per_workspace(client: httpx.AsyncClient) -> None:
     headers_b, _ = await _setup(client, "vb@example.com")
     r = await client.get(f"/databases/{db_a}/views", headers=headers_b)
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_rows_system_plus_relation_no_500(client: httpx.AsyncClient) -> None:
+    # Regression: created_time + a relation/rollup (whose inject autoflushes and
+    # expires updated_at) used to 500 the list endpoint via an async lazy-load.
+    headers, crm = await _setup(client)
+    r = await client.post("/databases", json={"name": "Orders"}, headers=headers)
+    orders = r.json()["id"]
+    ct = await _add_field(client, headers, crm, "Created", "created_time")
+    rel = await _add_field(
+        client, headers, crm, "Order", "relation", {"target_database_id": orders}
+    )
+    await _add_field(
+        client, headers, crm, "Cnt", "rollup",
+        {"relation_field_id": rel, "function": "count"},
+    )
+    await client.post(f"/databases/{crm}/rows", json={"data": {}}, headers=headers)
+    r = await client.get(f"/databases/{crm}/rows", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()[0]["data"][ct]  # created_time present, no crash

@@ -11,7 +11,7 @@ export type DropdownOption = {
   color?: string;
 };
 
-type Pos = { x: number; y: number; w: number };
+type Pos = { x: number; y: number; w: number; up?: boolean; anchorTop?: number };
 
 function OptionLabel({ option }: { option: DropdownOption }) {
   if (!option.color) return <span>{option.label}</span>;
@@ -35,16 +35,21 @@ function Panel({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const vh = typeof window !== "undefined" ? window.innerHeight : 0;
   const left =
     typeof window !== "undefined"
       ? Math.min(pos.x, window.innerWidth - 220)
       : pos.x;
+  // Flip upward when there isn't enough room below the trigger.
+  const vStyle = pos.up
+    ? { bottom: vh - (pos.anchorTop ?? pos.y) + 4 }
+    : { top: pos.y };
   return createPortal(
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
         className="fixed z-50 max-h-64 overflow-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
-        style={{ top: pos.y, left: Math.max(8, left), minWidth: Math.max(pos.w, 160) }}
+        style={{ ...vStyle, left: Math.max(8, left), minWidth: Math.max(pos.w, 160) }}
       >
         {children}
       </div>
@@ -79,7 +84,11 @@ export function Dropdown({
 
   function openMenu() {
     const r = ref.current?.getBoundingClientRect();
-    if (r) setPos({ x: r.left, y: r.bottom + 4, w: r.width });
+    if (r) {
+      const up =
+        window.innerHeight - r.bottom < 264 && r.top > window.innerHeight - r.bottom;
+      setPos({ x: r.left, y: r.bottom + 4, w: r.width, up, anchorTop: r.top });
+    }
     setOpen(true);
   }
 
@@ -149,7 +158,11 @@ export function MultiDropdown({
 
   function openMenu() {
     const r = ref.current?.getBoundingClientRect();
-    if (r) setPos({ x: r.left, y: r.bottom + 4, w: r.width });
+    if (r) {
+      const up =
+        window.innerHeight - r.bottom < 264 && r.top > window.innerHeight - r.bottom;
+      setPos({ x: r.left, y: r.bottom + 4, w: r.width, up, anchorTop: r.top });
+    }
     setOpen(true);
   }
 

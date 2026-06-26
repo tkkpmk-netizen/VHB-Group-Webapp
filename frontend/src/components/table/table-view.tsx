@@ -16,7 +16,7 @@ import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import { ColumnMenu } from "@/components/table/column-menu";
 import { Dropdown } from "@/components/ui/dropdown";
 import { countryByCode, parsePhone } from "@/lib/countries";
-import { applyFilterTree, applySorts, groupRows } from "@/lib/view";
+import { applyFilterTree, applySorts, groupRows, operatorsFor } from "@/lib/view";
 import type { SharedViewProps } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
 
@@ -142,14 +142,19 @@ function buildOptions(
 export function TableView({
   databaseId,
   filterRoot,
+  setFilterRoot,
   sorts,
+  setSorts,
   groupFieldId,
+  setGroupFieldId,
   hideEmpty,
   frozenUpTo,
   setFrozenUpTo,
   calc,
   setCalc,
   hidden,
+  setHidden,
+  limit,
   search,
   filterToMatches,
   matchedIds,
@@ -171,6 +176,7 @@ export function TableView({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editCell, setEditCell] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [pages, setPages] = useState(0); // extra "load more" clicks
   const [resizing, setResizing] = useState<{
     fieldId: string;
     startX: number;
@@ -444,12 +450,15 @@ export function TableView({
   const searchActive = search.trim().length > 0;
   if (searchActive && filterToMatches && matchedIds)
     visible = visible.filter((r) => matchedIds.has(r.id));
+  // Pagination window — recomputed from the live limit so changing it takes effect.
+  const shown = limit * (pages + 1);
   let groups =
     groupFieldId && byId[groupFieldId]
       ? groupRows(visible, byId[groupFieldId])
       : null;
   if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
   const displayFields = fields.filter((f) => !hidden.has(f.id));
+  const calcFields = displayFields.filter((f) => calc[f.id]);
   const subOwner = fields.find(
     (f) =>
       (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
@@ -524,6 +533,17 @@ export function TableView({
     const [r1, r2] = [Math.min(range.r1, range.r2), Math.max(range.r1, range.r2)];
     const [c1, c2] = [Math.min(range.c1, range.c2), Math.max(range.c1, range.c2)];
     return r >= r1 && r <= r2 && c >= c1 && c <= c2;
+  }
+
+  // The single focused cell (ClickUp-style selected cell border).
+  function isActiveCell(r: number, c: number): boolean {
+    return (
+      !!range &&
+      range.r1 === range.r2 &&
+      range.c1 === range.c2 &&
+      range.r1 === r &&
+      range.c1 === c
+    );
   }
 
   function cellText(f: Field, row: Row): string {
@@ -620,7 +640,7 @@ export function TableView({
               ? "bg-primary/5"
               : selected.has(row.id)
                 ? "bg-accent/30"
-                : ""
+                : "hover:bg-muted/60"
         }`}
       >
         <td
@@ -661,7 +681,11 @@ export function TableView({
               }}
               style={frozenStyle(colIdx)}
               className={`overflow-hidden border-r px-1 align-middle ${
-                inRange(idx, colIdx) ? "bg-primary/10" : "bg-card"
+                inRange(idx, colIdx) ? "bg-primary/10" : ""
+              } ${
+                isActiveCell(idx, colIdx)
+                  ? "ring-2 ring-inset ring-[var(--color-primary)]"
+                  : ""
               }`}
             >
               <div
@@ -728,6 +752,35 @@ export function TableView({
     );
   }
 
+  async function addRowInGroup(value: unknown) {
+    const data =
+      groupFieldId && value != null && value !== ""
+        ? { [groupFieldId]: value }
+        : {};
+    await apiFetch<Row>(`/databases/${databaseId}/rows`, {
+      method: "POST",
+      body: JSON.stringify({ data }),
+    });
+    qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+  }
+
+  // Inline "+ New" row (ClickUp-style) — the whole row is clickable.
+  function renderAddRow(key: string, onClick: () => void) {
+    return (
+      <tr
+        key={key}
+        onClick={onClick}
+        className="cursor-pointer border-b last:border-0 hover:bg-muted/60"
+      >
+        <td colSpan={displayFields.length + 2} className="px-2 py-1.5">
+          <span className="flex items-center gap-1.5 pl-1 text-sm text-muted-foreground">
+            <Plus className="size-4" /> New
+          </span>
+        </td>
+      </tr>
+    );
+  }
+
   // Recursive render for tree (sub-item) mode.
   function renderTree(
     rowsToRender: Row[],
@@ -746,7 +799,7 @@ export function TableView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Add field popover */}
       {adding &&
         addAnchor &&
@@ -884,7 +937,7 @@ export function TableView({
       )}
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-xl border bg-card">
+      <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-xl border bg-card [scrollbar-gutter:stable]">
         <table
           className="table-fixed select-none border-collapse text-sm"
           style={{
@@ -898,7 +951,7 @@ export function TableView({
             ))}
             <col style={{ width: 48 }} />
           </colgroup>
-          <thead>
+          <thead className="sticky top-0 z-20 bg-card">
             <tr className="border-b bg-muted/40">
               <th className="bg-muted/40 px-2 py-2" style={checkboxFrozen}>
                 <input
@@ -939,10 +992,6 @@ export function TableView({
                           ? null
                           : { field: f, x: r.left, y: r.bottom + 4 },
                       );
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setMenu({ field: f, x: e.clientX, y: e.clientY });
                     }}
                     title="Click to edit · drag to reorder"
                     className="flex w-full cursor-grab items-center gap-1 truncate text-left hover:text-primary active:cursor-grabbing"
@@ -987,7 +1036,7 @@ export function TableView({
             {treeMode && renderTree(topLevel, 0, { i: -1 })}
             {!treeMode &&
               !groups &&
-              visible.map((row, idx) => renderRow(row, idx))}
+              visible.slice(0, shown).map((row, idx) => renderRow(row, idx))}
             {!treeMode &&
               groups &&
               groupFieldId &&
@@ -1027,43 +1076,34 @@ export function TableView({
                           i += 1;
                           return renderRow(row, i);
                         })}
+                      {!isCollapsed &&
+                        renderAddRow(`add-${g.key}`, () => addRowInGroup(g.value))}
                     </Fragment>
                   );
                 });
               })()}
           </tbody>
-          {displayFields.length > 0 && (
-            <tfoot>
-              <tr className="border-t bg-muted/20">
-                <td className="bg-muted/20" style={checkboxFrozen} />
-                {displayFields.map((f, colIdx) => (
-                  <td
-                    key={f.id}
-                    style={frozenStyle(colIdx)}
-                    className="border-r bg-muted/20 px-1"
-                  >
-                    <Dropdown
-                      value={calc[f.id] ?? ""}
-                      allowClear={false}
-                      options={calcOptions(f.type)}
-                      onChange={(v) =>
-                        setCalc((c) => ({ ...c, [f.id]: v ?? "" }))
-                      }
-                      trigger={
-                        calc[f.id] ? (
-                          <span className="text-xs font-medium">
-                            {computeCalc(f, visible, calc[f.id])}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            Calculate
-                          </span>
-                        )
-                      }
-                    />
-                  </td>
-                ))}
-                <td className="bg-muted/20" />
+          {displayFields.length > 0 && !groups && (
+            <tfoot className="sticky bottom-0 z-30 bg-card">
+              <tr className="border-t bg-card">
+                <td colSpan={displayFields.length + 2} className="p-0">
+                  <div className="flex items-center justify-between">
+                    <button
+                      onClick={() => addRow.mutate()}
+                      className="sticky left-0 z-10 flex cursor-pointer items-center gap-1.5 bg-card px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      <Plus className="size-4" /> New
+                    </button>
+                    {!treeMode && shown < visible.length && (
+                      <button
+                        onClick={() => setPages((p) => p + 1)}
+                        className="sticky right-0 z-10 mr-2 flex items-center gap-1 rounded-md border bg-card px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10"
+                      >
+                        Load more ({visible.length - shown} left)
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             </tfoot>
           )}
@@ -1076,14 +1116,17 @@ export function TableView({
         )}
       </div>
 
-      <button
-        onClick={() => addRow.mutate()}
-        disabled={fields.length === 0 || addRow.isPending}
-        className="flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
-      >
-        <Plus className="size-4" />
-        New row
-      </button>
+      {/* Calculate summary — outside the table, only configured columns. */}
+      {calcFields.length > 0 && (
+        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+          {calcFields.map((f) => (
+            <span key={f.id} className="font-semibold">
+              <span className="mr-1 font-normal text-muted-foreground">{f.name}:</span>
+              {computeCalc(f, visible, calc[f.id])}
+            </span>
+          ))}
+        </div>
+      )}
 
       {menu && (
         <ColumnMenu
@@ -1098,6 +1141,33 @@ export function TableView({
             const i = fields.findIndex((f) => f.id === menu.field.id);
             setFrozenUpTo(i <= frozenUpTo ? i - 1 : i);
           }}
+          sortDir={sorts.find((s) => s.fieldId === menu.field.id)?.dir ?? null}
+          grouped={groupFieldId === menu.field.id}
+          onSort={(dir) => setSorts([{ fieldId: menu.field.id, dir }])}
+          onGroup={() =>
+            setGroupFieldId(groupFieldId === menu.field.id ? null : menu.field.id)
+          }
+          onFilter={() =>
+            setFilterRoot({
+              ...filterRoot,
+              rules: [
+                ...filterRoot.rules,
+                {
+                  fieldId: menu.field.id,
+                  op: operatorsFor(menu.field.type)[0].value,
+                  value: "",
+                },
+              ],
+            })
+          }
+          onHide={() => {
+            const next = new Set(hidden);
+            next.add(menu.field.id);
+            setHidden(next);
+          }}
+          calcValue={calc[menu.field.id] ?? ""}
+          calcOptions={calcOptions(menu.field.type)}
+          onCalc={(v) => setCalc((c) => ({ ...c, [menu.field.id]: v }))}
         />
       )}
 

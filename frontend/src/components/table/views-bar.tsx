@@ -10,7 +10,6 @@ import {
   LayoutGrid,
   Plus,
   Table,
-  Trash2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
@@ -72,19 +71,9 @@ export function ViewsBar({
     },
   });
 
-  const deleteView = useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/views/${id}`, { method: "DELETE" }),
-    onSuccess: (_d, id) => {
-      if (id === activeId) {
-        const next = views.find((v) => v.id !== id);
-        if (next) setActiveId(next.id);
-      }
-      invalidate();
-    },
-  });
 
   return (
-    <div className="flex items-center gap-1 border-b">
+    <div className="flex w-max items-center gap-1 border-b">
       {views.map((v) => {
         const Icon = iconFor(v.type);
         const active = v.id === activeId;
@@ -113,22 +102,16 @@ export function ViewsBar({
             key={v.id}
             onClick={() => setActiveId(v.id)}
             onDoubleClick={() => setRenaming({ id: v.id, name: v.name })}
-            className={`group mb-[-1px] flex items-center gap-1.5 border-b-2 px-2 py-1.5 text-sm ${
+            className={`group relative mb-[-1px] flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm transition-colors ${
               active
-                ? "border-primary font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "font-medium text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Icon className="size-3.5" />
+            <Icon className="size-4" />
             {v.name}
-            {active && views.length > 1 && (
-              <Trash2
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteView.mutate(v.id);
-                }}
-                className="size-3 opacity-0 hover:text-destructive group-hover:opacity-100"
-              />
+            {active && (
+              <span className="absolute inset-x-1 -bottom-px h-0.5 rounded-full bg-foreground" />
             )}
           </button>
         );
@@ -139,9 +122,9 @@ export function ViewsBar({
           setAdding({ x: r.left, y: r.bottom + 4 });
         }}
         title="Add view"
-        className="rounded p-1 text-muted-foreground hover:bg-muted"
+        className="flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted"
       >
-        <Plus className="size-4" />
+        <Plus className="size-4" /> View
       </button>
 
       {adding &&

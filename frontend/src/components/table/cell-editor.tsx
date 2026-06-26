@@ -213,6 +213,7 @@ function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
   const hyperlink =
     field.type === "url" &&
     (field.options as { hyperlink?: boolean })?.hyperlink === true;
+  const wrap = (field.options as { wrap?: boolean })?.wrap === true;
   const text = typeof value === "string" ? value : "";
   const href = text ? (text.startsWith("http") ? text : `https://${text}`) : "";
 
@@ -223,7 +224,9 @@ function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
           setLocal(text);
           setEditing(true);
         }}
-        className={`flex-1 ${displayCls}`}
+        className={`min-h-[34px] flex-1 cursor-text px-2 py-1.5 text-sm ${
+          wrap ? "whitespace-pre-wrap break-words" : "truncate"
+        }`}
       >
         {text || dash}
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Plus, Trash2 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
@@ -28,42 +29,52 @@ function ColorPicker({
   value?: string;
   onChange: (id: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const c = chipColor(value);
   return (
-    <div className="relative">
+    <>
       <button
+        ref={ref}
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="size-5 rounded-full border"
+        onClick={() => {
+          const r = ref.current?.getBoundingClientRect();
+          if (r) setPos({ x: r.left, y: r.bottom + 4 });
+        }}
+        className="size-5 shrink-0 rounded-full border"
         style={{ backgroundColor: c.bg }}
         title={c.label}
       />
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 grid grid-cols-5 gap-1 rounded-lg border bg-popover p-2 shadow-md">
-            {CHIP_COLORS.map((col) => (
-              <button
-                key={col.id}
-                type="button"
-                onClick={() => {
-                  onChange(col.id);
-                  setOpen(false);
-                }}
-                className="flex size-6 items-center justify-center rounded-full border"
-                style={{ backgroundColor: col.bg }}
-                title={col.label}
-              >
-                {value === col.id && (
-                  <Check className="size-3" style={{ color: col.fg }} />
-                )}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+      {pos &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setPos(null)} />
+            <div
+              className="fixed z-50 grid grid-cols-5 gap-1 rounded-lg border bg-popover p-2 shadow-lg"
+              style={{ top: pos.y, left: pos.x }}
+            >
+              {CHIP_COLORS.map((col) => (
+                <button
+                  key={col.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(col.id);
+                    setPos(null);
+                  }}
+                  className="flex size-6 items-center justify-center rounded-full border"
+                  style={{ backgroundColor: col.bg }}
+                  title={col.label}
+                >
+                  {value === col.id && (
+                    <Check className="size-3" style={{ color: col.fg }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -159,6 +170,18 @@ export function FieldConfig({
         className="mb-2 w-full rounded-md border bg-background px-2 py-1.5 text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
       />
       <p className="px-1 pb-1 text-xs text-muted-foreground">Type: {field.type}</p>
+
+      {["text", "long_text", "email", "url", "phone"].includes(field.type) && (
+        <label className="flex items-center justify-between px-1 py-1.5 text-sm">
+          Wrap text
+          <input
+            type="checkbox"
+            checked={opts.wrap === true}
+            onChange={(e) => commit({ ...opts, wrap: e.target.checked })}
+            className="size-4 accent-[var(--color-primary)]"
+          />
+        </label>
+      )}
 
       <div className="space-y-3 px-1 py-2">
         {field.type === "number" && (

@@ -218,7 +218,7 @@ export function BoardView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto pr-1">
       {swimlanes.map((sub) => (
         <div key={sub?.key ?? "all"} className="space-y-2">
           {sub && (
