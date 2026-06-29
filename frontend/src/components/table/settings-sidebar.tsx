@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
+import { DATE_FORMATS } from "@/components/table/gantt-view";
 import { FieldConfig } from "@/components/table/field-config";
 import {
   FilterGroupEditor,
@@ -45,6 +46,13 @@ export function SettingsSidebar({
   setBoardField,
   boardSubgroup,
   setBoardSubgroup,
+<<<<<<< Updated upstream
+=======
+  ganttDateFormat,
+  setGanttDateFormat,
+  limit,
+  setLimit,
+>>>>>>> Stashed changes
   filterRoot,
   setFilterRoot,
   sorts,
@@ -67,6 +75,13 @@ export function SettingsSidebar({
   setBoardField: (id: string | null) => void;
   boardSubgroup: string | null;
   setBoardSubgroup: (id: string | null) => void;
+<<<<<<< Updated upstream
+=======
+  ganttDateFormat: string;
+  setGanttDateFormat: (f: string) => void;
+  limit: number;
+  setLimit: (n: number) => void;
+>>>>>>> Stashed changes
   filterRoot: FilterGroup;
   setFilterRoot: (g: FilterGroup) => void;
   sorts: SortRule[];
@@ -194,7 +209,32 @@ export function SettingsSidebar({
               </label>
             </div>
           )}
+<<<<<<< Updated upstream
           {row(<Table className="size-4" />, "Layout / View", () => setPage("view"), "Table")}
+=======
+          {viewType === "gantt" && (
+            <div className="mb-1 space-y-2 rounded-lg border bg-muted/30 p-2">
+              <p className="text-xs font-semibold uppercase text-muted-foreground">
+                Timeline
+              </p>
+              <label className="block text-xs text-muted-foreground">
+                Định dạng ngày
+                <Dropdown
+                  value={ganttDateFormat}
+                  options={DATE_FORMATS.map((f) => ({ value: f.value, label: f.label }))}
+                  onChange={(v) => v && setGanttDateFormat(v)}
+                />
+              </label>
+            </div>
+          )}
+          {row(
+            <Table className="size-4" />,
+            "Layout",
+            () => setPage("view"),
+            LAYOUTS.find((l) => l.value === viewType)?.label,
+          )}
+          {row(<Layers className="size-4" />, "Views", () => setPage("views"), String(views.length))}
+>>>>>>> Stashed changes
           {row(<Eye className="size-4" />, "Property visibility", () => setPage("visibility"), String(shownCount))}
           {row(<ListFilter className="size-4" />, "Filter", () => setPage("filter"), countRules(filterRoot) ? String(countRules(filterRoot)) : undefined)}
           {row(<ArrowUpDown className="size-4" />, "Sort", () => setPage("sort"), sorts.length ? String(sorts.length) : undefined)}

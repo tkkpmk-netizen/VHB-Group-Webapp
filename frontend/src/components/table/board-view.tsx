@@ -2,10 +2,16 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { ValueChip } from "@/components/table/cell-editor";
-import { applyFilterTree, toText, type FilterGroup } from "@/lib/view";
+import {
+  applyFilterTree,
+  applySorts,
+  toText,
+  type FilterGroup,
+  type SortRule,
+} from "@/lib/view";
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
@@ -65,6 +71,8 @@ export function BoardView({
   boardField,
   boardSubgroup,
   filterRoot,
+  sorts,
+  limit,
   hidden,
   filterToMatches,
   matchedIds,
@@ -73,12 +81,16 @@ export function BoardView({
   boardField: string | null;
   boardSubgroup: string | null;
   filterRoot: FilterGroup;
+  sorts: SortRule[];
+  limit: number;
   hidden: Set<string>;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
 }) {
   const qc = useQueryClient();
   const [dragRow, setDragRow] = useState<string | null>(null);
+  // Per-column "load more" clicks, keyed by swimlane:column.
+  const [colPages, setColPages] = useState<Record<string, number>>({});
 
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
@@ -93,6 +105,7 @@ export function BoardView({
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
   let rows = applyFilterTree(rowsQ.data ?? [], byId, filterRoot);
   if (filterToMatches && matchedIds) rows = rows.filter((r) => matchedIds.has(r.id));
+  rows = applySorts(rows, byId, sorts);
 
   const groupable = fields.filter((f) =>
     ["select", "status", "priority"].includes(f.type),
@@ -188,6 +201,10 @@ export function BoardView({
     const cards = rows.filter(
       (r) => matches(field!, r, col) && (!sub || matches(subField!, r, sub)),
     );
+    const pgKey = `${sub?.key ?? ""}:${col.key}`;
+    const shown = limit * ((colPages[pgKey] ?? 0) + 1);
+    const visible = cards.slice(0, shown);
+    const moreCount = cards.length - visible.length;
     return (
       <div
         onDragOver={(e) => dragRow && e.preventDefault()}
@@ -203,12 +220,26 @@ export function BoardView({
           <span className="text-xs text-muted-foreground">{cards.length}</span>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
-          {cards.map((r) => (
+          {visible.map((r) => (
             <Card key={r.id} r={r} />
           ))}
+          {moreCount > 0 && (
+            <button
+              onClick={() =>
+                setColPages((p) => ({ ...p, [pgKey]: (p[pgKey] ?? 0) + 1 }))
+              }
+              className="flex w-full items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+            >
+              <ChevronDown className="size-3.5" /> Load more ({moreCount})
+            </button>
+          )}
           <button
             onClick={() => addCard.mutate(placement(col, sub))}
+<<<<<<< Updated upstream
             className="flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+=======
+            className="flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+>>>>>>> Stashed changes
           >
             <Plus className="size-3.5" /> New
           </button>
