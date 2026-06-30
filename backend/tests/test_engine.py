@@ -74,6 +74,28 @@ async def test_row_crud_and_inline_update(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_bulk_create_rows(client: httpx.AsyncClient) -> None:
+    headers, db_id = await _setup(client)
+    await _add_field(client, headers, db_id, "Name", "text")
+
+    r = await client.post(
+        f"/databases/{db_id}/rows/bulk", json={"count": 5}, headers=headers
+    )
+    assert r.status_code == 201, r.text
+    assert len(r.json()) == 5
+    seqs = sorted(row["seq"] for row in r.json())
+    assert seqs == [1, 2, 3, 4, 5]  # sequential seq assigned
+
+    r = await client.get(f"/databases/{db_id}/rows", headers=headers)
+    assert len(r.json()) == 5
+
+    # count bounds enforced (max 100)
+    r = await client.post(
+        f"/databases/{db_id}/rows/bulk", json={"count": 101}, headers=headers
+    )
+    assert r.status_code == 422
+
+
 async def test_value_validation(client: httpx.AsyncClient) -> None:
     headers, db_id = await _setup(client)
     amt_f = await _add_field(client, headers, db_id, "Amount", "number")

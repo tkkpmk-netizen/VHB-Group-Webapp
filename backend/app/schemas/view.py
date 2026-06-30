@@ -19,6 +19,7 @@ class ViewUpdate(BaseModel):
     name: str | None = PField(default=None, min_length=1, max_length=200)
     type: ViewType | None = None
     config: dict[str, Any] | None = None
+    order: int | None = None
 
 
 class ViewOut(BaseModel):

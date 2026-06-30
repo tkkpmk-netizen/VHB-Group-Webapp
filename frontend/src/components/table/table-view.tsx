@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -103,6 +103,64 @@ function computeCalc(field: Field, rows: Row[], op: string): string {
   return "";
 }
 
+/** "Bulk" control next to New: enter a count (≤100) to add that many rows. */
+function BulkAddRows({
+  onAdd,
+  disabled,
+}: {
+  onAdd: (n: number) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [n, setN] = useState(10);
+  if (!open)
+    return (
+      <button
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        title="Add multiple rows"
+        className="flex items-center gap-1 rounded-md border px-2 py-1 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
+      >
+        <ChevronDown className="size-3.5" /> Bulk
+      </button>
+    );
+  return (
+    <span className="flex items-center gap-1">
+      <input
+        type="number"
+        min={1}
+        max={100}
+        value={n}
+        autoFocus
+        onChange={(e) => setN(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            onAdd(n);
+            setOpen(false);
+          }
+          if (e.key === "Escape") setOpen(false);
+        }}
+        className="w-16 rounded-md border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+      />
+      <button
+        onClick={() => {
+          onAdd(n);
+          setOpen(false);
+        }}
+        className="rounded-md bg-primary px-2 py-1 text-sm font-medium text-primary-foreground hover:opacity-90"
+      >
+        Add
+      </button>
+      <button
+        onClick={() => setOpen(false)}
+        className="rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-muted"
+      >
+        ✕
+      </button>
+    </span>
+  );
+}
+
 function slug(label: string, i: number): string {
   const s = label
     .toLowerCase()
@@ -142,20 +200,25 @@ function buildOptions(
 export function TableView({
   databaseId,
   filterRoot,
+  setFilterRoot,
   sorts,
+  setSorts,
   groupFieldId,
+  setGroupFieldId,
   hideEmpty,
   frozenUpTo,
   setFrozenUpTo,
   calc,
   setCalc,
   hidden,
+  limit,
   search,
   filterToMatches,
   matchedIds,
   flashId,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
+  const [pages, setPages] = useState(0); // "load more" clicks (flat list only)
   const [adding, setAdding] = useState(false);
   const [addAnchor, setAddAnchor] = useState<{ x: number; y: number } | null>(
     null,
@@ -171,6 +234,7 @@ export function TableView({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editCell, setEditCell] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [childShown, setChildShown] = useState<Record<string, number>>({}); // per-parent sub-item window
   const [resizing, setResizing] = useState<{
     fieldId: string;
     startX: number;
@@ -233,6 +297,15 @@ export function TableView({
       apiFetch<Row>(`/databases/${databaseId}/rows`, {
         method: "POST",
         body: JSON.stringify({ data: {} }),
+      }),
+    onSuccess: invalidate,
+  });
+
+  const bulkAdd = useMutation({
+    mutationFn: (count: number) =>
+      apiFetch<Row[]>(`/databases/${databaseId}/rows/bulk`, {
+        method: "POST",
+        body: JSON.stringify({ count }),
       }),
     onSuccess: invalidate,
   });
@@ -450,6 +523,9 @@ export function TableView({
       : null;
   if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
   const displayFields = fields.filter((f) => !hidden.has(f.id));
+  const calcFields = displayFields.filter((f) => calc[f.id]);
+  // Pagination window (flat list only): render first N rows, reveal more.
+  const shown = limit * (pages + 1);
   const subOwner = fields.find(
     (f) =>
       (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
@@ -518,6 +594,15 @@ export function TableView({
     c2: number;
   } | null>(null);
   const [dragging, setDragging] = useState(false);
+  // True if the cell about to be clicked was already the sole-selected cell
+  // (captured on mousedown, before the td re-selects it) → second click edits.
+  const clickedActive = useRef(false);
+
+  function isActiveCell(r: number, c: number): boolean {
+    return (
+      !!range && range.r1 === r && range.r2 === r && range.c1 === c && range.c2 === c
+    );
+  }
 
   function inRange(r: number, c: number): boolean {
     if (!range) return false;
@@ -703,10 +788,17 @@ export function TableView({
                       autoEdit={isEditing}
                     />
                   )}
-                  {/* Single click = select only; double-click activates editing. */}
+                  {/* 1st click selects; click on the already-selected cell or
+                      double-click enters edit (dropdowns auto-open via autoEdit). */}
                   {!isEditing && f.type !== "unique_id" && (
                     <div
                       className="absolute inset-0 z-[1] cursor-cell"
+                      onMouseDown={() => {
+                        clickedActive.current = isActiveCell(idx, colIdx);
+                      }}
+                      onClick={() => {
+                        if (clickedActive.current) setEditCell(cellKey);
+                      }}
                       onDoubleClick={() => setEditCell(cellKey)}
                     />
                   )}
@@ -728,7 +820,9 @@ export function TableView({
     );
   }
 
-  // Recursive render for tree (sub-item) mode.
+  // Recursive render for tree (sub-item) mode. Each parent shows up to 5
+  // children at a time with a "Load more sub-items" row.
+  const CHILD_PAGE = 5;
   function renderTree(
     rowsToRender: Row[],
     depth: number,
@@ -739,14 +833,34 @@ export function TableView({
       counter.i += 1;
       out.push(renderRow(row, counter.i, depth));
       if (expanded.has(row.id)) {
-        out.push(...renderTree(childrenOf(row), depth + 1, counter));
+        const kids = childrenOf(row);
+        const cShown = childShown[row.id] ?? CHILD_PAGE;
+        out.push(...renderTree(kids.slice(0, cShown), depth + 1, counter));
+        if (kids.length > cShown) {
+          out.push(
+            <tr key={`submore-${row.id}`}>
+              <td colSpan={displayFields.length + 2} className="p-0">
+                <button
+                  onClick={() =>
+                    setChildShown((s) => ({ ...s, [row.id]: cShown + CHILD_PAGE }))
+                  }
+                  style={{ paddingLeft: (depth + 1) * 18 + 12 }}
+                  className="flex items-center gap-1 py-1.5 text-xs font-medium text-primary hover:underline"
+                >
+                  <ChevronDown className="size-3.5" /> Load more sub-items (
+                  {kids.length - cShown} left)
+                </button>
+              </td>
+            </tr>,
+          );
+        }
       }
     }
     return out;
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       {/* Add field popover */}
       {adding &&
         addAnchor &&
@@ -884,7 +998,7 @@ export function TableView({
       )}
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-xl border bg-card">
+      <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-xl border bg-card [scrollbar-gutter:stable]">
         <table
           className="table-fixed select-none border-collapse text-sm"
           style={{
@@ -898,7 +1012,7 @@ export function TableView({
             ))}
             <col style={{ width: 48 }} />
           </colgroup>
-          <thead>
+          <thead className="sticky top-0 z-20 bg-card">
             <tr className="border-b bg-muted/40">
               <th className="bg-muted/40 px-2 py-2" style={checkboxFrozen}>
                 <input
@@ -984,10 +1098,10 @@ export function TableView({
             </tr>
           </thead>
           <tbody>
-            {treeMode && renderTree(topLevel, 0, { i: -1 })}
+            {treeMode && renderTree(topLevel.slice(0, shown), 0, { i: -1 })}
             {!treeMode &&
               !groups &&
-              visible.map((row, idx) => renderRow(row, idx))}
+              visible.slice(0, shown).map((row, idx) => renderRow(row, idx))}
             {!treeMode &&
               groups &&
               groupFieldId &&
@@ -1032,41 +1146,6 @@ export function TableView({
                 });
               })()}
           </tbody>
-          {displayFields.length > 0 && (
-            <tfoot>
-              <tr className="border-t bg-muted/20">
-                <td className="bg-muted/20" style={checkboxFrozen} />
-                {displayFields.map((f, colIdx) => (
-                  <td
-                    key={f.id}
-                    style={frozenStyle(colIdx)}
-                    className="border-r bg-muted/20 px-1"
-                  >
-                    <Dropdown
-                      value={calc[f.id] ?? ""}
-                      allowClear={false}
-                      options={calcOptions(f.type)}
-                      onChange={(v) =>
-                        setCalc((c) => ({ ...c, [f.id]: v ?? "" }))
-                      }
-                      trigger={
-                        calc[f.id] ? (
-                          <span className="text-xs font-medium">
-                            {computeCalc(f, visible, calc[f.id])}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            Calculate
-                          </span>
-                        )
-                      }
-                    />
-                  </td>
-                ))}
-                <td className="bg-muted/20" />
-              </tr>
-            </tfoot>
-          )}
         </table>
 
         {fields.length === 0 && (
@@ -1076,14 +1155,41 @@ export function TableView({
         )}
       </div>
 
-      <button
-        onClick={() => addRow.mutate()}
-        disabled={fields.length === 0 || addRow.isPending}
-        className="flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
-      >
-        <Plus className="size-4" />
-        New row
-      </button>
+      {/* Action bar — pinned below the table (always visible). */}
+      <div className="flex shrink-0 items-center gap-2">
+        {!groups && shown < (treeMode ? topLevel.length : visible.length) && (
+          <button
+            onClick={() => setPages((p) => p + 1)}
+            className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10"
+          >
+            <ChevronDown className="size-4" /> Load more (
+            {(treeMode ? topLevel.length : visible.length) - shown} left)
+          </button>
+        )}
+        <button
+          onClick={() => addRow.mutate()}
+          disabled={fields.length === 0 || addRow.isPending}
+          className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
+        >
+          <Plus className="size-4" /> New
+        </button>
+        <BulkAddRows
+          disabled={fields.length === 0 || bulkAdd.isPending}
+          onAdd={(n) => bulkAdd.mutate(n)}
+        />
+      </div>
+
+      {/* Calculate summary — below the action bar; bold results for calc'd columns. */}
+      {calcFields.length > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+          {calcFields.map((f) => (
+            <span key={f.id} className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">{f.name}</span>
+              <span className="font-bold">{computeCalc(f, visible, calc[f.id])}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {menu && (
         <ColumnMenu
@@ -1098,6 +1204,15 @@ export function TableView({
             const i = fields.findIndex((f) => f.id === menu.field.id);
             setFrozenUpTo(i <= frozenUpTo ? i - 1 : i);
           }}
+          sorts={sorts}
+          setSorts={setSorts}
+          groupFieldId={groupFieldId}
+          setGroupFieldId={setGroupFieldId}
+          filterRoot={filterRoot}
+          setFilterRoot={setFilterRoot}
+          calcValue={calc[menu.field.id] ?? ""}
+          setCalc={(v) => setCalc((c) => ({ ...c, [menu.field.id]: v }))}
+          calcOptions={calcOptions(menu.field.type)}
         />
       )}
 

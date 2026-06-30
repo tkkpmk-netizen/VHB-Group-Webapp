@@ -232,6 +232,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/{database_id}/rows/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk Create Rows */
+        post: operations["bulk_create_rows_databases__database_id__rows_bulk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rows/{row_id}": {
         parameters: {
             query?: never;
@@ -327,6 +344,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** BulkRowCreate */
+        BulkRowCreate: {
+            /** Count */
+            count: number;
+        };
         /** DatabaseCreate */
         DatabaseCreate: {
             /** Name */
@@ -574,7 +596,7 @@ export interface components {
          * ViewType
          * @enum {string}
          */
-        ViewType: "table" | "board" | "calendar" | "gallery" | "gantt";
+        ViewType: "table" | "board" | "calendar" | "gallery" | "gantt" | "list";
         /** ViewUpdate */
         ViewUpdate: {
             /** Name */
@@ -584,6 +606,8 @@ export interface components {
             config?: {
                 [key: string]: unknown;
             } | null;
+            /** Order */
+            order?: number | null;
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -1101,6 +1125,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_create_rows_databases__database_id__rows_bulk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkRowCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RowOut"][];
                 };
             };
             /** @description Validation Error */

@@ -9,7 +9,7 @@ export default async function DatabaseDetailPage({
   const { id } = await params;
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-[1800px]">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1800px] flex-col">
         <DatabaseView databaseId={id} />
       </div>
     </AppShell>

@@ -8,9 +8,9 @@ import {
   Columns3,
   GanttChart,
   LayoutGrid,
+  List,
   Plus,
   Table,
-  Trash2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
@@ -21,6 +21,7 @@ type ViewType = View["type"];
 const TYPES: { value: ViewType; label: string; icon: typeof Table }[] = [
   { value: "table", label: "Table", icon: Table },
   { value: "board", label: "Board", icon: Columns3 },
+  { value: "list", label: "List", icon: List },
   { value: "calendar", label: "Calendar", icon: Calendar },
   { value: "gallery", label: "Gallery", icon: LayoutGrid },
   { value: "gantt", label: "Timeline", icon: GanttChart },
@@ -41,7 +42,28 @@ export function ViewsBar({
   const qc = useQueryClient();
   const [adding, setAdding] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["views", databaseId] });
+
+  // Drag-reorder tabs: PATCH each view's `order` to its new index.
+  const patchOrder = useMutation({
+    mutationFn: (ids: string[]) =>
+      Promise.all(
+        ids.map((id, i) =>
+          apiFetch<View>(`/views/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ order: i }),
+          }),
+        ),
+      ),
+    onSuccess: invalidate,
+  });
+  function moveView(fromId: string, toId: string) {
+    if (fromId === toId) return;
+    const ids = views.map((v) => v.id).filter((i) => i !== fromId);
+    ids.splice(ids.indexOf(toId), 0, fromId);
+    patchOrder.mutate(ids);
+  }
 
   const addView = useMutation({
     mutationFn: (type: ViewType) =>
@@ -72,19 +94,8 @@ export function ViewsBar({
     },
   });
 
-  const deleteView = useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/views/${id}`, { method: "DELETE" }),
-    onSuccess: (_d, id) => {
-      if (id === activeId) {
-        const next = views.find((v) => v.id !== id);
-        if (next) setActiveId(next.id);
-      }
-      invalidate();
-    },
-  });
-
   return (
-    <div className="flex items-center gap-1 border-b">
+    <div className="flex items-center gap-1">
       {views.map((v) => {
         const Icon = iconFor(v.type);
         const active = v.id === activeId;
@@ -111,9 +122,17 @@ export function ViewsBar({
         return (
           <button
             key={v.id}
+            draggable
+            onDragStart={() => setDragId(v.id)}
+            onDragOver={(e) => dragId && e.preventDefault()}
+            onDrop={() => {
+              if (dragId) moveView(dragId, v.id);
+              setDragId(null);
+            }}
             onClick={() => setActiveId(v.id)}
             onDoubleClick={() => setRenaming({ id: v.id, name: v.name })}
-            className={`group mb-[-1px] flex items-center gap-1.5 border-b-2 px-2 py-1.5 text-sm ${
+            title="Click để mở · double-click đổi tên · kéo để sắp xếp"
+            className={`mb-[-1px] flex cursor-grab items-center gap-1.5 border-b-2 px-2 py-1.5 text-sm active:cursor-grabbing ${
               active
                 ? "border-primary font-medium text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -121,15 +140,6 @@ export function ViewsBar({
           >
             <Icon className="size-3.5" />
             {v.name}
-            {active && views.length > 1 && (
-              <Trash2
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteView.mutate(v.id);
-                }}
-                className="size-3 opacity-0 hover:text-destructive group-hover:opacity-100"
-              />
-            )}
           </button>
         );
       })}

@@ -63,6 +63,8 @@ export function Dropdown({
   onChange,
   placeholder = "—",
   allowClear = true,
+  autoOpen = false,
+  wrap = false,
   trigger,
 }: {
   value: string | null;
@@ -70,9 +72,12 @@ export function Dropdown({
   onChange: (v: string | null) => void;
   placeholder?: string;
   allowClear?: boolean;
+  autoOpen?: boolean;
+  wrap?: boolean;
   trigger?: React.ReactNode;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
+  const opened = useRef(false);
   const [pos, setPos] = useState<Pos>({ x: 0, y: 0, w: 0 });
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value) ?? null;
@@ -82,11 +87,21 @@ export function Dropdown({
     if (r) setPos({ x: r.left, y: r.bottom + 4, w: r.width });
     setOpen(true);
   }
+  // Callback ref: open once on mount when autoOpen (no effect → lint-safe).
+  const setBtn = (el: HTMLButtonElement | null) => {
+    ref.current = el;
+    if (el && autoOpen && !opened.current) {
+      opened.current = true;
+      const r = el.getBoundingClientRect();
+      setPos({ x: r.left, y: r.bottom + 4, w: r.width });
+      setOpen(true);
+    }
+  };
 
   return (
     <>
-      <button ref={ref} type="button" onClick={openMenu} className={triggerCls}>
-        <span className="truncate">
+      <button ref={setBtn} type="button" onClick={openMenu} className={triggerCls}>
+        <span className={wrap ? "break-words" : "truncate"}>
           {trigger ??
             (current ? (
               <OptionLabel option={current} />
@@ -136,13 +151,18 @@ export function MultiDropdown({
   options,
   onChange,
   placeholder = "—",
+  autoOpen = false,
+  wrap = true,
 }: {
   values: string[];
   options: DropdownOption[];
   onChange: (v: string[]) => void;
   placeholder?: string;
+  autoOpen?: boolean;
+  wrap?: boolean;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
+  const opened = useRef(false);
   const [pos, setPos] = useState<Pos>({ x: 0, y: 0, w: 0 });
   const [open, setOpen] = useState(false);
   const selected = options.filter((o) => values.includes(o.value));
@@ -152,6 +172,15 @@ export function MultiDropdown({
     if (r) setPos({ x: r.left, y: r.bottom + 4, w: r.width });
     setOpen(true);
   }
+  const setBtn = (el: HTMLButtonElement | null) => {
+    ref.current = el;
+    if (el && autoOpen && !opened.current) {
+      opened.current = true;
+      const r = el.getBoundingClientRect();
+      setPos({ x: r.left, y: r.bottom + 4, w: r.width });
+      setOpen(true);
+    }
+  };
 
   function toggle(v: string) {
     onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
@@ -159,8 +188,12 @@ export function MultiDropdown({
 
   return (
     <>
-      <button ref={ref} type="button" onClick={openMenu} className={triggerCls}>
-        <span className="flex flex-wrap items-center gap-1">
+      <button ref={setBtn} type="button" onClick={openMenu} className={triggerCls}>
+        <span
+          className={`flex items-center gap-1 ${
+            wrap ? "flex-wrap" : "overflow-hidden"
+          }`}
+        >
           {selected.length === 0 ? (
             <span className="text-muted-foreground">{placeholder}</span>
           ) : (

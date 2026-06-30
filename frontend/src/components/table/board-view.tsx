@@ -171,9 +171,11 @@ export function BoardView({
     return typeof v === "string" && v ? v : `#${r.seq}`;
   };
 
-  function Card({ r }: { r: Row }) {
-    return (
+  // Plain render fns (NOT components) so columns don't remount on every parent
+  // re-render — which would reset each column's scroll to the top.
+  const renderCard = (r: Row) => (
       <div
+        key={r.id}
         draggable
         onDragStart={() => setDragRow(r.id)}
         className="cursor-grab space-y-1.5 rounded-lg border bg-card p-2.5 shadow-sm active:cursor-grabbing"
@@ -195,9 +197,8 @@ export function BoardView({
         })}
       </div>
     );
-  }
 
-  function Column({ col, sub }: { col: Col; sub?: Col }) {
+  const renderColumn = (col: Col, sub?: Col) => {
     const cards = rows.filter(
       (r) => matches(field!, r, col) && (!sub || matches(subField!, r, sub)),
     );
@@ -207,6 +208,7 @@ export function BoardView({
     const moreCount = cards.length - visible.length;
     return (
       <div
+        key={`${sub?.key ?? ""}:${col.key}`}
         onDragOver={(e) => dragRow && e.preventDefault()}
         onDrop={() => dropOn(col, sub)}
         className="flex max-h-[72vh] w-72 shrink-0 flex-col rounded-xl border bg-muted/30"
@@ -220,9 +222,7 @@ export function BoardView({
           <span className="text-xs text-muted-foreground">{cards.length}</span>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
-          {visible.map((r) => (
-            <Card key={r.id} r={r} />
-          ))}
+          {visible.map((r) => renderCard(r))}
           {moreCount > 0 && (
             <button
               onClick={() =>
@@ -235,18 +235,14 @@ export function BoardView({
           )}
           <button
             onClick={() => addCard.mutate(placement(col, sub))}
-<<<<<<< Updated upstream
-            className="flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
-=======
             className="flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
->>>>>>> Stashed changes
           >
             <Plus className="size-3.5" /> New
           </button>
         </div>
       </div>
     );
-  }
+  };
 
   return (
     <div className="space-y-4">
@@ -262,9 +258,7 @@ export function BoardView({
             </div>
           )}
           <div className="flex gap-3 overflow-x-auto pb-2">
-            {columns.map((col) => (
-              <Column key={col.key} col={col} sub={sub ?? undefined} />
-            ))}
+            {columns.map((col) => renderColumn(col, sub ?? undefined))}
           </div>
         </div>
       ))}

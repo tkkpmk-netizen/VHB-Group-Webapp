@@ -99,6 +99,8 @@ async def update_view(
         view.type = payload.type
     if payload.config is not None:
         view.config = payload.config
+    if payload.order is not None:
+        view.order = payload.order
     await db.commit()
     await db.refresh(view)
     return view

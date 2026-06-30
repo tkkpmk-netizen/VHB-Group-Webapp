@@ -5,8 +5,10 @@ import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpDown,
+  Bookmark,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Eye,
   EyeOff,
   GitBranch,
@@ -15,6 +17,7 @@ import {
   ListOrdered,
   GripVertical,
   Plus,
+  Star,
   Table,
   Trash2,
   X,
@@ -29,14 +32,32 @@ import {
   SortEditor,
 } from "@/components/table/view-tools";
 import { countRules, type FilterGroup, type SortRule } from "@/lib/view";
+import type { Preset } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
-type Page = "main" | "view" | "visibility" | "filter" | "sort" | "group" | "fields";
+type View = components["schemas"]["ViewOut"];
+type Page =
+  | "main"
+  | "view"
+  | "presets"
+  | "visibility"
+  | "filter"
+  | "sort"
+  | "group"
+  | "fields";
+
+const LIMIT_OPTIONS = [10, 20, 50, 100, 200].map((n) => ({
+  value: String(n),
+  label: `${n} rows`,
+}));
 
 export function SettingsSidebar({
   databaseId,
   viewType,
+  views,
+  activeId,
+  setActiveId,
   fields,
   hidden,
   setHidden,
@@ -46,13 +67,10 @@ export function SettingsSidebar({
   setBoardField,
   boardSubgroup,
   setBoardSubgroup,
-<<<<<<< Updated upstream
-=======
   ganttDateFormat,
   setGanttDateFormat,
   limit,
   setLimit,
->>>>>>> Stashed changes
   filterRoot,
   setFilterRoot,
   sorts,
@@ -61,11 +79,18 @@ export function SettingsSidebar({
   setGroupFieldId,
   hideEmpty,
   setHideEmpty,
+  presets,
+  setPresets,
+  activePreset,
+  setActivePreset,
   initialPage = "main",
   onClose,
 }: {
   databaseId: string;
   viewType: string;
+  views: View[];
+  activeId: string;
+  setActiveId: (id: string) => void;
   fields: Field[];
   hidden: Set<string>;
   setHidden: (s: Set<string>) => void;
@@ -75,13 +100,10 @@ export function SettingsSidebar({
   setBoardField: (id: string | null) => void;
   boardSubgroup: string | null;
   setBoardSubgroup: (id: string | null) => void;
-<<<<<<< Updated upstream
-=======
   ganttDateFormat: string;
   setGanttDateFormat: (f: string) => void;
   limit: number;
   setLimit: (n: number) => void;
->>>>>>> Stashed changes
   filterRoot: FilterGroup;
   setFilterRoot: (g: FilterGroup) => void;
   sorts: SortRule[];
@@ -90,6 +112,10 @@ export function SettingsSidebar({
   setGroupFieldId: (id: string | null) => void;
   hideEmpty: boolean;
   setHideEmpty: (b: boolean) => void;
+  presets: Preset[];
+  setPresets: (p: Preset[]) => void;
+  activePreset: string | null;
+  setActivePreset: (id: string | null) => void;
   initialPage?: Page;
   onClose: () => void;
 }) {
@@ -98,6 +124,9 @@ export function SettingsSidebar({
   const [editFieldId, setEditFieldId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [viewDrag, setViewDrag] = useState<string | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState("");
 
   const reorder = useMutation({
     mutationFn: (ids: string[]) =>
@@ -122,6 +151,46 @@ export function SettingsSidebar({
     const to = ids.indexOf(toId);
     ids.splice(to, 0, fromId);
     reorder.mutate(ids);
+  }
+
+  // --- View (Layout) management ---
+  const invalidateViews = () =>
+    qc.invalidateQueries({ queryKey: ["views", databaseId] });
+  const patchView = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
+      apiFetch<View>(`/views/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: invalidateViews,
+  });
+  const createView = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch<View>(`/databases/${databaseId}/views`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (v) => {
+      invalidateViews();
+      setActiveId(v.id);
+    },
+  });
+  const deleteView = useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/views/${id}`, { method: "DELETE" }),
+    onSuccess: invalidateViews,
+  });
+  // Reorder = PATCH each view's `order` to its new index (no bulk endpoint).
+  function reorderViews(ids: string[]) {
+    ids.forEach((id, i) => patchView.mutate({ id, body: { order: i } }));
+  }
+  function moveView(fromId: string, toId: string) {
+    if (fromId === toId) return;
+    const ids = views.map((v) => v.id).filter((i) => i !== fromId);
+    ids.splice(ids.indexOf(toId), 0, fromId);
+    reorderViews(ids);
+  }
+  function setDefaultView(id: string) {
+    reorderViews([id, ...views.map((v) => v.id).filter((i) => i !== id)]);
+  }
+  function duplicateView(v: View) {
+    createView.mutate({ name: `${v.name} copy`, type: v.type, config: v.config });
   }
 
   const shownCount = fields.filter((f) => !hidden.has(f.id)).length;
@@ -209,9 +278,6 @@ export function SettingsSidebar({
               </label>
             </div>
           )}
-<<<<<<< Updated upstream
-          {row(<Table className="size-4" />, "Layout / View", () => setPage("view"), "Table")}
-=======
           {viewType === "gantt" && (
             <div className="mb-1 space-y-2 rounded-lg border bg-muted/30 p-2">
               <p className="text-xs font-semibold uppercase text-muted-foreground">
@@ -227,20 +293,25 @@ export function SettingsSidebar({
               </label>
             </div>
           )}
-          {row(
-            <Table className="size-4" />,
-            "Layout",
-            () => setPage("view"),
-            LAYOUTS.find((l) => l.value === viewType)?.label,
-          )}
-          {row(<Layers className="size-4" />, "Views", () => setPage("views"), String(views.length))}
->>>>>>> Stashed changes
+          {row(<Table className="size-4" />, "Layout", () => setPage("view"), String(views.length))}
+          {row(<Bookmark className="size-4" />, "View presets", () => setPage("presets"), presets.length ? String(presets.length) : undefined)}
           {row(<Eye className="size-4" />, "Property visibility", () => setPage("visibility"), String(shownCount))}
           {row(<ListFilter className="size-4" />, "Filter", () => setPage("filter"), countRules(filterRoot) ? String(countRules(filterRoot)) : undefined)}
           {row(<ArrowUpDown className="size-4" />, "Sort", () => setPage("sort"), sorts.length ? String(sorts.length) : undefined)}
           {row(<GroupIcon className="size-4" />, "Group", () => setPage("group"), groupField?.name)}
           {row(<ListOrdered className="size-4" />, "Edit properties", () => setPage("fields"))}
           <div className="my-1 border-t" />
+          <label className="flex items-center gap-3 rounded-md px-2 py-2 text-sm">
+            <span className="flex-1 text-muted-foreground">Rows per page</span>
+            <div className="w-28">
+              <Dropdown
+                value={String(limit)}
+                allowClear={false}
+                options={LIMIT_OPTIONS}
+                onChange={(v) => v && setLimit(Number(v))}
+              />
+            </div>
+          </label>
           <label className="flex items-center gap-3 rounded-md px-2 py-2 text-sm">
             <span className="text-muted-foreground">
               <GitBranch className="size-4" />
@@ -259,23 +330,186 @@ export function SettingsSidebar({
   } else if (page === "view") {
     body = (
       <>
-        {header("Views", () => setPage("main"))}
+        {header("Layout", () => setPage("main"))}
         <div className="flex-1 space-y-1 overflow-y-auto p-3">
-          <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-2 text-sm">
-            <Table className="size-4" /> Table
-            <span className="ml-auto text-xs text-muted-foreground">current</span>
-          </div>
-          <button
-            disabled
-            title="Coming soon"
-            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground opacity-60"
-          >
-            <Plus className="size-4" /> Add view
-            <span className="ml-auto text-xs">soon</span>
-          </button>
-          <p className="px-2 pt-2 text-xs text-muted-foreground">
-            Board / Calendar / Gallery views coming later.
+          <p className="px-1 pb-1 text-xs text-muted-foreground">
+            Kéo để sắp xếp · ★ đặt mặc định · double-click để đổi tên
           </p>
+          {views.map((v, i) => {
+            const isActive = v.id === activeId;
+            const isDefault = i === 0;
+            return (
+              <div
+                key={v.id}
+                draggable={renameId !== v.id}
+                onDragStart={() => setViewDrag(v.id)}
+                onDragOver={(e) => viewDrag && e.preventDefault()}
+                onDrop={() => {
+                  if (viewDrag) moveView(viewDrag, v.id);
+                  setViewDrag(null);
+                }}
+                className={`flex items-center gap-2 rounded-md px-1.5 py-1.5 text-sm ${
+                  isActive ? "bg-muted" : "hover:bg-muted"
+                }`}
+              >
+                <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground" />
+                {renameId === v.id ? (
+                  <input
+                    autoFocus
+                    value={renameText}
+                    onChange={(e) => setRenameText(e.target.value)}
+                    onBlur={() => {
+                      if (renameText.trim())
+                        patchView.mutate({ id: v.id, body: { name: renameText.trim() } });
+                      setRenameId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                      if (e.key === "Escape") setRenameId(null);
+                    }}
+                    className="min-w-0 flex-1 rounded border bg-background px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-ring"
+                  />
+                ) : (
+                  <button
+                    onClick={() => {
+                      setActiveId(v.id);
+                      onClose();
+                    }}
+                    onDoubleClick={() => {
+                      setRenameId(v.id);
+                      setRenameText(v.name);
+                    }}
+                    className="min-w-0 flex-1 truncate text-left"
+                  >
+                    {v.name}
+                    <span className="ml-1 text-xs text-muted-foreground">{v.type}</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setDefaultView(v.id)}
+                  title="Đặt làm mặc định"
+                  className={isDefault ? "text-primary" : "text-muted-foreground/50 hover:text-foreground"}
+                >
+                  <Star className={`size-3.5 ${isDefault ? "fill-current" : ""}`} />
+                </button>
+                <button
+                  onClick={() => duplicateView(v)}
+                  title="Nhân bản"
+                  className="text-muted-foreground/60 hover:text-foreground"
+                >
+                  <Copy className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (views.length <= 1) return;
+                    if (isActive) setActiveId(views.find((x) => x.id !== v.id)!.id);
+                    deleteView.mutate(v.id);
+                  }}
+                  disabled={views.length <= 1}
+                  title="Xóa"
+                  className="text-muted-foreground/60 hover:text-destructive disabled:opacity-30"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
+          <div className="mt-1 border-t pt-2">
+            <p className="px-1 pb-1 text-xs font-semibold uppercase text-muted-foreground">
+              Add layout
+            </p>
+            <div className="grid grid-cols-2 gap-1">
+              {(
+                [
+                  ["table", "Table"],
+                  ["board", "Board"],
+                  ["list", "List"],
+                  ["calendar", "Calendar"],
+                  ["gallery", "Gallery"],
+                  ["gantt", "Timeline"],
+                ] as const
+              ).map(([t, label]) => (
+                <button
+                  key={t}
+                  onClick={() => createView.mutate({ name: label, type: t, config: {} })}
+                  className="flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs hover:bg-muted"
+                >
+                  <Plus className="size-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  } else if (page === "presets") {
+    body = (
+      <>
+        {header("View presets", () => setPage("main"))}
+        <div className="flex-1 space-y-1 overflow-y-auto p-3">
+          {presets.length === 0 && (
+            <p className="px-1 py-2 text-xs text-muted-foreground">
+              Chưa có preset. Lưu bộ lọc/sort/group hiện tại bằng nút “Save view” trên thanh công cụ.
+            </p>
+          )}
+          {presets.map((p) => {
+            const isActive = p.id === activePreset;
+            return (
+              <div
+                key={p.id}
+                className={`flex items-center gap-2 rounded-md px-1.5 py-1.5 text-sm ${
+                  isActive ? "bg-muted" : "hover:bg-muted"
+                }`}
+              >
+                {renameId === p.id ? (
+                  <input
+                    autoFocus
+                    value={renameText}
+                    onChange={(e) => setRenameText(e.target.value)}
+                    onBlur={() => {
+                      const name = renameText.trim();
+                      if (name)
+                        setPresets(presets.map((x) => (x.id === p.id ? { ...x, name } : x)));
+                      setRenameId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                      if (e.key === "Escape") setRenameId(null);
+                    }}
+                    className="min-w-0 flex-1 rounded border bg-background px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-ring"
+                  />
+                ) : (
+                  <button
+                    onClick={() => setActivePreset(p.id)}
+                    onDoubleClick={() => {
+                      setRenameId(p.id);
+                      setRenameText(p.name);
+                    }}
+                    className="min-w-0 flex-1 truncate text-left"
+                  >
+                    {p.name}
+                  </button>
+                )}
+                <button
+                  onClick={() => setActivePreset(p.id)}
+                  title="Đặt làm mặc định"
+                  className={isActive ? "text-primary" : "text-muted-foreground/50 hover:text-foreground"}
+                >
+                  <Star className={`size-3.5 ${isActive ? "fill-current" : ""}`} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (isActive) setActivePreset(null);
+                    setPresets(presets.filter((x) => x.id !== p.id));
+                  }}
+                  title="Xóa"
+                  className="text-muted-foreground/60 hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </>
     );

@@ -17,6 +17,7 @@ class ViewType(enum.StrEnum):
     calendar = "calendar"
     gallery = "gallery"
     gantt = "gantt"
+    list = "list"
 
 
 class View(Base, TimestampMixin):

@@ -2,20 +2,31 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpDown, ListFilter, SlidersHorizontal } from "lucide-react";
+import {
+  ArrowUpDown,
+  Group as GroupIcon,
+  ListFilter,
+  RotateCcw,
+  Save,
+  SlidersHorizontal,
+} from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { BoardView } from "@/components/table/board-view";
-<<<<<<< Updated upstream
-import { SearchBar } from "@/components/table/search-box";
-=======
+import { CalendarView } from "@/components/table/calendar-view";
+import { GalleryView } from "@/components/table/gallery-view";
 import { GanttView } from "@/components/table/gantt-view";
+import { ListView } from "@/components/table/list-view";
 import type { GanttScale } from "@/components/table/gantt-scale";
 import { Dropdown } from "@/components/ui/dropdown";
->>>>>>> Stashed changes
 import { SettingsSidebar } from "@/components/table/settings-sidebar";
 import { TableView } from "@/components/table/table-view";
-import { matchedRowIds, searchHits } from "@/lib/search";
+import {
+  FilterGroupEditor,
+  GroupEditor,
+  SortEditor,
+} from "@/components/table/view-tools";
 import {
   countRules,
   emptyGroup,
@@ -25,8 +36,17 @@ import {
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
-type Row = components["schemas"]["RowOut"];
 type View = components["schemas"]["ViewOut"];
+
+/** A saved Quick View preset = a named snapshot of filter/sort/group. */
+export type Preset = {
+  id: string;
+  name: string;
+  filter: FilterGroup;
+  sorts: SortRule[];
+  group: string | null;
+  hideEmpty: boolean;
+};
 
 /** Persisted per-view config (everything except ephemeral UI like collapse). */
 export type ViewConfig = {
@@ -39,30 +59,33 @@ export type ViewConfig = {
   hidden?: string[];
   boardField?: string | null;
   boardSubgroup?: string | null;
-<<<<<<< Updated upstream
-=======
   ganttField?: string | null;
   ganttScale?: GanttScale | null;
   ganttLeftFields?: string[];
   ganttColWidths?: Record<string, number>;
   ganttDateFormat?: string;
+  calendarField?: string | null;
+  calendarMode?: string;
+  limit?: number;
   presets?: Preset[];
   activePreset?: string | null;
-  limit?: number;
->>>>>>> Stashed changes
 };
 
 /** Per-view state every view renderer (Table/Board/…) reads from the shell. */
 export type SharedViewProps = {
   filterRoot: FilterGroup;
+  setFilterRoot: (g: FilterGroup) => void;
   sorts: SortRule[];
+  setSorts: (s: SortRule[]) => void;
   groupFieldId: string | null;
+  setGroupFieldId: (id: string | null) => void;
   hideEmpty: boolean;
   frozenUpTo: number;
   setFrozenUpTo: Dispatch<SetStateAction<number>>;
   calc: Record<string, string>;
   setCalc: Dispatch<SetStateAction<Record<string, string>>>;
   hidden: Set<string>;
+  limit: number;
   search: string;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
@@ -86,9 +109,23 @@ type SettingsPage =
 export function ViewShell({
   databaseId,
   view,
+  views,
+  activeId,
+  setActiveId,
+  search,
+  filterToMatches,
+  matchedIds,
+  flashId,
 }: {
   databaseId: string;
   view: View;
+  views: View[];
+  activeId: string;
+  setActiveId: (id: string) => void;
+  search: string;
+  filterToMatches: boolean;
+  matchedIds: Set<string> | null;
+  flashId: string | null;
 }) {
   const qc = useQueryClient();
   const cfg = (view.config ?? {}) as ViewConfig;
@@ -105,15 +142,6 @@ export function ViewShell({
   const [boardSubgroup, setBoardSubgroup] = useState<string | null>(
     cfg.boardSubgroup ?? null,
   );
-<<<<<<< Updated upstream
-
-  // Search (database-level, not persisted) + settings panel.
-  const [search, setSearch] = useState("");
-  const [scopeFieldId, setScopeFieldId] = useState<string | null>(null);
-  const [filterToMatches, setFilterToMatches] = useState(false);
-  const [flashId, setFlashId] = useState<string | null>(null);
-  const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
-=======
   const [ganttField, setGanttField] = useState<string | null>(cfg.ganttField ?? null);
   const [ganttScale, setGanttScale] = useState<GanttScale | null>(cfg.ganttScale ?? null);
   const [ganttLeftFields, setGanttLeftFields] = useState<string[]>(
@@ -125,32 +153,31 @@ export function ViewShell({
   const [ganttDateFormat, setGanttDateFormat] = useState<string>(
     cfg.ganttDateFormat ?? "locale",
   );
+  const [calendarField, setCalendarField] = useState<string | null>(
+    cfg.calendarField ?? null,
+  );
+  const [calendarMode, setCalendarMode] = useState<string>(cfg.calendarMode ?? "month");
   const [limit, setLimit] = useState<number>(cfg.limit ?? 10);
+
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
+  const [ganttToolbar, setGanttToolbar] = useState<HTMLDivElement | null>(null);
   const [presets, setPresets] = useState<Preset[]>(cfg.presets ?? []);
   const [activePreset, setActivePreset] = useState<string | null>(
     cfg.activePreset ?? null,
   );
   const [naming, setNaming] = useState(false);
   const [presetName, setPresetName] = useState("");
-  const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
-  const [ganttToolbar, setGanttToolbar] = useState<HTMLDivElement | null>(null);
   const [quick, setQuick] = useState<{
     kind: "filter" | "sort" | "group";
     x: number;
     y: number;
   } | null>(null);
->>>>>>> Stashed changes
 
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const rowsQ = useQuery<Row[]>({
-    queryKey: ["rows", databaseId],
-    queryFn: () => apiFetch<Row[]>(`/databases/${databaseId}/rows`),
-  });
   const fields = fieldsQ.data ?? [];
-  const rows = rowsQ.data ?? [];
 
   // Persist config (debounced). No views-query invalidation → no save→refetch loop.
   const saveView = useMutation({
@@ -176,17 +203,16 @@ export function ViewShell({
       hidden: [...hidden],
       boardField,
       boardSubgroup,
-<<<<<<< Updated upstream
-=======
       ganttField,
       ganttScale,
       ganttLeftFields,
       ganttColWidths,
       ganttDateFormat,
+      calendarField,
+      calendarMode,
+      limit,
       presets,
       activePreset,
-      limit,
->>>>>>> Stashed changes
     };
     const t = setTimeout(() => saveView.mutate(config), 600);
     return () => clearTimeout(t);
@@ -201,36 +227,17 @@ export function ViewShell({
     hidden,
     boardField,
     boardSubgroup,
-<<<<<<< Updated upstream
-=======
     ganttField,
     ganttScale,
     ganttLeftFields,
     ganttColWidths,
     ganttDateFormat,
+    calendarField,
+    calendarMode,
+    limit,
     presets,
     activePreset,
-    limit,
->>>>>>> Stashed changes
   ]);
-
-  // Search (over all rows; scope narrows to one field).
-  const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
-  const searchActive = search.trim().length > 0;
-  const searchFields =
-    scopeFieldId && byId[scopeFieldId] ? [byId[scopeFieldId]] : fields;
-  const hits = searchActive ? searchHits(rows, searchFields, search) : [];
-  const matchedIds = searchActive ? matchedRowIds(hits) : null;
-
-  function jumpToRow(id: string) {
-    setFlashId(id);
-    requestAnimationFrame(() =>
-      document
-        .querySelector(`[data-row-id="${id}"]`)
-        ?.scrollIntoView({ block: "center", behavior: "smooth" }),
-    );
-    setTimeout(() => setFlashId((f) => (f === id ? null : f)), 1500);
-  }
 
   // Sub-items toggle (creates/deletes the two self-relation fields).
   const hasSubItems = fields.some(
@@ -256,38 +263,25 @@ export function ViewShell({
 
   const shared: SharedViewProps = {
     filterRoot,
+    setFilterRoot,
     sorts,
+    setSorts,
     groupFieldId,
+    setGroupFieldId,
     hideEmpty,
     frozenUpTo,
     setFrozenUpTo,
     calc,
     setCalc,
     hidden,
+    limit,
     search,
     filterToMatches,
     matchedIds,
     flashId,
   };
 
-<<<<<<< Updated upstream
-  return (
-    <div className="space-y-3">
-      {/* Global toolbar: search + filter/sort chips + settings — on every view */}
-      <div className="flex items-center gap-1">
-        <div className="min-w-0 flex-1">
-          <SearchBar
-            fields={fields}
-            hits={hits}
-            scopeFieldId={scopeFieldId}
-            setScopeFieldId={setScopeFieldId}
-            query={search}
-            setQuery={setSearch}
-            filterToMatches={filterToMatches}
-            setFilterToMatches={setFilterToMatches}
-            onJump={jumpToRow}
-=======
-  // --- Quick View presets ---
+  // --- Quick View presets (named snapshots of filter/sort/group) ---
   const baseline = activePreset ? presets.find((p) => p.id === activePreset) : null;
   const baseCfg = baseline
     ? {
@@ -297,12 +291,7 @@ export function ViewShell({
         hideEmpty: baseline.hideEmpty,
       }
     : { filter: emptyGroup(), sorts: [], group: null, hideEmpty: false };
-  const curCfg = {
-    filter: filterRoot,
-    sorts,
-    group: groupFieldId,
-    hideEmpty,
-  };
+  const curCfg = { filter: filterRoot, sorts, group: groupFieldId, hideEmpty };
   const dirty = JSON.stringify(curCfg) !== JSON.stringify(baseCfg);
 
   function applyPreset(id: string | null) {
@@ -330,7 +319,7 @@ export function ViewShell({
     setNaming(false);
   }
 
-  // Group axis is board-field on a Board (its columns), row-group elsewhere.
+  // Group axis is the board-field on a Board (its columns), row-group elsewhere.
   const isBoard = view.type === "board";
   const grpId = isBoard ? boardField : groupFieldId;
   const setGrpId = isBoard ? setBoardField : setGroupFieldId;
@@ -346,10 +335,10 @@ export function ViewShell({
     }`;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 pt-3">
-      {/* Toolbar: Quick View (left) · Filter/Sort/Group + search + Customize (right).
-          Fixed height so opening the search bar doesn't shift the page down. */}
-      <div className="flex h-10 shrink-0 items-center gap-1">
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* Toolbar: Quick View preset (left) · gantt controls · search +
+          Filter/Sort/Group + Customize (right). */}
+      <div className="flex items-center gap-1">
         <div className="w-44 shrink-0">
           <Dropdown
             value={activePreset}
@@ -393,7 +382,7 @@ export function ViewShell({
           <div ref={setGanttToolbar} className="flex flex-wrap items-center gap-3" />
         )}
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex min-w-0 items-center gap-1">
           <button onClick={openQuick("filter")} className={quickCls(nRules > 0)}>
             <ListFilter className="size-4" />
             Filter{nRules > 0 ? ` · ${nRules}` : ""}
@@ -415,7 +404,6 @@ export function ViewShell({
               <RotateCcw className="size-4" /> Reset
             </button>
           )}
-          {searchSlot}
           <button
             onClick={() => setSettingsPage((p) => (p ? null : "main"))}
             title="Customize"
@@ -438,22 +426,13 @@ export function ViewShell({
                 top: quick.y,
                 left:
                   typeof window !== "undefined"
-                    ? Math.min(
-                        quick.x,
-                        window.innerWidth -
-                          (quick.kind === "filter" ? 540 : 360) -
-                          8,
-                      )
+                    ? Math.min(quick.x, window.innerWidth - (quick.kind === "filter" ? 540 : 360) - 8)
                     : quick.x,
                 width: quick.kind === "filter" ? 520 : quick.kind === "sort" ? 360 : 300,
               }}
             >
               {quick.kind === "filter" && (
-                <FilterGroupEditor
-                  group={filterRoot}
-                  fields={fields}
-                  onChange={setFilterRoot}
-                />
+                <FilterGroupEditor group={filterRoot} fields={fields} onChange={setFilterRoot} />
               )}
               {quick.kind === "sort" && (
                 <SortEditor fields={fields} sorts={sorts} setSorts={setSorts} />
@@ -472,121 +451,71 @@ export function ViewShell({
           document.body,
         )}
 
-      {/* Content + in-flow Customize panel (never covers the top bar) */}
-      <div className="flex min-h-0 flex-1 items-stretch gap-3">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {view.type === "board" ? (
-            <BoardView
-              databaseId={databaseId}
-              boardField={boardField}
-              boardSubgroup={boardSubgroup}
-              filterRoot={filterRoot}
-              sorts={sorts}
-              limit={limit}
-              hidden={hidden}
-              filterToMatches={filterToMatches}
-              matchedIds={matchedIds}
-            />
-          ) : view.type === "gantt" ? (
-            <GanttView
-              databaseId={databaseId}
-              ganttField={ganttField}
-              setGanttField={setGanttField}
-              ganttScale={ganttScale}
-              setGanttScale={setGanttScale}
-              ganttLeftFields={ganttLeftFields}
-              setGanttLeftFields={setGanttLeftFields}
-              ganttColWidths={ganttColWidths}
-              setGanttColWidths={setGanttColWidths}
-              ganttDateFormat={ganttDateFormat}
-              toolbarSlot={ganttToolbar}
-              filterRoot={filterRoot}
-              sorts={sorts}
-              limit={limit}
-              filterToMatches={filterToMatches}
-              matchedIds={matchedIds}
-            />
-          ) : (
-            <TableView databaseId={databaseId} {...shared} />
-          )}
-        </div>
-
-        {settingsPage && (
-          <SettingsSidebar
-            databaseId={databaseId}
-            viewId={view.id}
-            viewType={view.type}
-            activeId={activeId}
-            setActiveId={setActiveId}
-            fields={fields}
-            hidden={hidden}
-            setHidden={setHidden}
-            hasSubItems={hasSubItems}
-            onToggleSubItems={toggleSubItems}
-            boardField={boardField}
-            setBoardField={setBoardField}
-            boardSubgroup={boardSubgroup}
-            setBoardSubgroup={setBoardSubgroup}
-            ganttDateFormat={ganttDateFormat}
-            setGanttDateFormat={setGanttDateFormat}
-            limit={limit}
-            setLimit={setLimit}
-            filterRoot={filterRoot}
-            setFilterRoot={setFilterRoot}
-            sorts={sorts}
-            setSorts={setSorts}
-            groupFieldId={groupFieldId}
-            setGroupFieldId={setGroupFieldId}
-            hideEmpty={hideEmpty}
-            setHideEmpty={setHideEmpty}
-            initialPage={settingsPage}
-            onClose={() => setSettingsPage(null)}
->>>>>>> Stashed changes
-          />
-        </div>
-        {countRules(filterRoot) > 0 && (
-          <button
-            onClick={() => setSettingsPage("filter")}
-            className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-sm text-primary"
-          >
-            <ListFilter className="size-4" /> {countRules(filterRoot)}
-          </button>
-        )}
-        {sorts.length > 0 && (
-          <button
-            onClick={() => setSettingsPage("sort")}
-            className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-sm text-primary"
-          >
-            <ArrowUpDown className="size-4" /> {sorts.length}
-          </button>
-        )}
-        <button
-          onClick={() => setSettingsPage("main")}
-          title="Settings"
-          className="rounded-md px-2 py-1 text-sm hover:bg-muted"
-        >
-          <SlidersHorizontal className="size-4" />
-        </button>
-      </div>
-
+      <div
+        className={
+          view.type === "board"
+            ? "min-h-0 flex-1 overflow-auto"
+            : "flex min-h-0 flex-1 flex-col"
+        }
+      >
       {view.type === "board" ? (
         <BoardView
           databaseId={databaseId}
           boardField={boardField}
           boardSubgroup={boardSubgroup}
           filterRoot={filterRoot}
+          sorts={sorts}
+          limit={limit}
           hidden={hidden}
           filterToMatches={filterToMatches}
           matchedIds={matchedIds}
         />
+      ) : view.type === "gantt" ? (
+        <GanttView
+          databaseId={databaseId}
+          ganttField={ganttField}
+          setGanttField={setGanttField}
+          ganttScale={ganttScale}
+          setGanttScale={setGanttScale}
+          ganttLeftFields={ganttLeftFields}
+          setGanttLeftFields={setGanttLeftFields}
+          ganttColWidths={ganttColWidths}
+          setGanttColWidths={setGanttColWidths}
+          ganttDateFormat={ganttDateFormat}
+          toolbarSlot={ganttToolbar}
+          filterRoot={filterRoot}
+          sorts={sorts}
+          limit={limit}
+          filterToMatches={filterToMatches}
+          matchedIds={matchedIds}
+        />
+      ) : view.type === "calendar" ? (
+        <CalendarView
+          databaseId={databaseId}
+          calendarField={calendarField}
+          setCalendarField={setCalendarField}
+          calendarMode={calendarMode}
+          setCalendarMode={setCalendarMode}
+          filterRoot={filterRoot}
+          filterToMatches={filterToMatches}
+          matchedIds={matchedIds}
+        />
+      ) : view.type === "list" ? (
+        <ListView databaseId={databaseId} {...shared} />
+      ) : view.type === "gallery" ? (
+        <GalleryView databaseId={databaseId} {...shared} />
       ) : (
         <TableView databaseId={databaseId} {...shared} />
       )}
+      </div>
 
       {settingsPage && (
         <SettingsSidebar
           databaseId={databaseId}
           viewType={view.type}
+          views={views}
+          activeId={activeId}
+          setActiveId={setActiveId}
           fields={fields}
           hidden={hidden}
           setHidden={setHidden}
@@ -596,6 +525,10 @@ export function ViewShell({
           setBoardField={setBoardField}
           boardSubgroup={boardSubgroup}
           setBoardSubgroup={setBoardSubgroup}
+          ganttDateFormat={ganttDateFormat}
+          setGanttDateFormat={setGanttDateFormat}
+          limit={limit}
+          setLimit={setLimit}
           filterRoot={filterRoot}
           setFilterRoot={setFilterRoot}
           sorts={sorts}
@@ -604,6 +537,10 @@ export function ViewShell({
           setGroupFieldId={setGroupFieldId}
           hideEmpty={hideEmpty}
           setHideEmpty={setHideEmpty}
+          presets={presets}
+          setPresets={setPresets}
+          activePreset={activePreset}
+          setActivePreset={setActivePreset}
           initialPage={settingsPage}
           onClose={() => setSettingsPage(null)}
         />

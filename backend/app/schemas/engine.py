@@ -39,6 +39,10 @@ class RowUpdate(BaseModel):
     data: dict[str, Any]
 
 
+class BulkRowCreate(BaseModel):
+    count: int = PField(ge=1, le=100)
+
+
 class RowOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
