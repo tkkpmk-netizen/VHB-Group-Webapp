@@ -9,8 +9,8 @@ import type { SharedViewProps } from "@/components/table/view-shell";
 import {
   applyFilterTree,
   applySorts,
+  displayText,
   groupRows,
-  toText,
   type FilterGroup,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
@@ -108,7 +108,7 @@ export function GalleryView({
         {CHIP_TYPES.has(f.type) ? (
           <ValueChip field={f} value={Array.isArray(v) ? v[0] : v} />
         ) : (
-          <span className="truncate font-medium">{toText(f, v)}</span>
+          <span className="truncate font-medium">{displayText(f, v)}</span>
         )}
       </div>
     );
@@ -118,7 +118,7 @@ export function GalleryView({
     <div
       key={row.id}
       data-row-id={row.id}
-      className="group flex flex-col gap-2 rounded-xl border bg-card p-3 transition-shadow hover:shadow-md"
+      className="group flex min-h-32 flex-col gap-3 rounded-xl border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1 text-sm font-semibold">
@@ -137,7 +137,8 @@ export function GalleryView({
         <button
           onClick={() => deleteRow.mutate(row.id)}
           title="Delete"
-          className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+          aria-label="Delete row"
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-60 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
         >
           <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
         </button>
@@ -147,7 +148,7 @@ export function GalleryView({
   );
 
   const grid = (rs: Row[]) => (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))] gap-3">
       {rs.map(card)}
     </div>
   );
@@ -158,6 +159,10 @@ export function GalleryView({
         {fields.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">
             No columns yet.
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="flex h-full min-h-48 items-center justify-center rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+            No rows match this view.
           </div>
         ) : groups ? (
           <div className="space-y-4">

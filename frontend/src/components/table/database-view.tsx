@@ -81,8 +81,8 @@ export function DatabaseView({ databaseId }: { databaseId: string }) {
       {active ? (
         <>
           {/* Layout (tabs) row — search bar sits opposite, on the right. */}
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b">
-            <div className="min-w-0 overflow-x-auto">
+          <div className="flex shrink-0 flex-col gap-2 border-b pb-2 xl:flex-row xl:items-end xl:justify-between xl:pb-0">
+            <div className="min-w-0 overflow-x-auto pb-1 xl:pb-0">
               <ViewsBar
                 databaseId={databaseId}
                 views={views}
@@ -90,7 +90,7 @@ export function DatabaseView({ databaseId }: { databaseId: string }) {
                 setActiveId={setActiveId}
               />
             </div>
-            <div className="w-80 shrink-0 pb-1">
+            <div className="w-full shrink-0 xl:w-80 xl:pb-1">
               <SearchBar
                 fields={fields}
                 hits={hits}

@@ -376,8 +376,8 @@ export function GanttView({
           <div className="mb-2">{controls()}</div>
         )}
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-          Timeline cần một field ngày — <b>Date</b>, <b>Created time</b>,{" "}
-          <b>Last edited time</b>, hoặc <b>Formula</b> trả về ngày.
+          Timeline needs a date field: <b>Date</b>, <b>Created time</b>,{" "}
+          <b>Last edited time</b>, or a date-returning <b>Formula</b>.
         </div>
       </div>
     );
@@ -595,7 +595,7 @@ export function GanttView({
               style={{ height: HDR_H * 2 }}
             >
               <div className={`${colCls} flex items-center`} style={{ width: nameW }}>
-                {titleField?.name ?? "Tên"}
+                {titleField?.name ?? "Name"}
                 {resizeHandle(TITLE_KEY, nameW)}
               </div>
               <div
@@ -616,7 +616,7 @@ export function GanttView({
                     onClick={() =>
                       setGanttLeftFields(ganttLeftFields.filter((id) => id !== f.id))
                     }
-                    title="Bỏ cột"
+                    title="Remove column"
                     className="shrink-0 text-muted-foreground/60 hover:text-destructive"
                   >
                     ×
@@ -651,8 +651,8 @@ export function GanttView({
                   {span && (
                     <button
                       onClick={() => scrollToX(xOf(span.start))}
-                      title="Nhảy tới timeblock"
-                      className="shrink-0 text-muted-foreground/50 opacity-0 hover:text-primary group-hover:opacity-100"
+                      title="Jump to time block"
+                      className="shrink-0 rounded p-0.5 text-muted-foreground/60 transition hover:bg-primary/10 hover:text-primary"
                     >
                       <LocateFixed className="size-3.5" />
                     </button>
@@ -835,10 +835,10 @@ export function GanttView({
       {undatedRows.length > 0 && (
         <div className="mt-2 shrink-0 overflow-hidden rounded-xl border">
           <div className="border-b bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            Chưa có ngày ({undatedRows.length}) ·{" "}
+            Unscheduled ({undatedRows.length}) ·{" "}
             {editable
-              ? "click hoặc kéo trên timeline để đặt ngày"
-              : "field này không đặt ngày được"}
+              ? "click or drag on the timeline to set a date"
+              : "this field cannot be edited"}
           </div>
           <div
             ref={trayScrollRef}

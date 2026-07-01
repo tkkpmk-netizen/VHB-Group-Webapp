@@ -199,14 +199,22 @@ export function CalendarView({
 
   function header() {
     return (
-      <div className="flex shrink-0 items-center gap-3 pb-2">
-        <button onClick={() => step(-1)} className="rounded p-1 hover:bg-muted">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-2">
+        <button
+          onClick={() => step(-1)}
+          title="Previous period"
+          className="rounded p-1 hover:bg-muted"
+        >
           <ChevronLeft className="size-4" />
         </button>
-        <button onClick={() => step(1)} className="rounded p-1 hover:bg-muted">
+        <button
+          onClick={() => step(1)}
+          title="Next period"
+          className="rounded p-1 hover:bg-muted"
+        >
           <ChevronRight className="size-4" />
         </button>
-        <span className="text-base font-semibold">{headerTitle}</span>
+        <span className="min-w-28 text-base font-semibold">{headerTitle}</span>
         <button
           onClick={() => setAnchor(startOfDay(new Date()))}
           className="rounded-md border px-2.5 py-1 text-sm hover:bg-muted"
@@ -214,7 +222,7 @@ export function CalendarView({
           Today
         </button>
         {dateFields.length > 1 && (
-          <div className="w-40">
+          <div className="min-w-36 flex-1 sm:flex-none">
             <Dropdown
               value={field?.id ?? null}
               options={dateFields.map((f) => ({ value: f.id, label: f.name }))}
@@ -252,14 +260,14 @@ export function CalendarView({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Day headers */}
-        <div className="flex shrink-0 border-b pr-3">
+        <div className="flex shrink-0 border-b">
           <div className="w-14 shrink-0 text-center text-[11px] text-muted-foreground">
             {tzLabel}
           </div>
           {days.map((d) => {
             const today = sameDay(d, now);
             return (
-              <div key={+d} className="flex-1 py-1 text-center text-sm">
+              <div key={+d} className="min-w-0 flex-1 py-1 text-center text-sm">
                 <span className="text-muted-foreground">
                   {d.toLocaleDateString(undefined, { weekday: "short" })}{" "}
                 </span>
@@ -277,8 +285,8 @@ export function CalendarView({
           })}
         </div>
         {/* All-day row */}
-        <div className="flex shrink-0 border-b pr-3">
-          <div className="w-14 shrink-0 py-1 text-right text-[11px] text-muted-foreground pr-1">
+        <div className="flex shrink-0 border-b">
+          <div className="w-14 shrink-0 py-1 pr-1 text-right text-[11px] text-muted-foreground">
             All day
           </div>
           {days.map((d) => (
@@ -290,7 +298,7 @@ export function CalendarView({
                 if (ev) reschedule(ev, startOfDay(d));
                 setDragId(null);
               }}
-              className="min-h-[26px] flex-1 space-y-0.5 border-l px-1 py-0.5"
+              className="min-h-[26px] min-w-0 flex-1 space-y-0.5 border-l px-1 py-0.5"
             >
               {allDayForDay(d).map((ev) => (
                 <div
@@ -308,7 +316,7 @@ export function CalendarView({
         {/* Hour grid */}
         <div ref={attach} className="min-h-0 flex-1 overflow-auto">
           <div className="flex" style={{ height: 24 * HOUR_PX }}>
-            <div className="w-14 shrink-0">
+            <div className="relative w-14 shrink-0">
               {Array.from({ length: 24 }, (_, h) => (
                 <div
                   key={h}
@@ -320,6 +328,13 @@ export function CalendarView({
                   </span>
                 </div>
               ))}
+              {/* Current-time badge in the gutter */}
+              <span
+                className="absolute right-0.5 z-10 -translate-y-1/2 rounded bg-red-500 px-1 text-[10px] font-medium text-white"
+                style={{ top: (now.getHours() * 60 + now.getMinutes()) * (HOUR_PX / 60) }}
+              >
+                {now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+              </span>
             </div>
             {days.map((d) => {
               const today = sameDay(d, now);
@@ -339,7 +354,7 @@ export function CalendarView({
                     }
                     setDragId(null);
                   }}
-                  className="relative flex-1 border-l"
+                  className="relative min-w-0 flex-1 border-l"
                 >
                   {Array.from({ length: 24 }, (_, h) => (
                     <div
@@ -495,7 +510,7 @@ export function CalendarView({
               <div className="grid grid-cols-7 text-center text-xs">
                 {days.map((d) => {
                   const inMonth = d.getMonth() === mo;
-                  const today = sameDay(d, now);
+                  const today = inMonth && sameDay(d, now);
                   const has = eventDays.has(ymd(d));
                   return (
                     <button

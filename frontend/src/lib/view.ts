@@ -52,6 +52,28 @@ export function toText(field: Field, value: unknown): string {
   return String(value);
 }
 
+/** Human-friendly value for read-only display (List/Gallery): formats dates
+ *  (start → end, no raw ISO "T"); falls back to toText otherwise. */
+export function displayText(field: Field, value: unknown): string {
+  if (value == null || value === "") return "";
+  const fmtIso = (s?: string | null) => {
+    if (!s) return "";
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s;
+    return s.includes("T") ? d.toLocaleString() : d.toLocaleDateString();
+  };
+  if (field.type === "date") {
+    const o =
+      typeof value === "object"
+        ? (value as { start?: string; end?: string | null })
+        : { start: String(value), end: null };
+    return fmtIso(o.start) + (o.end ? ` → ${fmtIso(o.end)}` : "");
+  }
+  if (field.type === "created_time" || field.type === "last_edited_time")
+    return fmtIso(String(value));
+  return toText(field, value);
+}
+
 function toNum(value: unknown): number | null {
   if (typeof value === "number") return value;
   const n = Number(value);

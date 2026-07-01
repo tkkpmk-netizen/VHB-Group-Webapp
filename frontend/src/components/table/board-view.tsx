@@ -8,6 +8,7 @@ import { ValueChip } from "@/components/table/cell-editor";
 import {
   applyFilterTree,
   applySorts,
+  displayText,
   toText,
   type FilterGroup,
   type SortRule,
@@ -178,7 +179,7 @@ export function BoardView({
         key={r.id}
         draggable
         onDragStart={() => setDragRow(r.id)}
-        className="cursor-grab space-y-1.5 rounded-lg border bg-card p-2.5 shadow-sm active:cursor-grabbing"
+        className="cursor-grab space-y-2 rounded-lg border bg-card p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md active:cursor-grabbing"
       >
         <div className="text-sm font-medium">{cardTitle(r)}</div>
         {cardFields.map((f) => {
@@ -190,7 +191,7 @@ export function BoardView({
               {CHIP_TYPES.has(f.type) ? (
                 <ValueChip field={f} value={Array.isArray(v) ? v[0] : v} />
               ) : (
-                <span className="truncate">{String(v)}</span>
+                <span className="truncate">{displayText(f, v)}</span>
               )}
             </div>
           );
@@ -211,7 +212,7 @@ export function BoardView({
         key={`${sub?.key ?? ""}:${col.key}`}
         onDragOver={(e) => dragRow && e.preventDefault()}
         onDrop={() => dropOn(col, sub)}
-        className="flex max-h-[72vh] w-72 shrink-0 flex-col rounded-xl border bg-muted/30"
+        className="flex max-h-[calc(100vh-17rem)] min-h-56 w-72 shrink-0 flex-col rounded-xl border bg-muted/30"
       >
         <div className="flex items-center gap-2 px-3 py-2">
           {col.chip ? (
@@ -221,7 +222,12 @@ export function BoardView({
           )}
           <span className="text-xs text-muted-foreground">{cards.length}</span>
         </div>
-        <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+        <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2 [scrollbar-gutter:stable]">
+          {visible.length === 0 && (
+            <div className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+              Drop a card here or create a new one.
+            </div>
+          )}
           {visible.map((r) => renderCard(r))}
           {moreCount > 0 && (
             <button

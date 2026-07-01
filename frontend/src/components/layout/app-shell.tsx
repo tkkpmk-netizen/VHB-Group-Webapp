@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, ApiError } from "@/lib/api/client";
 import { clearToken, getToken } from "@/lib/auth";
@@ -27,10 +27,23 @@ const navItems = [
   { label: "Settings", icon: Settings, href: "/settings", enabled: false },
 ];
 
-function Sidebar({ workspaceName }: { workspaceName?: string }) {
+function Sidebar({
+  workspaceName,
+  onClose,
+}: {
+  workspaceName?: string;
+  onClose: () => void;
+}) {
   const pathname = usePathname();
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r bg-sidebar md:flex">
+    <>
+      <button
+        type="button"
+        aria-label="Đóng sidebar"
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-black/25 lg:hidden"
+      />
+      <aside className="fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 flex-col border-r bg-sidebar shadow-xl lg:static lg:z-auto lg:shadow-none">
       <div className="flex h-16 items-center gap-2 px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary font-bold text-primary-foreground">
           V
@@ -74,7 +87,8 @@ function Sidebar({ workspaceName }: { workspaceName?: string }) {
           );
         })}
       </nav>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -85,7 +99,7 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     router.push("/login");
   }
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b bg-card px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b bg-card px-3 sm:px-4 lg:px-6">
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleSidebar}
@@ -94,13 +108,13 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
         >
           <PanelLeft className="size-5" />
         </button>
-        <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-muted-foreground">
+        <div className="hidden items-center gap-2 rounded-lg bg-muted px-3 py-2 text-muted-foreground sm:flex">
           <Search className="size-4" />
           <span className="text-sm">Search…</span>
         </div>
       </div>
-      <div className="flex items-center gap-4">
-        <Bell className="size-5 text-muted-foreground" />
+      <div className="flex items-center gap-2 sm:gap-4">
+        <Bell className="hidden size-5 text-muted-foreground sm:block" />
         <div className="flex size-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
           VH
         </div>
@@ -110,7 +124,7 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
           className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted"
         >
           <LogOut className="size-4" />
-          Đăng xuất
+          <span className="hidden sm:inline">Đăng xuất</span>
         </button>
       </div>
     </header>
@@ -120,6 +134,16 @@ function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const compact = useSyncExternalStore(
+    (notify) => {
+      const media = window.matchMedia("(max-width: 1023px)");
+      media.addEventListener("change", notify);
+      return () => media.removeEventListener("change", notify);
+    },
+    () => window.matchMedia("(max-width: 1023px)").matches,
+    () => false,
+  );
 
   // Route guard: no token → straight to login.
   useEffect(() => {
@@ -142,10 +166,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      {!collapsed && <Sidebar workspaceName={workspace?.name} />}
+      {(compact ? mobileOpen : !collapsed) && (
+        <Sidebar
+          workspaceName={workspace?.name}
+          onClose={() => (compact ? setMobileOpen(false) : setCollapsed(true))}
+        />
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onToggleSidebar={() => setCollapsed((c) => !c)} />
-        <main className="flex min-h-0 flex-1 flex-col overflow-auto p-6">{children}</main>
+        <Topbar
+          onToggleSidebar={() =>
+            compact
+              ? setMobileOpen((open) => !open)
+              : setCollapsed((value) => !value)
+          }
+        />
+        <main className="flex min-h-0 flex-1 flex-col overflow-auto p-3 sm:p-4 lg:p-6">
+          {children}
+        </main>
       </div>
     </div>
   );

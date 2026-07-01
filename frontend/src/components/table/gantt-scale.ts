@@ -21,13 +21,13 @@ export const PERIODS: Record<
   GanttScale,
   { label: string; minor: Unit; major: Unit; dayPx: number; windowDays: number }
 > = {
-  hour: { label: "Giờ", minor: "hour", major: "day", dayPx: 1080, windowDays: 7 },
-  day: { label: "Ngày", minor: "day", major: "week", dayPx: 48, windowDays: 28 },
-  week: { label: "Tuần", minor: "week", major: "month", dayPx: 20, windowDays: 60 },
-  biweek: { label: "2 tuần", minor: "biweek", major: "month", dayPx: 12, windowDays: 60 },
-  month: { label: "Tháng", minor: "month", major: "quarter", dayPx: 6, windowDays: 120 },
-  quarter: { label: "Quý", minor: "quarter", major: "year", dayPx: 2.6, windowDays: 365 },
-  year: { label: "Năm", minor: "year", major: "year", dayPx: 1.2, windowDays: 730 },
+  hour: { label: "Hour", minor: "hour", major: "day", dayPx: 1080, windowDays: 7 },
+  day: { label: "Day", minor: "day", major: "week", dayPx: 48, windowDays: 28 },
+  week: { label: "Week", minor: "week", major: "month", dayPx: 20, windowDays: 60 },
+  biweek: { label: "2 weeks", minor: "biweek", major: "month", dayPx: 12, windowDays: 60 },
+  month: { label: "Month", minor: "month", major: "quarter", dayPx: 6, windowDays: 120 },
+  quarter: { label: "Quarter", minor: "quarter", major: "year", dayPx: 2.6, windowDays: 365 },
+  year: { label: "Year", minor: "year", major: "year", dayPx: 1.2, windowDays: 730 },
 };
 
 const startOfDay = (t: number) => {

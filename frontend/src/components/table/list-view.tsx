@@ -9,8 +9,8 @@ import type { SharedViewProps } from "@/components/table/view-shell";
 import {
   applyFilterTree,
   applySorts,
+  displayText,
   groupRows,
-  toText,
   type FilterGroup,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
@@ -106,8 +106,13 @@ export function ListView({
     if (CHIP_TYPES.has(f.type))
       return <ValueChip key={f.id} field={f} value={Array.isArray(v) ? v[0] : v} />;
     return (
-      <span key={f.id} className="truncate text-xs text-muted-foreground">
-        {toText(f, v)}
+      <span
+        key={f.id}
+        className="flex min-w-0 max-w-56 items-center gap-1 truncate text-xs"
+        title={`${f.name}: ${displayText(f, v)}`}
+      >
+        <span className="shrink-0 text-muted-foreground">{f.name}</span>
+        <span className="truncate font-medium">{displayText(f, v)}</span>
       </span>
     );
   };
@@ -116,7 +121,7 @@ export function ListView({
     <div
       key={row.id}
       data-row-id={row.id}
-      className="group flex items-center gap-3 border-b px-3 py-2 hover:bg-muted/40"
+      className="group flex min-h-11 items-center gap-3 border-b px-3 py-2 transition-colors hover:bg-muted/40"
     >
       {idField && (
         <span className="w-12 shrink-0 text-xs text-muted-foreground">
@@ -136,13 +141,14 @@ export function ListView({
           <span>#{row.seq}</span>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="hidden min-w-0 shrink items-center justify-end gap-3 md:flex">
         {propFields.map((f) => propCell(f, row))}
       </div>
       <button
         onClick={() => deleteRow.mutate(row.id)}
         title="Delete"
-        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        aria-label="Delete row"
+        className="shrink-0 rounded p-1 text-muted-foreground opacity-60 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
       >
         <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
       </button>
@@ -155,6 +161,10 @@ export function ListView({
         {fields.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">
             No columns yet.
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="flex h-full min-h-48 items-center justify-center p-8 text-center text-sm text-muted-foreground">
+            No rows match this view.
           </div>
         ) : groups ? (
           groups.map((g) => {
