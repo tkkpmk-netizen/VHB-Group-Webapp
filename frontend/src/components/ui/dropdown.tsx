@@ -43,6 +43,37 @@ function Panel({
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
+        ref={(node) => {
+          if (node)
+            queueMicrotask(() =>
+              node.querySelector<HTMLButtonElement>("button")?.focus(),
+            );
+        }}
+        role="listbox"
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onClose();
+            return;
+          }
+          if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+          e.preventDefault();
+          const buttons = Array.from(
+            e.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
+          );
+          if (!buttons.length) return;
+          const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          const next =
+            e.key === "Home"
+              ? 0
+              : e.key === "End"
+                ? buttons.length - 1
+                : e.key === "ArrowDown"
+                  ? Math.min(buttons.length - 1, Math.max(0, current + 1))
+                  : Math.max(0, current < 0 ? 0 : current - 1);
+          buttons[next]?.focus();
+        }}
         className="fixed z-50 max-h-64 overflow-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
         style={{ top: pos.y, left: Math.max(8, left), minWidth: Math.max(pos.w, 160) }}
       >
@@ -100,7 +131,14 @@ export function Dropdown({
 
   return (
     <>
-      <button ref={setBtn} type="button" onClick={openMenu} className={triggerCls}>
+      <button
+        ref={setBtn}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={openMenu}
+        className={triggerCls}
+      >
         <span className={wrap ? "break-words" : "truncate"}>
           {trigger ??
             (current ? (
@@ -112,7 +150,13 @@ export function Dropdown({
         <ChevronDown className="size-3.5 shrink-0 opacity-50" />
       </button>
       {open && (
-        <Panel pos={pos} onClose={() => setOpen(false)}>
+        <Panel
+          pos={pos}
+          onClose={() => {
+            setOpen(false);
+            queueMicrotask(() => ref.current?.focus());
+          }}
+        >
           {allowClear && (
             <button
               type="button"
@@ -188,7 +232,14 @@ export function MultiDropdown({
 
   return (
     <>
-      <button ref={setBtn} type="button" onClick={openMenu} className={triggerCls}>
+      <button
+        ref={setBtn}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={openMenu}
+        className={triggerCls}
+      >
         <span
           className={`flex items-center gap-1 ${
             wrap ? "flex-wrap" : "overflow-hidden"
@@ -203,7 +254,13 @@ export function MultiDropdown({
         <ChevronDown className="size-3.5 shrink-0 opacity-50" />
       </button>
       {open && (
-        <Panel pos={pos} onClose={() => setOpen(false)}>
+        <Panel
+          pos={pos}
+          onClose={() => {
+            setOpen(false);
+            queueMicrotask(() => ref.current?.focus());
+          }}
+        >
           {options.length === 0 && (
             <p className="px-2 py-1.5 text-sm text-muted-foreground">
               No options

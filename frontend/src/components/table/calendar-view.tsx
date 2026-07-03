@@ -1,13 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
 import { looksDate } from "@/components/table/gantt-scale";
 import { applyFilterTree, type FilterGroup } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
+import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
 type Row = components["schemas"]["RowOut"];
@@ -113,6 +115,12 @@ export function CalendarView({
   const [now] = useState(() => new Date());
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [dragId, setDragId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{
+    title: string;
+    value: { start: string; end: null };
+    x: number;
+    y: number;
+  } | null>(null);
   const gridScroll = useRef<HTMLDivElement>(null);
   const didScroll = useRef(false);
 
@@ -157,6 +165,56 @@ export function CalendarView({
         body: JSON.stringify({ data: { [field!.id]: value } }),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+  });
+  const createEvent = useMutation({
+    mutationFn: (d: NonNullable<typeof draft>) => {
+      const data: Record<string, unknown> = { [field!.id]: d.value };
+      if (titleField) data[titleField.id] = d.title.trim() || null;
+      return apiFetch<Row>(`/databases/${databaseId}/rows`, {
+        method: "POST",
+        body: JSON.stringify({ data }),
+      });
+    },
+    onSuccess: () => {
+      setDraft(null);
+      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+    },
+  });
+
+  function openDraft(
+    start: Date,
+    anchor: { clientX: number; clientY: number },
+    timed = false,
+  ) {
+    setDraft({
+      title: "",
+      value: { start: timed ? ymdhm(start) : ymd(start), end: null },
+      x: anchor.clientX,
+      y: anchor.clientY,
+    });
+  }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        e.key.toLowerCase() !== "n" ||
+        e.metaKey ||
+        e.ctrlKey ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable ||
+        !editable
+      )
+        return;
+      e.preventDefault();
+      openDraft(startOfDay(anchor), {
+        clientX: window.innerWidth / 2,
+        clientY: 160,
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   /** Move an event to a new start, keeping its duration. */
@@ -343,6 +401,18 @@ export function CalendarView({
               return (
                 <div
                   key={+d}
+                  onDoubleClick={(e) => {
+                    if (!editable || (e.target as HTMLElement).closest("[draggable]"))
+                      return;
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const mins =
+                      Math.round(((e.clientY - rect.top) / HOUR_PX) * 2) * 30;
+                    openDraft(
+                      new Date(+startOfDay(d) + mins * 60000),
+                      e,
+                      true,
+                    );
+                  }}
                   onDragOver={(e) => dragId && e.preventDefault()}
                   onDrop={(e) => {
                     const ev = events.find((x) => x.row.id === dragId);
@@ -442,20 +512,31 @@ export function CalendarView({
                   }
                   setDragId(null);
                 }}
-                className={`min-h-0 overflow-hidden border-b border-l p-1 ${
+                className={`group min-h-0 overflow-hidden border-b border-l p-1 ${
                   inMonth ? "" : "bg-muted/30"
                 }`}
               >
-                <div
-                  className={`mb-0.5 text-right text-xs ${
-                    today
-                      ? "inline-flex size-5 items-center justify-center rounded-full bg-red-500 font-medium text-white"
-                      : inMonth
-                        ? ""
-                        : "text-muted-foreground/50"
-                  }`}
-                >
-                  {d.getDate()}
+                <div className="mb-0.5 flex items-center justify-between">
+                  {editable && (
+                    <button
+                      onClick={(e) => openDraft(startOfDay(d), e)}
+                      title={`Create on ${d.toLocaleDateString()}`}
+                      className="rounded p-0.5 text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                    >
+                      <Plus className="size-3.5" />
+                    </button>
+                  )}
+                  <div
+                    className={`ml-auto text-right text-xs ${
+                      today
+                        ? "inline-flex size-5 items-center justify-center rounded-full bg-red-500 font-medium text-white"
+                        : inMonth
+                          ? ""
+                          : "text-muted-foreground/50"
+                    }`}
+                  >
+                    {d.getDate()}
+                  </div>
                 </div>
                 <div className="space-y-0.5">
                   {dayEvents.slice(0, 3).map((ev) => (
@@ -550,9 +631,66 @@ export function CalendarView({
   else body = yearGrid();
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <ViewQueryState
+        loading={fieldsQ.isLoading || rowsQ.isLoading}
+        error={fieldsQ.isError || rowsQ.isError}
+        onRetry={() => {
+          void fieldsQ.refetch();
+          void rowsQ.refetch();
+        }}
+      />
       {header()}
       {body}
+      {draft &&
+        createPortal(
+          <>
+            <button
+              aria-label="Cancel new event"
+              className="fixed inset-0 z-40"
+              onClick={() => setDraft(null)}
+            />
+            <div
+              className="fixed z-50 w-72 rounded-xl border bg-popover p-3 shadow-lg"
+              style={{
+                left:
+                  typeof window === "undefined"
+                    ? draft.x
+                    : Math.max(8, Math.min(draft.x, window.innerWidth - 304)),
+                top:
+                  typeof window === "undefined"
+                    ? draft.y
+                    : Math.max(8, Math.min(draft.y, window.innerHeight - 132)),
+              }}
+            >
+              <input
+                autoFocus
+                value={draft.title}
+                onChange={(e) =>
+                  setDraft((current) =>
+                    current ? { ...current, title: e.target.value } : current,
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    createEvent.mutate(draft);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setDraft(null);
+                  }
+                }}
+                placeholder="Event name"
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                <span>{draft.value.start.replace("T", " ")}</span>
+                <span>Enter to save · Esc to cancel</span>
+              </div>
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }

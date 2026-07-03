@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
@@ -14,6 +14,7 @@ import {
   type FilterGroup,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
+import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
 type Row = components["schemas"]["RowOut"];
@@ -42,6 +43,7 @@ export function GalleryView({
   const qc = useQueryClient();
   const [pages, setPages] = useState(0);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
 
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
@@ -58,7 +60,11 @@ export function GalleryView({
         method: "PATCH",
         body: JSON.stringify({ data }),
       }),
-    onSuccess: invalidate,
+    onSuccess: (created) => {
+      setEditingRowId(created.id);
+      setPages(Math.floor((rowsQ.data?.length ?? 0) / limit));
+      invalidate();
+    },
   });
   const addRow = useMutation({
     mutationFn: () =>
@@ -71,6 +77,25 @@ export function GalleryView({
   const deleteRow = useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/rows/${id}`, { method: "DELETE" }),
     onSuccess: invalidate,
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        e.key.toLowerCase() !== "n" ||
+        e.metaKey ||
+        e.ctrlKey ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      )
+        return;
+      e.preventDefault();
+      addRow.mutate();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   const fields = fieldsQ.data ?? [];
@@ -124,11 +149,14 @@ export function GalleryView({
         <div className="min-w-0 flex-1 text-sm font-semibold">
           {titleField ? (
             <CellEditor
+              key={editingRowId === row.id ? "edit" : "view"}
               field={titleField}
               value={(row.data as Record<string, unknown>)[titleField.id] ?? null}
               onCommit={(v) =>
                 updateCell.mutate({ rowId: row.id, data: { [titleField.id]: v } })
               }
+              autoEdit={editingRowId === row.id}
+              onFinish={() => setEditingRowId(null)}
             />
           ) : (
             <span>#{row.seq}</span>
@@ -154,7 +182,15 @@ export function GalleryView({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="relative flex h-full min-h-0 flex-col gap-3">
+      <ViewQueryState
+        loading={fieldsQ.isLoading || rowsQ.isLoading}
+        error={fieldsQ.isError || rowsQ.isError}
+        onRetry={() => {
+          void fieldsQ.refetch();
+          void rowsQ.refetch();
+        }}
+      />
       <div className="min-h-0 flex-1 overflow-auto">
         {fields.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">
@@ -213,9 +249,10 @@ export function GalleryView({
         <button
           onClick={() => addRow.mutate()}
           disabled={fields.length === 0 || addRow.isPending}
+          title="Create a new row (N)"
           className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
         >
-          <Plus className="size-4" /> New
+          <Plus className="size-4" /> New <kbd className="text-[10px] opacity-60">N</kbd>
         </button>
       </div>
     </div>

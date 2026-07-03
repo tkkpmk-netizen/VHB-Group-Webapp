@@ -1,7 +1,7 @@
 """Field + Row schemas for the database engine."""
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from pydantic import Field as PField
@@ -50,6 +50,39 @@ class RowOut(BaseModel):
     database_id: uuid.UUID
     data: dict[str, Any]
     seq: int
+
+
+class RowFilter(BaseModel):
+    field_id: str
+    operator: Literal["eq", "neq", "contains", "gt", "gte", "lt", "lte", "is_empty", "is_not_empty"]
+    value: Any = None
+
+
+class RowSort(BaseModel):
+    field_id: str
+    direction: Literal["asc", "desc"] = "asc"
+
+
+class RowAggregation(BaseModel):
+    field_id: str
+    function: Literal["count", "sum", "avg", "min", "max"]
+
+
+class RowQuery(BaseModel):
+    page: int = PField(default=1, ge=1)
+    page_size: int = PField(default=50, ge=1, le=200)
+    filters: list[RowFilter] = PField(default_factory=list, max_length=20)
+    sorts: list[RowSort] = PField(default_factory=list, max_length=5)
+    aggregations: list[RowAggregation] = PField(default_factory=list, max_length=20)
+
+
+class RowPage(BaseModel):
+    items: list[RowOut]
+    page: int
+    page_size: int
+    total: int
+    pages: int
+    aggregates: dict[str, Any] = PField(default_factory=dict)
 
 
 class ReorderRequest(BaseModel):

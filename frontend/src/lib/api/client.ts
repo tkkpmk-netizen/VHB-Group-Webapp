@@ -6,6 +6,21 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const WORKSPACE_KEY = "vhb_workspace_id";
+
+export function getWorkspaceId(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(WORKSPACE_KEY);
+}
+
+export function selectWorkspace(workspaceId: string): void {
+  window.localStorage.setItem(WORKSPACE_KEY, workspaceId);
+}
+
+export function clearWorkspaceSelection(): void {
+  window.localStorage.removeItem(WORKSPACE_KEY);
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -22,12 +37,14 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const { getToken } = await import("@/lib/auth");
   const token = getToken();
+  const workspaceId = getWorkspaceId();
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(workspaceId ? { "X-Workspace-ID": workspaceId } : {}),
       ...init?.headers,
     },
   });

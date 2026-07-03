@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Plus } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
-import { ValueChip } from "@/components/table/cell-editor";
+import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import {
   applyFilterTree,
   applySorts,
@@ -14,6 +14,7 @@ import {
   type SortRule,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
+import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
 type Row = components["schemas"]["RowOut"];
@@ -90,6 +91,7 @@ export function BoardView({
 }) {
   const qc = useQueryClient();
   const [dragRow, setDragRow] = useState<string | null>(null);
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
   // Per-column "load more" clicks, keyed by swimlane:column.
   const [colPages, setColPages] = useState<Record<string, number>>({});
 
@@ -134,12 +136,47 @@ export function BoardView({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
   });
   const addCard = useMutation({
-    mutationFn: (data: Record<string, unknown>) =>
+    mutationFn: ({
+      data,
+    }: {
+      data: Record<string, unknown>;
+      pageKey: string;
+    }) =>
       apiFetch<Row>(`/databases/${databaseId}/rows`, {
         method: "POST",
         body: JSON.stringify({ data }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: (created, variables) => {
+      setEditingRowId(created.id);
+      setColPages((pages) => ({
+        ...pages,
+        [variables.pageKey]: Math.ceil(((rowsQ.data?.length ?? 0) + 1) / limit),
+      }));
+      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+    },
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        e.key.toLowerCase() !== "n" ||
+        e.metaKey ||
+        e.ctrlKey ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable ||
+        !field
+      )
+        return;
+      e.preventDefault();
+      const col = columnsFor(field, rows)[0];
+      const data: Record<string, unknown> = {};
+      if (!NON_SETTABLE.has(field.type)) data[field.id] = col.value;
+      addCard.mutate({ data, pageKey: `:${col.key}` });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   if (!field)
@@ -177,11 +214,26 @@ export function BoardView({
   const renderCard = (r: Row) => (
       <div
         key={r.id}
-        draggable
+        draggable={editingRowId !== r.id}
         onDragStart={() => setDragRow(r.id)}
         className="cursor-grab space-y-2 rounded-lg border bg-card p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md active:cursor-grabbing"
       >
-        <div className="text-sm font-medium">{cardTitle(r)}</div>
+        <div className="text-sm font-medium">
+          {titleField ? (
+            <CellEditor
+              key={editingRowId === r.id ? "edit" : "view"}
+              field={titleField}
+              value={(r.data as Record<string, unknown>)[titleField.id] ?? null}
+              onCommit={(value) =>
+                save.mutate({ rowId: r.id, data: { [titleField.id]: value } })
+              }
+              autoEdit={editingRowId === r.id}
+              onFinish={() => setEditingRowId(null)}
+            />
+          ) : (
+            cardTitle(r)
+          )}
+        </div>
         {cardFields.map((f) => {
           const v = (r.data as Record<string, unknown>)[f.id];
           if (isEmpty(v)) return null;
@@ -221,6 +273,15 @@ export function BoardView({
             <span className="text-sm text-muted-foreground">{col.label}</span>
           )}
           <span className="text-xs text-muted-foreground">{cards.length}</span>
+          <button
+            onClick={() =>
+              addCard.mutate({ data: placement(col, sub), pageKey: pgKey })
+            }
+            title={`Create in ${col.label}`}
+            className="ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Plus className="size-3.5" />
+          </button>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2 [scrollbar-gutter:stable]">
           {visible.length === 0 && (
@@ -240,7 +301,9 @@ export function BoardView({
             </button>
           )}
           <button
-            onClick={() => addCard.mutate(placement(col, sub))}
+            onClick={() =>
+              addCard.mutate({ data: placement(col, sub), pageKey: pgKey })
+            }
             className="flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
           >
             <Plus className="size-3.5" /> New
@@ -251,7 +314,15 @@ export function BoardView({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="relative min-h-40 space-y-4">
+      <ViewQueryState
+        loading={fieldsQ.isLoading || rowsQ.isLoading}
+        error={fieldsQ.isError || rowsQ.isError}
+        onRetry={() => {
+          void fieldsQ.refetch();
+          void rowsQ.refetch();
+        }}
+      />
       {swimlanes.map((sub) => (
         <div key={sub?.key ?? "all"} className="space-y-2">
           {sub && (

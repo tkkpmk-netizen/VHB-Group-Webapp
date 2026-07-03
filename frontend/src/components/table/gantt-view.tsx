@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
-import { ValueChip } from "@/components/table/cell-editor";
+import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import {
   PERIODS,
   applyDrag,
@@ -30,6 +30,7 @@ import {
   type SortRule,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
+import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
 type Row = components["schemas"]["RowOut"];
@@ -188,6 +189,7 @@ export function GanttView({
   const [extBefore, setExtBefore] = useState(0); // window extensions (earlier)
   const [extAfter, setExtAfter] = useState(0); // window extensions (later)
   const [edges, setEdges] = useState({ left: false, right: false });
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>(() => ({
     ...ganttColWidths,
   }));
@@ -251,7 +253,30 @@ export function GanttView({
         method: "POST",
         body: JSON.stringify({ data: {} }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: (created) => {
+      setEditingRowId(created.id);
+      setPages(Math.floor((rowsQ.data?.length ?? 0) / limit));
+      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+    },
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        e.key.toLowerCase() !== "n" ||
+        e.metaKey ||
+        e.ctrlKey ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      )
+        return;
+      e.preventDefault();
+      addRow.mutate();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   const fields = fieldsQ.data ?? [];
@@ -570,6 +595,14 @@ export function GanttView({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
+      <ViewQueryState
+        loading={fieldsQ.isLoading || rowsQ.isLoading}
+        error={fieldsQ.isError || rowsQ.isError}
+        onRetry={() => {
+          void fieldsQ.refetch();
+          void rowsQ.refetch();
+        }}
+      />
       {toolbarSlot ? (
         createPortal(controls(scrollToToday), toolbarSlot)
       ) : (
@@ -646,7 +679,26 @@ export function GanttView({
                   style={{ width: nameW }}
                 >
                   <span className="min-w-0 flex-1 truncate" title={title(r)}>
-                    {title(r)}
+                    {titleField ? (
+                      <CellEditor
+                        key={editingRowId === r.id ? "edit" : "view"}
+                        field={titleField}
+                        value={
+                          (r.data as Record<string, unknown>)[titleField.id] ?? null
+                        }
+                        onCommit={(value) =>
+                          save.mutate({
+                            rowId: r.id,
+                            fieldId: titleField.id,
+                            value,
+                          })
+                        }
+                        autoEdit={editingRowId === r.id}
+                        onFinish={() => setEditingRowId(null)}
+                      />
+                    ) : (
+                      title(r)
+                    )}
                   </span>
                   {span && (
                     <button
@@ -825,9 +877,10 @@ export function GanttView({
         )}
         <button
           onClick={() => addRow.mutate()}
+          title="Create a new row and edit its name"
           className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted"
         >
-          <Plus className="size-4" /> New
+          <Plus className="size-4" /> New <kbd className="text-[10px] opacity-60">N</kbd>
         </button>
       </div>
 
@@ -862,7 +915,27 @@ export function GanttView({
                         style={{ width: nameW }}
                         title={title(r)}
                       >
-                        {title(r)}
+                        {titleField ? (
+                          <CellEditor
+                            key={editingRowId === r.id ? "edit" : "view"}
+                            field={titleField}
+                            value={
+                              (r.data as Record<string, unknown>)[titleField.id] ??
+                              null
+                            }
+                            onCommit={(value) =>
+                              save.mutate({
+                                rowId: r.id,
+                                fieldId: titleField.id,
+                                value,
+                              })
+                            }
+                            autoEdit={editingRowId === r.id}
+                            onFinish={() => setEditingRowId(null)}
+                          />
+                        ) : (
+                          title(r)
+                        )}
                       </div>
                       <div
                         className={`${colCls} flex items-center text-xs ${

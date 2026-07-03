@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, ChevronLeft, ChevronRight, ExternalLink, Star } from "lucide-react";
@@ -118,6 +118,8 @@ type CellProps = {
   onCommit: (value: unknown) => void;
   /** When the cell is double-click-activated, text/number/phone open their input. */
   autoEdit?: boolean;
+  /** Called after a keyboard/mouse editing session ends. */
+  onFinish?: (move?: "down" | "next" | "previous") => void;
 };
 
 type NumberOptions = {
@@ -193,12 +195,14 @@ function formatOne(field: Field, s: string): string {
   return out;
 }
 
-function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
+function TextCell({ field, value, onCommit, autoEdit, onFinish }: CellProps) {
   // autoEdit cells remount via key when activated, so initial state is enough.
   const [editing, setEditing] = useState(autoEdit ?? false);
   const [local, setLocal] = useState(
     autoEdit && typeof value === "string" ? value : "",
   );
+  const canceled = useRef(false);
+  const move = useRef<"down" | "next" | "previous" | undefined>(undefined);
   const multiline = field.type === "long_text";
   const inputType =
     field.type === "email" ? "email" : field.type === "url" ? "url" : "text";
@@ -206,7 +210,37 @@ function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
   if (editing) {
     const commit = () => {
       setEditing(false);
+      if (canceled.current) {
+        canceled.current = false;
+        onFinish?.();
+        return;
+      }
       onCommit(local === "" ? null : local);
+      onFinish?.(move.current);
+      move.current = undefined;
+    };
+    const onKeyDown = (
+      e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+    ) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        canceled.current = true;
+        setEditing(false);
+        onFinish?.();
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        move.current = e.shiftKey ? "previous" : "next";
+        e.currentTarget.blur();
+        return;
+      }
+      if (e.key === "Enter" && !(multiline && e.shiftKey)) {
+        e.preventDefault();
+        move.current = "down";
+        e.currentTarget.blur();
+      }
     };
     return multiline ? (
       <textarea
@@ -214,18 +248,28 @@ function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
         rows={2}
         value={local}
         onChange={(e) => setLocal(e.target.value)}
+        onKeyDown={onKeyDown}
         onBlur={commit}
         className={inputCls}
       />
     ) : (
-      <input
-        autoFocus
-        type={inputType}
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-        onBlur={commit}
-        className={inputCls}
-      />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          move.current = "down";
+          commit();
+        }}
+      >
+        <input
+          autoFocus
+          type={inputType}
+          value={local}
+          onChange={(e) => setLocal(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={commit}
+          className={inputCls}
+        />
+      </form>
     );
   }
 
@@ -261,26 +305,56 @@ function TextCell({ field, value, onCommit, autoEdit }: CellProps) {
   );
 }
 
-function NumberCell({ field, value, onCommit, autoEdit }: CellProps) {
+function NumberCell({ field, value, onCommit, autoEdit, onFinish }: CellProps) {
   const [editing, setEditing] = useState(autoEdit ?? false);
   const [local, setLocal] = useState(
     autoEdit && value != null ? String(value) : "",
   );
+  const canceled = useRef(false);
+  const move = useRef<"down" | "next" | "previous" | undefined>(undefined);
   if (editing) {
     return (
-      <input
-        autoFocus
-        type="text"
-        inputMode="decimal"
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-        onBlur={() => {
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          move.current = "down";
+          e.currentTarget.querySelector("input")?.blur();
+        }}
+      >
+        <input
+          autoFocus
+          type="text"
+          inputMode="decimal"
+          value={local}
+          onChange={(e) => setLocal(e.target.value)}
+          onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            canceled.current = true;
+            setEditing(false);
+            onFinish?.();
+          } else if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            move.current =
+              e.key === "Enter" ? "down" : e.shiftKey ? "previous" : "next";
+            e.currentTarget.blur();
+          }
+          }}
+          onBlur={() => {
           setEditing(false);
+          if (canceled.current) {
+            canceled.current = false;
+            return;
+          }
           const n = Number(local);
           onCommit(local === "" || Number.isNaN(n) ? null : n);
-        }}
-        className={inputCls}
-      />
+          onFinish?.(move.current);
+          move.current = undefined;
+          }}
+          className={inputCls}
+        />
+      </form>
     );
   }
   return (
@@ -609,11 +683,13 @@ function RatingCell({ value, onCommit }: CellProps) {
   );
 }
 
-function PhoneCell({ field, value, onCommit, autoEdit }: CellProps) {
+function PhoneCell({ field, value, onCommit, autoEdit, onFinish }: CellProps) {
   const [editing, setEditing] = useState(autoEdit ?? false);
   const parsed = parsePhone(typeof value === "string" ? value : "");
   const [dial, setDial] = useState(parsed.dial);
   const [num, setNum] = useState(parsed.number);
+  const canceled = useRef(false);
+  const move = useRef<"down" | "next" | "previous" | undefined>(undefined);
 
   function join(d: string, n: string): string | null {
     const v = `${d ? d + " " : ""}${n}`.trim();
@@ -638,7 +714,14 @@ function PhoneCell({ field, value, onCommit, autoEdit }: CellProps) {
   }
 
   return (
-    <div className="flex items-center gap-1 px-1 py-0.5">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        move.current = "down";
+        e.currentTarget.querySelector("input")?.blur();
+      }}
+      className="flex items-center gap-1 px-1 py-0.5"
+    >
       <div className="w-24 shrink-0">
         <Dropdown
           value={dial || null}
@@ -656,7 +739,25 @@ function PhoneCell({ field, value, onCommit, autoEdit }: CellProps) {
         type="tel"
         value={num}
         onChange={(e) => setNum(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            canceled.current = true;
+            setEditing(false);
+            onFinish?.();
+          } else if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            move.current =
+              e.key === "Enter" ? "down" : e.shiftKey ? "previous" : "next";
+            e.currentTarget.blur();
+          }
+        }}
         onBlur={() => {
+          if (canceled.current) {
+            canceled.current = false;
+            return;
+          }
           let d = dial;
           let n = num.trim();
           if (n.startsWith("+") || !dial) {
@@ -670,10 +771,12 @@ function PhoneCell({ field, value, onCommit, autoEdit }: CellProps) {
           setNum(n);
           onCommit(join(d, n));
           setEditing(false);
+          onFinish?.(move.current);
+          move.current = undefined;
         }}
         className={inputCls}
       />
-    </div>
+    </form>
   );
 }
 
@@ -799,29 +902,59 @@ function TimeCell({ field, value }: CellProps) {
   return <div className={`${displayCls(field)} text-muted-foreground`}>{text}</div>;
 }
 
-function ProgressCell({ value, onCommit, autoEdit }: CellProps) {
+function ProgressCell({ value, onCommit, autoEdit, onFinish }: CellProps) {
   const [editing, setEditing] = useState(autoEdit ?? false);
   const [local, setLocal] = useState(
     autoEdit && value != null ? String(value) : "",
   );
+  const canceled = useRef(false);
+  const move = useRef<"down" | "next" | "previous" | undefined>(undefined);
   const n = typeof value === "number" ? value : 0;
   if (editing) {
     return (
-      <input
-        autoFocus
-        type="text"
-        inputMode="numeric"
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-        onBlur={() => {
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          move.current = "down";
+          e.currentTarget.querySelector("input")?.blur();
+        }}
+      >
+        <input
+          autoFocus
+          type="text"
+          inputMode="numeric"
+          value={local}
+          onChange={(e) => setLocal(e.target.value)}
+          onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            canceled.current = true;
+            setEditing(false);
+            onFinish?.();
+          } else if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            move.current =
+              e.key === "Enter" ? "down" : e.shiftKey ? "previous" : "next";
+            e.currentTarget.blur();
+          }
+          }}
+          onBlur={() => {
           setEditing(false);
+          if (canceled.current) {
+            canceled.current = false;
+            return;
+          }
           const x = Number(local);
           onCommit(
             local === "" || Number.isNaN(x) ? null : Math.max(0, Math.min(100, x)),
           );
-        }}
-        className={inputCls}
-      />
+          onFinish?.(move.current);
+          move.current = undefined;
+          }}
+          className={inputCls}
+        />
+      </form>
     );
   }
   return (
@@ -839,7 +972,13 @@ function ProgressCell({ value, onCommit, autoEdit }: CellProps) {
   );
 }
 
-export function CellEditor({ field, value, onCommit, autoEdit }: CellProps) {
+export function CellEditor({
+  field,
+  value,
+  onCommit,
+  autoEdit,
+  onFinish,
+}: CellProps) {
   if (field.type === "checkbox") {
     return (
       <input
@@ -852,7 +991,13 @@ export function CellEditor({ field, value, onCommit, autoEdit }: CellProps) {
   }
   if (field.type === "number")
     return (
-      <NumberCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+      <NumberCell
+        field={field}
+        value={value}
+        onCommit={onCommit}
+        autoEdit={autoEdit}
+        onFinish={onFinish}
+      />
     );
   if (field.type === "rating")
     return <RatingCell field={field} value={value} onCommit={onCommit} />;
@@ -870,7 +1015,13 @@ export function CellEditor({ field, value, onCommit, autoEdit }: CellProps) {
     );
   if (field.type === "phone")
     return (
-      <PhoneCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+      <PhoneCell
+        field={field}
+        value={value}
+        onCommit={onCommit}
+        autoEdit={autoEdit}
+        onFinish={onFinish}
+      />
     );
   if (field.type === "country")
     return (
@@ -888,7 +1039,13 @@ export function CellEditor({ field, value, onCommit, autoEdit }: CellProps) {
     );
   if (field.type === "progress")
     return (
-      <ProgressCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+      <ProgressCell
+        field={field}
+        value={value}
+        onCommit={onCommit}
+        autoEdit={autoEdit}
+        onFinish={onFinish}
+      />
     );
   if (field.type === "created_time" || field.type === "last_edited_time")
     return <TimeCell field={field} value={value} onCommit={onCommit} />;
@@ -896,7 +1053,13 @@ export function CellEditor({ field, value, onCommit, autoEdit }: CellProps) {
     return <UserCell field={field} value={value} onCommit={onCommit} />;
   if (TEXT_TYPES.has(field.type))
     return (
-      <TextCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+      <TextCell
+        field={field}
+        value={value}
+        onCommit={onCommit}
+        autoEdit={autoEdit}
+        onFinish={onFinish}
+      />
     );
 
   return <span className="px-2 text-sm text-muted-foreground">—</span>;

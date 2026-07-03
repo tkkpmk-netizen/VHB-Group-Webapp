@@ -38,6 +38,18 @@ core rule—FastAPI-owned, workspace-scoped authorization—still applies.
 - On 2026-07-01, all six database views received responsive shared-toolbar/sidebar
   polish plus view-specific Board/List/Gallery/Calendar/Timeline UX fixes; frontend
   typecheck, lint, 16 tests, production build, and browser QA passed.
+- `PRODUCTION_PLAN.md` is now the active roadmap. Foundation F2.1 (Space/Folder
+  resource tree and optional `Database.folder_id`) shipped on 2026-07-02 with
+  migrations and workspace-isolation tests.
+- Foundation F3 (authorization v2) and F4 (bounded server-side row queries)
+  shipped on 2026-07-02. The next production slices are F5 object storage and
+  F6 durable jobs.
+- Foundation F5 uses an S3-compatible `ObjectStorage` interface with local
+  MinIO. F6 uses PostgreSQL durable jobs with leases, `SKIP LOCKED`, retry
+  backoff, idempotency keys, and the `python -m app.worker` process.
+- F7–F9 add immutable audit/outbox events, Redis-backed JWT sessions and auth
+  rate limits, readiness/Prometheus metrics, production secret validation,
+  backup scripts, and GitHub CI.
 
 ## Non-Negotiable UX Rules
 
@@ -64,12 +76,14 @@ core rule—FastAPI-owned, workspace-scoped authorization—still applies.
 ## Commands
 
 ```bash
-cd docker && docker compose up -d db
+cd docker && docker compose up -d db minio minio-init redis
 cd backend && uv run pytest && uv run ruff check . && uv run mypy app
 cd frontend && pnpm test && pnpm typecheck && pnpm lint && pnpm build
 ```
 
 Backend dev: `cd backend && uv run uvicorn app.main:app --reload`
+
+Worker dev: `cd backend && uv run python -m app.worker`
 
 Frontend dev: `cd frontend && pnpm dev`
 

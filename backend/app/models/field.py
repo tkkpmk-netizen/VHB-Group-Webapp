@@ -66,9 +66,7 @@ class RowLink(Base, TimestampMixin):
 
     __tablename__ = "row_links"
     __table_args__ = (
-        UniqueConstraint(
-            "field_id", "source_row_id", "target_row_id", name="uq_row_link"
-        ),
+        UniqueConstraint("field_id", "source_row_id", "target_row_id", name="uq_row_link"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)

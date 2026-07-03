@@ -27,6 +27,14 @@ const TYPES: { value: ViewType; label: string; icon: typeof Table }[] = [
   { value: "gantt", label: "Timeline", icon: GanttChart },
 ];
 const iconFor = (t: ViewType) => TYPES.find((x) => x.value === t)?.icon ?? Table;
+const shortcutFor: Partial<Record<ViewType, string>> = {
+  table: "T",
+  board: "B",
+  list: "L",
+  calendar: "C",
+  gallery: "G",
+  gantt: "Y",
+};
 
 export function ViewsBar({
   databaseId,
@@ -131,7 +139,9 @@ export function ViewsBar({
             }}
             onClick={() => setActiveId(v.id)}
             onDoubleClick={() => setRenaming({ id: v.id, name: v.name })}
-            title="Click để mở · double-click đổi tên · kéo để sắp xếp"
+            title={`Open · double-click to rename · drag to reorder${
+              shortcutFor[v.type] ? ` · ${shortcutFor[v.type]}` : ""
+            }`}
             className={`mb-[-1px] flex cursor-grab items-center gap-1.5 border-b-2 px-2 py-1.5 text-sm active:cursor-grabbing ${
               active
                 ? "border-primary font-medium text-foreground"

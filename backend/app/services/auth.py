@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
+from app.models.resource import Space
 from app.models.user import User
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
 from app.schemas.auth import SignupRequest
@@ -35,20 +36,15 @@ async def create_user(db: AsyncSession, payload: SignupRequest) -> User:
     workspace = Workspace(name=ws_name)
     db.add(workspace)
     await db.flush()
-    db.add(
-        WorkspaceMember(
-            workspace_id=workspace.id, user_id=user.id, role=MemberRole.owner
-        )
-    )
+    db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role=MemberRole.owner))
+    db.add(Space(workspace_id=workspace.id, name="General", order=0))
 
     await db.commit()
     await db.refresh(user)
     return user
 
 
-async def authenticate_user(
-    db: AsyncSession, email: str, password: str
-) -> User | None:
+async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:
     user = await get_user_by_email(db, email)
     if user is None or not verify_password(password, user.hashed_password):
         return None

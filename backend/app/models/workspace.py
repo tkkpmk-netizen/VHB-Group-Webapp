@@ -11,6 +11,10 @@ from app.db.base import Base, TimestampMixin, new_uuid
 
 class MemberRole(enum.StrEnum):
     owner = "owner"
+    admin = "admin"
+    editor = "editor"
+    viewer = "viewer"
+    # Kept for migration compatibility. New memberships should use editor.
     member = "member"
 
 
@@ -27,9 +31,7 @@ class Workspace(Base, TimestampMixin):
 
 class WorkspaceMember(Base, TimestampMixin):
     __tablename__ = "workspace_members"
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_user"),
-    )
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_user"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
     workspace_id: Mapped[uuid.UUID] = mapped_column(

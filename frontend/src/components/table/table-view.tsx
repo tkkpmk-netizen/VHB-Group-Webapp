@@ -1,8 +1,14 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import type { InfiniteData } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
@@ -19,9 +25,11 @@ import { countryByCode, parsePhone } from "@/lib/countries";
 import { applyFilterTree, applySorts, groupRows } from "@/lib/view";
 import type { SharedViewProps } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
+import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
 type Row = components["schemas"]["RowOut"];
+type RowPage = components["schemas"]["RowPage"];
 type Db = components["schemas"]["DatabaseOut"];
 
 const FIELD_TYPES: { value: string; label: string; choices: boolean }[] = [
@@ -218,7 +226,6 @@ export function TableView({
   flashId,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
-  const [pages, setPages] = useState(0); // "load more" clicks (flat list only)
   const [adding, setAdding] = useState(false);
   const [addAnchor, setAddAnchor] = useState<{ x: number; y: number } | null>(
     null,
@@ -258,10 +265,45 @@ export function TableView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const rowsQ = useQuery<Row[]>({
-    queryKey: ["rows", databaseId],
-    queryFn: () => apiFetch<Row[]>(`/databases/${databaseId}/rows`),
+  const pageSize = Math.min(Math.max(limit, 1), 200);
+  const rowsQueryKey = ["rows", databaseId, "infinite", pageSize] as const;
+  const rowsQ = useInfiniteQuery<RowPage>({
+    queryKey: rowsQueryKey,
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      apiFetch<RowPage>(`/databases/${databaseId}/rows/query`, {
+        method: "POST",
+        body: JSON.stringify({ page: pageParam, page_size: pageSize }),
+      }),
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined,
   });
+  const rowItems = useMemo(
+    () => rowsQ.data?.pages.flatMap((page) => page.items) ?? [],
+    [rowsQ.data?.pages],
+  );
+  const totalRows = rowsQ.data?.pages[0]?.total ?? 0;
+
+  function updateCachedRows(
+    transform: (rows: Row[]) => Row[],
+    totalDelta = 0,
+  ) {
+    qc.setQueryData<InfiniteData<RowPage>>(rowsQueryKey, (current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        pages: current.pages.map((page) => {
+          const total = Math.max(0, page.total + totalDelta);
+          return {
+            ...page,
+            total,
+            pages: Math.ceil(total / page.page_size),
+            items: transform(page.items),
+          };
+        }),
+      };
+    });
+  }
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["fields", databaseId] });
@@ -298,7 +340,32 @@ export function TableView({
         method: "POST",
         body: JSON.stringify({ data: {} }),
       }),
-    onSuccess: invalidate,
+    onSuccess: (created) => {
+      const title = (fieldsQ.data ?? []).find((f) =>
+        ["text", "long_text"].includes(f.type),
+      );
+      if (title) setEditCell(`${created.id}:${title.id}`);
+      invalidate();
+    },
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        e.key.toLowerCase() !== "n" ||
+        e.metaKey ||
+        e.ctrlKey ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      )
+        return;
+      e.preventDefault();
+      addRow.mutate();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   const bulkAdd = useMutation({
@@ -313,7 +380,10 @@ export function TableView({
   const deleteRow = useMutation({
     mutationFn: (id: string) =>
       apiFetch<void>(`/rows/${id}`, { method: "DELETE" }),
-    onSuccess: invalidate,
+    onSuccess: (_, id) => {
+      updateCachedRows((rows) => rows.filter((row) => row.id !== id), -1);
+      qc.invalidateQueries({ queryKey: ["rows-search", databaseId] });
+    },
   });
 
   const updateCell = useMutation({
@@ -322,7 +392,12 @@ export function TableView({
         method: "PATCH",
         body: JSON.stringify({ data }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: (updated) => {
+      updateCachedRows((rows) =>
+        rows.map((row) => (row.id === updated.id ? updated : row)),
+      );
+      qc.invalidateQueries({ queryKey: ["rows-search", databaseId] });
+    },
   });
 
   const bulkDelete = useMutation({
@@ -339,7 +414,7 @@ export function TableView({
 
   const duplicateRows = useMutation({
     mutationFn: async (ids: string[]) => {
-      const byId = new Map((rowsQ.data ?? []).map((r) => [r.id, r.data]));
+      const byId = new Map(rowItems.map((r) => [r.id, r.data]));
       for (const id of ids) {
         await apiFetch<Row>(`/databases/${databaseId}/rows`, {
           method: "POST",
@@ -425,7 +500,7 @@ export function TableView({
       : undefined;
 
   function handleRowClick(idx: number, id: string, shift: boolean) {
-    const rs = rowsQ.data ?? [];
+    const rs = rowItems;
     if (shift && anchor !== null) {
       const [lo, hi] = anchor <= idx ? [anchor, idx] : [idx, anchor];
       setSelected(new Set(rs.slice(lo, hi + 1).map((r) => r.id)));
@@ -443,7 +518,7 @@ export function TableView({
       if (!((e.ctrlKey || e.metaKey) && e.shiftKey)) return;
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       e.preventDefault();
-      const rs = rowsQ.data ?? [];
+      const rs = rowItems;
       if (!rs.length) return;
       const a = anchor ?? 0;
       const cur = cursor ?? a;
@@ -458,7 +533,7 @@ export function TableView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [anchor, cursor, rowsQ.data]);
+  }, [anchor, cursor, rowItems]);
 
   const reorderFields = useMutation({
     mutationFn: (ids: string[]) =>
@@ -504,7 +579,7 @@ export function TableView({
   }
 
   const fields = fieldsQ.data ?? [];
-  const rows = rowsQ.data ?? [];
+  const rows = rowItems;
   const choiceType = ["select", "multi_select"].includes(fType);
 
   // View tools: filter → sort → search → optional group.
@@ -524,8 +599,6 @@ export function TableView({
   if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
   const displayFields = fields.filter((f) => !hidden.has(f.id));
   const calcFields = displayFields.filter((f) => calc[f.id]);
-  // Pagination window (flat list only): render first N rows, reveal more.
-  const shown = limit * (pages + 1);
   const subOwner = fields.find(
     (f) =>
       (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
@@ -638,16 +711,57 @@ export function TableView({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      )
+        return;
       if (e.key === "Escape") {
         setRange(null);
         setEditCell(null);
         return;
       }
+      if (range) {
+        const row = range.r2;
+        const col = range.c2;
+        const move =
+          e.key === "ArrowDown"
+            ? [1, 0]
+            : e.key === "ArrowUp"
+              ? [-1, 0]
+              : e.key === "ArrowRight" || (e.key === "Tab" && !e.shiftKey)
+                ? [0, 1]
+                : e.key === "ArrowLeft" || (e.key === "Tab" && e.shiftKey)
+                  ? [0, -1]
+                  : null;
+        if (move) {
+          e.preventDefault();
+          const nr = Math.max(0, Math.min(visible.length - 1, row + move[0]));
+          const nc = Math.max(
+            0,
+            Math.min(displayFields.length - 1, col + move[1]),
+          );
+          setRange({ r1: nr, c1: nc, r2: nr, c2: nc });
+          setEditCell(null);
+          return;
+        }
+        if (e.key === "Enter") {
+          const r = visible[row];
+          const f = displayFields[col];
+          if (r && f && f.type !== "unique_id") {
+            e.preventDefault();
+            setEditCell(`${r.id}:${f.id}`);
+          }
+          return;
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C") && range) {
         const tag = document.activeElement?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
         e.preventDefault();
-        const rs = rowsQ.data ?? [];
+        const rs = rowItems;
         const fs = fieldsQ.data ?? [];
         const [r1, r2] = [
           Math.min(range.r1, range.r2),
@@ -671,7 +785,33 @@ export function TableView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [range, rowsQ.data, fieldsQ.data]);
+  }, [range, rowItems, fieldsQ.data, visible, displayFields]);
+
+  function finishCell(
+    rowIdx: number,
+    colIdx: number,
+    move?: "down" | "next" | "previous",
+  ) {
+    setEditCell(null);
+    if (!move || visible.length === 0 || displayFields.length === 0) return;
+    let nr = rowIdx;
+    let nc = colIdx;
+    if (move === "down") nr = Math.min(visible.length - 1, rowIdx + 1);
+    else if (move === "next") {
+      nc += 1;
+      if (nc >= displayFields.length) {
+        nc = 0;
+        nr = Math.min(visible.length - 1, rowIdx + 1);
+      }
+    } else {
+      nc -= 1;
+      if (nc < 0) {
+        nc = displayFields.length - 1;
+        nr = Math.max(0, rowIdx - 1);
+      }
+    }
+    setRange({ r1: nr, c1: nc, r2: nr, c2: nc });
+  }
 
   function toggleExpand(id: string) {
     setExpanded((p) => {
@@ -786,6 +926,7 @@ export function TableView({
                       value={(row.data as Record<string, unknown>)[f.id] ?? null}
                       onCommit={(v) => commitCell(row, f, v)}
                       autoEdit={isEditing}
+                      onFinish={(move) => finishCell(idx, colIdx, move)}
                     />
                   )}
                   {/* 1st click selects; click on the already-selected cell or
@@ -860,7 +1001,15 @@ export function TableView({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="relative flex h-full min-h-0 flex-col gap-3">
+      <ViewQueryState
+        loading={fieldsQ.isLoading || rowsQ.isLoading}
+        error={fieldsQ.isError || rowsQ.isError}
+        onRetry={() => {
+          void fieldsQ.refetch();
+          void rowsQ.refetch();
+        }}
+      />
       {/* Add field popover */}
       {adding &&
         addAnchor &&
@@ -1098,10 +1247,10 @@ export function TableView({
             </tr>
           </thead>
           <tbody>
-            {treeMode && renderTree(topLevel.slice(0, shown), 0, { i: -1 })}
+            {treeMode && renderTree(topLevel, 0, { i: -1 })}
             {!treeMode &&
               !groups &&
-              visible.slice(0, shown).map((row, idx) => renderRow(row, idx))}
+              visible.map((row, idx) => renderRow(row, idx))}
             {!treeMode &&
               groups &&
               groupFieldId &&
@@ -1157,26 +1306,38 @@ export function TableView({
 
       {/* Action bar — pinned below the table (always visible). */}
       <div className="flex shrink-0 items-center gap-2">
-        {!groups && shown < (treeMode ? topLevel.length : visible.length) && (
+        {rowsQ.hasNextPage && (
           <button
-            onClick={() => setPages((p) => p + 1)}
-            className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10"
+            type="button"
+            onClick={() => rowsQ.fetchNextPage()}
+            disabled={rowsQ.isFetchingNextPage}
+            className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
           >
-            <ChevronDown className="size-4" /> Load more (
-            {(treeMode ? topLevel.length : visible.length) - shown} left)
+            <ChevronDown
+              className={`size-4 ${rowsQ.isFetchingNextPage ? "animate-bounce" : ""}`}
+            />
+            {rowsQ.isFetchingNextPage
+              ? "Loading…"
+              : `Load more (${Math.max(totalRows - rowItems.length, 0)} left)`}
           </button>
         )}
         <button
           onClick={() => addRow.mutate()}
           disabled={fields.length === 0 || addRow.isPending}
+          title="Create a new row (N)"
           className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
         >
-          <Plus className="size-4" /> New
+          <Plus className="size-4" /> New <kbd className="text-[10px] opacity-60">N</kbd>
         </button>
         <BulkAddRows
           disabled={fields.length === 0 || bulkAdd.isPending}
           onAdd={(n) => bulkAdd.mutate(n)}
         />
+        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            Showing {rowItems.length} of {totalRows} records
+          </span>
+        </div>
       </div>
 
       {/* Calculate summary — below the action bar; bold results for calc'd columns. */}

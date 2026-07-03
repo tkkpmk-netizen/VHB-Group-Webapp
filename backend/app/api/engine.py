@@ -4,8 +4,8 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import Float, String, cast, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -25,6 +25,8 @@ from app.schemas.engine import (
     ReorderRequest,
     RowCreate,
     RowOut,
+    RowPage,
+    RowQuery,
     RowUpdate,
 )
 from app.services.engine import (
@@ -63,9 +65,7 @@ async def _list_fields(db: AsyncSession, database_id: uuid.UUID) -> list[Field]:
     return list(result.scalars().all())
 
 
-async def _inject_relations(
-    db: AsyncSession, fields: list[Field], rows: list[Row]
-) -> None:
+async def _inject_relations(db: AsyncSession, fields: list[Field], rows: list[Row]) -> None:
     """Populate each relation field's value (list of linked row ids) per row."""
     rel_fields = [f for f in fields if f.type == FieldType.relation]
     if not rel_fields or not rows:
@@ -98,9 +98,7 @@ async def _inject_relations(
             r.data = {**r.data, str(f.id): m.get(r.id, [])}
 
 
-async def _sync_relation(
-    db: AsyncSession, field: Field, row: Row, target_ids: Any
-) -> None:
+async def _sync_relation(db: AsyncSession, field: Field, row: Row, target_ids: Any) -> None:
     ids: list[uuid.UUID] = []
     for t in target_ids or []:
         try:
@@ -111,22 +109,16 @@ async def _sync_relation(
     if opts.get("mirror"):
         owner = uuid.UUID(opts["owner_field_id"])
         await db.execute(
-            delete(RowLink).where(
-                RowLink.field_id == owner, RowLink.target_row_id == row.id
-            )
+            delete(RowLink).where(RowLink.field_id == owner, RowLink.target_row_id == row.id)
         )
         for sid in ids:
             db.add(RowLink(field_id=owner, source_row_id=sid, target_row_id=row.id))
     else:
         await db.execute(
-            delete(RowLink).where(
-                RowLink.field_id == field.id, RowLink.source_row_id == row.id
-            )
+            delete(RowLink).where(RowLink.field_id == field.id, RowLink.source_row_id == row.id)
         )
         for tid in ids:
-            db.add(
-                RowLink(field_id=field.id, source_row_id=row.id, target_row_id=tid)
-            )
+            db.add(RowLink(field_id=field.id, source_row_id=row.id, target_row_id=tid))
 
 
 def _split_relation(
@@ -165,9 +157,7 @@ def _aggregate(func: str, values: list[Any]) -> Any:
     return len(values)  # count
 
 
-async def _inject_rollups(
-    db: AsyncSession, fields: list[Field], rows: list[Row]
-) -> None:
+async def _inject_rollups(db: AsyncSession, fields: list[Field], rows: list[Row]) -> None:
     """Compute rollup fields. Requires _inject_relations to have run first."""
     rollups = [f for f in fields if f.type == FieldType.rollup]
     if not rollups or not rows:
@@ -186,9 +176,7 @@ async def _inject_rollups(
         all_ids = {i for ids in per_row.values() for i in ids}
         tmap: dict[str, Row] = {}
         if all_ids:
-            res = await db.execute(
-                select(Row).where(Row.id.in_([uuid.UUID(i) for i in all_ids]))
-            )
+            res = await db.execute(select(Row).where(Row.id.in_([uuid.UUID(i) for i in all_ids])))
             tmap = {str(tr.id): tr for tr in res.scalars().all()}
         for r in rows:
             values: list[Any] = []
@@ -219,9 +207,7 @@ def _inject_formulas(fields: list[Field], rows: list[Row]) -> None:
 def _inject_system(fields: list[Field], rows: list[Row]) -> None:
     """Read-only timestamp fields, reflected live from Row.created_at/updated_at."""
     sys_fields = [
-        f
-        for f in fields
-        if f.type in (FieldType.created_time, FieldType.last_edited_time)
+        f for f in fields if f.type in (FieldType.created_time, FieldType.last_edited_time)
     ]
     if not sys_fields or not rows:
         return
@@ -236,9 +222,7 @@ def _apply_auto_by(
 ) -> None:
     """Stamp created_by (on insert) and last_edited_by (insert + update) into data."""
     for f in fields:
-        if f.type is FieldType.last_edited_by or (
-            created and f.type is FieldType.created_by
-        ):
+        if f.type is FieldType.last_edited_by or (created and f.type is FieldType.created_by):
             cleaned[str(f.id)] = user_id
 
 
@@ -255,10 +239,7 @@ async def formula_preview(
     await _scoped_database(database_id, workspace, db)
     fields = await _list_fields(db, database_id)
     res = await db.execute(
-        select(Row)
-        .where(Row.database_id == database_id)
-        .order_by(Row.order, Row.seq)
-        .limit(1)
+        select(Row).where(Row.database_id == database_id).order_by(Row.order, Row.seq).limit(1)
     )
     rows = list(res.scalars().all())
     await _inject_relations(db, fields, rows)
@@ -365,11 +346,7 @@ async def enable_sub_items(
     """Create a two-way self-relation: 'Sub-item' (owner) + 'Parent item' (mirror)."""
     await _scoped_database(database_id, workspace, db)
     existing = await _list_fields(db, database_id)
-    if any(
-        f.type == FieldType.relation
-        and (f.options or {}).get("sub_item")
-        for f in existing
-    ):
+    if any(f.type == FieldType.relation and (f.options or {}).get("sub_item") for f in existing):
         raise HTTPException(status.HTTP_409_CONFLICT, "Sub-items already enabled")
     order = (max((f.order for f in existing), default=0)) + 1
     owner = Field(
@@ -463,6 +440,8 @@ async def reorder_fields(
 @router.get("/databases/{database_id}/rows", response_model=list[RowOut])
 async def list_rows(
     database_id: uuid.UUID,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=200),
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> list[Row]:
@@ -471,6 +450,8 @@ async def list_rows(
         select(Row)
         .where(Row.database_id == database_id)
         .order_by(Row.order, Row.seq)
+        .offset(offset)
+        .limit(limit)
     )
     rows = list(result.scalars().all())
     fields = await _list_fields(db, database_id)
@@ -486,6 +467,110 @@ async def list_rows(
     return rows
 
 
+def _field_expression(field_id: str, fields: dict[str, Field]) -> Any:
+    if field_id == "seq":
+        return Row.seq
+    if field_id == "order":
+        return Row.order
+    field = fields.get(field_id)
+    if field is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Unknown query field: {field_id}",
+        )
+    text_expr = Row.data[field_id].astext
+    if field.type in {FieldType.number, FieldType.rating, FieldType.progress}:
+        return cast(func.nullif(text_expr, ""), Float)
+    return cast(text_expr, String)
+
+
+@router.post(
+    "/databases/{database_id}/rows/query",
+    response_model=RowPage,
+)
+async def query_rows(
+    database_id: uuid.UUID,
+    payload: RowQuery,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> RowPage:
+    """Bounded server-side filtering, sorting, pagination and aggregation."""
+    await _scoped_database(database_id, workspace, db)
+    fields = await _list_fields(db, database_id)
+    field_map = {str(field.id): field for field in fields}
+    conditions: list[Any] = [Row.database_id == database_id]
+
+    for filter_item in payload.filters:
+        expression = _field_expression(filter_item.field_id, field_map)
+        if filter_item.operator == "eq":
+            conditions.append(expression == filter_item.value)
+        elif filter_item.operator == "neq":
+            conditions.append(expression != filter_item.value)
+        elif filter_item.operator == "contains":
+            conditions.append(cast(expression, String).ilike(f"%{filter_item.value}%"))
+        elif filter_item.operator == "gt":
+            conditions.append(expression > filter_item.value)
+        elif filter_item.operator == "gte":
+            conditions.append(expression >= filter_item.value)
+        elif filter_item.operator == "lt":
+            conditions.append(expression < filter_item.value)
+        elif filter_item.operator == "lte":
+            conditions.append(expression <= filter_item.value)
+        elif filter_item.operator == "is_empty":
+            conditions.append(expression.is_(None) | (cast(expression, String) == ""))
+        else:
+            conditions.append(expression.is_not(None) & (cast(expression, String) != ""))
+
+    total = int(await db.scalar(select(func.count()).select_from(Row).where(*conditions)) or 0)
+    order_by: list[Any] = []
+    for sort_item in payload.sorts:
+        expression = _field_expression(sort_item.field_id, field_map)
+        order_by.append(
+            expression.desc().nullslast()
+            if sort_item.direction == "desc"
+            else expression.asc().nullslast()
+        )
+    if not order_by:
+        order_by = [Row.order.asc(), Row.seq.asc()]
+
+    result = await db.execute(
+        select(Row)
+        .where(*conditions)
+        .order_by(*order_by)
+        .offset((payload.page - 1) * payload.page_size)
+        .limit(payload.page_size)
+    )
+    rows = list(result.scalars())
+    for row in rows:
+        db.expunge(row)
+    await _inject_relations(db, fields, rows)
+    await _inject_rollups(db, fields, rows)
+    _inject_formulas(fields, rows)
+    _inject_system(fields, rows)
+
+    aggregates: dict[str, Any] = {}
+    for aggregation_item in payload.aggregations:
+        expression = _field_expression(aggregation_item.field_id, field_map)
+        aggregate = {
+            "count": func.count(expression),
+            "sum": func.sum(expression),
+            "avg": func.avg(expression),
+            "min": func.min(expression),
+            "max": func.max(expression),
+        }[aggregation_item.function]
+        value = await db.scalar(select(aggregate).select_from(Row).where(*conditions))
+        aggregates[f"{aggregation_item.function}:{aggregation_item.field_id}"] = value
+
+    return RowPage(
+        items=rows,
+        page=payload.page,
+        page_size=payload.page_size,
+        total=total,
+        pages=(total + payload.page_size - 1) // payload.page_size,
+        aggregates=aggregates,
+    )
+
+
 async def _validate(
     db: AsyncSession, database_id: uuid.UUID, data: dict[str, Any]
 ) -> dict[str, Any]:
@@ -493,9 +578,7 @@ async def _validate(
     try:
         return validate_row_data(fields, data)
     except CellValidationError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)
-        ) from exc
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
 
 @router.post(
@@ -517,14 +600,10 @@ async def create_row(
     _apply_auto_by(fields, cleaned, str(current_user.id), created=True)
     next_seq = (
         await db.scalar(
-            select(func.coalesce(func.max(Row.seq), 0)).where(
-                Row.database_id == database_id
-            )
+            select(func.coalesce(func.max(Row.seq), 0)).where(Row.database_id == database_id)
         )
     ) or 0
-    row = Row(
-        database_id=database_id, data=cleaned, seq=next_seq + 1, order=next_seq + 1
-    )
+    row = Row(database_id=database_id, data=cleaned, seq=next_seq + 1, order=next_seq + 1)
     db.add(row)
     await db.flush()
     for fid, ids in rel.items():
@@ -555,18 +634,14 @@ async def bulk_create_rows(
     fields = await _list_fields(db, database_id)
     base = (
         await db.scalar(
-            select(func.coalesce(func.max(Row.seq), 0)).where(
-                Row.database_id == database_id
-            )
+            select(func.coalesce(func.max(Row.seq), 0)).where(Row.database_id == database_id)
         )
     ) or 0
     created: list[Row] = []
     for i in range(payload.count):
         data: dict[str, Any] = {}
         _apply_auto_by(fields, data, str(current_user.id), created=True)
-        row = Row(
-            database_id=database_id, data=data, seq=base + i + 1, order=base + i + 1
-        )
+        row = Row(database_id=database_id, data=data, seq=base + i + 1, order=base + i + 1)
         db.add(row)
         created.append(row)
     await db.commit()
@@ -635,9 +710,7 @@ async def reorder_rows(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await _scoped_database(database_id, workspace, db)
-    result = await db.execute(
-        select(Row).where(Row.database_id == database_id)
-    )
+    result = await db.execute(select(Row).where(Row.database_id == database_id))
     rows = {r.id: r for r in result.scalars().all()}
     for index, rid in enumerate(payload.ids):
         row = rows.get(rid)

@@ -5,6 +5,109 @@ Changelog gộp, mới nhất ở trên. (Trước đây tách thành `CHANGELOG
 
 ---
 
+## 2026-07-03 — Database export reliability
+
+- Sửa lỗi export XLSX/CSV với JSONB như date range, list và object lồng nhau.
+- Chặn spreadsheet formula injection từ dữ liệu người dùng.
+- Development API tự chạy durable worker để export không treo ở `queued`.
+- Tải file qua link trực tiếp thay cho popup bất đồng bộ và bổ sung cảnh báo
+  khi background processing phản hồi chậm.
+
+---
+
+## 2026-07-03 — Core Functions 1/2, F1 and U4
+
+- Đổi thuật ngữ `Core Mini Apps` thành `Core Functions`.
+- Core 1: CSV/XLSX import/export qua object storage và durable jobs, có UI Database.
+- Core 2: Block Documents dùng BlockNote, autosave và optimistic versioning.
+- Hoàn tất F1 bằng modular composition registry cho backend/frontend.
+- Hoàn tất U4 bằng loading/error/retry states dùng chung cho sáu Database views.
+
+---
+
+## 2026-07-02 — Foundation F7/F8/F9 production hardening
+
+Trạng thái: backend ruff/mypy/44 tests ✓ · Alembic head `c7e9a1b3d5f6` ✓ ·
+Redis/session/readiness/metrics/outbox smoke tests ✓.
+
+- F7: immutable audit trail, transactional outbox, admin audit API và worker publisher.
+- F8: Redis JWT session registry, immediate logout revoke và auth rate limiting.
+- F9: production secret validation, request IDs, request metrics, readiness,
+  backup/restore scripts và GitHub Actions CI.
+- Thêm Redis 7.4 persistent service và ADR 0004.
+
+---
+
+## 2026-07-02 — Foundation F5/F6: storage and durable jobs
+
+Trạng thái: backend ruff/mypy/39 tests ✓ · Alembic head `b6d8f0a2c4e5` ✓ ·
+MinIO health/smoke test ✓ · worker smoke test ✓.
+
+- Thêm S3-compatible ObjectStorage abstraction và MinIO local.
+- Thêm asset metadata, presigned upload/download, verify/list/delete APIs.
+- Thêm PostgreSQL durable jobs với lease, retry backoff và idempotency.
+- Worker claim bằng `FOR UPDATE SKIP LOCKED`; chạy độc lập qua
+  `uv run python -m app.worker`.
+- Thêm Job APIs, `system.noop` và `asset.verify` handlers.
+- Thêm migration, Docker services, env config và ADR 0003.
+
+---
+
+## 2026-07-02 — Smooth Table incremental loading
+
+- Khôi phục UX `Load more`, nhưng dùng server-side infinite query và append page
+  vào cache thay vì thay toàn bộ bảng.
+- Giữ nguyên rows đã tải và vị trí scroll trong lúc tải page tiếp theo.
+- Không tải dataset search thứ hai khi search chưa được sử dụng.
+- Inline cell update và delete cập nhật cache tại chỗ, tránh refetch toàn bộ pages.
+- Browser QA với 75 rows: 10 → 20 rows, counter và remaining count cập nhật đúng.
+
+---
+
+## 2026-07-02 — ClickUp-style UI foundation
+
+Trạng thái: frontend typecheck/lint/16 test/build ✓ · browser QA desktop ✓.
+
+- Thay app shell bằng app rail, workspace switcher và Space/Folder/Database tree.
+- Thêm UI quản trị People/Roles theo workspace và database-level Share grants.
+- Thêm trang quản lý Spaces/Databases, tạo Space/Folder/Database trực tiếp.
+- Table view chuyển sang F4 server pagination, hiển thị record/page count.
+- Đồng bộ token màu, typography, density, focus states và database chrome.
+- Tạm dừng F5/F6 cho đến khi hoàn tất và duyệt UI modernization gate.
+
+---
+
+## 2026-07-02 — Production foundation: authorization and queries
+
+Trạng thái: backend ruff/mypy/34 test ✓ · Alembic head `a5c7e9f1b3d4` ✓ ·
+frontend typecheck/lint/16 test/build ✓.
+
+- F3: explicit workspace selection, workspace roles, member management và
+  database-level grants.
+- F4: bounded row pagination, filter, multi-sort và aggregation phía PostgreSQL.
+- API client frontend lưu workspace selection và gửi `X-Workspace-ID`.
+- Regenerate OpenAPI types và thêm integration tests cho tenancy, ACL và queries.
+
+---
+
+## 2026-07-02 — Production foundation: resource tree
+
+Trạng thái: backend ruff/mypy/30 test ✓ · Alembic head `9a4b2c6d8e1f` ✓ ·
+frontend typecheck/lint/16 test/build ✓.
+
+### Production roadmap
+- Thêm `PRODUCTION_PLAN.md` làm roadmap hiện hành; `PLAN.md` giữ vai trò lịch sử MVP.
+- Chốt modular monolith + worker, tách business data khỏi platform resources.
+
+### Workspace resources
+- Thêm model/API `Space` và nested `Folder`, luôn scope theo workspace.
+- `Database.folder_id` nullable: database cũ tiếp tục nằm ở workspace root.
+- Signup mới tự tạo space `General`; migration data tạo `General` cho workspace hiện có.
+- Chặn parent khác space, self-parent và folder cycle.
+- Regenerate frontend OpenAPI types.
+
+---
+
 ## 2026-07-01 — Database views UI/UX responsive polish
 
 Trạng thái: frontend typecheck/lint/16 test/build ✓ · QA trực tiếp desktop + viewport 900px ✓.
