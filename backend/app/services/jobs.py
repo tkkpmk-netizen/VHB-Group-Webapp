@@ -14,6 +14,7 @@ SUPPORTED_JOB_TYPES = {
     "asset.verify",
     "database.import",
     "database.export",
+    "notification.email",
 }
 
 

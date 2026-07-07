@@ -37,6 +37,7 @@ class FieldType(enum.StrEnum):
     created_by = "created_by"  # auto, set to creator on insert
     last_edited_time = "last_edited_time"  # auto, read-only = Row.updated_at
     last_edited_by = "last_edited_by"  # auto, set to editor on insert+update
+    files = "files"  # Google Drive-backed attachment metadata
 
 
 class Field(Base, TimestampMixin):

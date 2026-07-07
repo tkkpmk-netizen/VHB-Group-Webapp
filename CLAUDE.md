@@ -3,9 +3,9 @@
 ## Project
 
 VHB Group's internal B2B trading/export super app, intended to replace a mature
-Notion business hub and a lightly used ClickUp setup. The current priority is the
-Notion-style dynamic database engine; tasks, docs, design tools, realtime, storage,
-and deployment are later epics.
+Notion business hub and a lightly used ClickUp setup. Foundation F1–F9, UI
+modernization U1–U4, and Core Functions CM1–CM7 are complete. The next product
+phase is Site/Web Designer and publishing.
 
 ## Current Architecture
 
@@ -14,14 +14,12 @@ and deployment are later epics.
 | Frontend | Next.js **16.2.9**, React 19, TypeScript, Tailwind 4, shadcn/Base UI, TanStack Query |
 | Backend | Python 3.12, FastAPI async, Pydantic v2, SQLAlchemy 2 async, Alembic, `uv` |
 | Database | Self-hosted/local PostgreSQL 16 via `docker/docker-compose.yml`; no Supabase |
-| Auth | FastAPI email/password auth, Argon2 hashes, app-issued HS256 JWT |
+| Auth | FastAPI email/password + Google Identity, Argon2 hashes, app-issued HS256 JWT |
 | API types | Generated from FastAPI OpenAPI into `frontend/src/lib/api/schema.ts` |
 | Data model | Fixed meta-schema; dynamic row values in JSONB keyed by field UUID |
 | Authorization | FastAPI owns authz; every data query must be workspace-scoped |
 
-Accepted decisions: `docs/adr/0001-dynamic-schema.md` and
-`docs/adr/0002-authz-model.md`. ADR 0002 contains stale Supabase wording, but its
-core rule—FastAPI-owned, workspace-scoped authorization—still applies.
+Accepted decisions are recorded under `docs/adr/`.
 
 ## Current Product State
 
@@ -30,26 +28,16 @@ core rule—FastAPI-owned, workspace-scoped authorization—still applies.
   settings are persisted through the `View` API.
 - The dynamic engine includes relation, rollup, formula, sub-items, system fields,
   bulk rows, field/row reorder, and multiple field editors.
-- Latest committed baseline: `d995b70` on `feature/26.06.05` and `main`.
-- Last documented green baseline: frontend typecheck/lint/16 tests/build; backend
-  ruff/mypy/27 tests.
-- The working tree contains uncommitted UI polish in Board/Calendar/Gallery/List and
-  `frontend/src/lib/view.ts`. Preserve these user changes.
-- On 2026-07-01, all six database views received responsive shared-toolbar/sidebar
-  polish plus view-specific Board/List/Gallery/Calendar/Timeline UX fixes; frontend
-  typecheck, lint, 16 tests, production build, and browser QA passed.
-- `PRODUCTION_PLAN.md` is now the active roadmap. Foundation F2.1 (Space/Folder
-  resource tree and optional `Database.folder_id`) shipped on 2026-07-02 with
-  migrations and workspace-isolation tests.
-- Foundation F3 (authorization v2) and F4 (bounded server-side row queries)
-  shipped on 2026-07-02. The next production slices are F5 object storage and
-  F6 durable jobs.
-- Foundation F5 uses an S3-compatible `ObjectStorage` interface with local
-  MinIO. F6 uses PostgreSQL durable jobs with leases, `SKIP LOCKED`, retry
-  backoff, idempotency keys, and the `python -m app.worker` process.
-- F7–F9 add immutable audit/outbox events, Redis-backed JWT sessions and auth
-  rate limits, readiness/Prometheus metrics, production secret validation,
-  backup scripts, and GitHub CI.
+- Six database layouts exist: Table, Board, List, Calendar, Gallery, and
+  Timeline/Gantt.
+- Foundation F1–F9 and UI modernization U1–U4 are complete.
+- Core Functions CM1–CM7 provide transfers, BlockNote documents, generic
+  resource grants, dashboards, Google identity, notifications, and Google
+  Drive-backed Database Files & Media.
+- Current green baseline: backend ruff/mypy/62 tests; frontend
+  typecheck/lint/16 tests/production build.
+- Alembic head: `2b4d6f8a0c1e`.
+- Preserve unrelated dirty-worktree changes.
 
 ## Non-Negotiable UX Rules
 
@@ -91,10 +79,10 @@ Frontend dev: `cd frontend && pnpm dev`
 
 | Need | Source |
 |---|---|
-| Full memory index | `MEMORY.md` |
-| Current implementation history | `build-progress-m1.md`, `CHANGELOG.md` |
-| Product requirements and roadmap | `SPEC.md`, `PLAN.md` (some stack wording is stale) |
+| Current implementation history | `CHANGELOG.md` |
+| Product requirements and roadmap | `docs/product-context.md`, `PRODUCTION_PLAN.md` |
 | Field catalog | `docs/field-catalog.md` |
-| Business context | `user-vhb-group-business.md` |
-| UX dropdown rule | `ux-dropdown-no-native-menus.md` |
+| Google Drive files design | `docs/adr/0010-google-drive-files-media.md` |
+| UX rules | `docs/ux-guidelines.md` |
+| Architecture decisions | `docs/adr/` |
 | Frontend local instructions | `frontend/AGENTS.md`, `frontend/CLAUDE.md` |

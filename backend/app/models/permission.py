@@ -1,4 +1,4 @@
-"""Resource-scoped authorization models."""
+"""Generic resource-scoped authorization models."""
 
 import enum
 import uuid
@@ -15,14 +15,35 @@ class ResourceRole(enum.StrEnum):
     manager = "manager"
 
 
-class DatabaseGrant(Base, TimestampMixin):
-    __tablename__ = "database_grants"
-    __table_args__ = (UniqueConstraint("database_id", "user_id", name="uq_database_grant_user"),)
+class ResourceType(enum.StrEnum):
+    database = "database"
+    document = "document"
+    dashboard = "dashboard"
+
+
+class ResourceGrant(Base, TimestampMixin):
+    __tablename__ = "resource_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "resource_type",
+            "resource_id",
+            "user_id",
+            name="uq_resource_grant_user",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
-    database_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("databases.id", ondelete="CASCADE"), index=True
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
+    resource_type: Mapped[ResourceType] = mapped_column(
+        Enum(ResourceType, native_enum=False, length=32, create_constraint=False),
+        index=True,
+    )
+    # Polymorphic resource id. Referential integrity is enforced by the
+    # resource registry before writes; workspace_id keeps every query scoped.
+    resource_id: Mapped[uuid.UUID] = mapped_column(index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )

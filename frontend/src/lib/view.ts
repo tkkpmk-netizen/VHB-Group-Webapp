@@ -22,7 +22,7 @@ export function emptyGroup(): FilterGroup {
 type Choice = { id: string; label: string };
 
 const SELECT_LIKE = new Set(["select", "status", "priority"]);
-const MULTI_LIKE = new Set(["multi_select", "relation"]);
+const MULTI_LIKE = new Set(["multi_select", "relation", "files"]);
 const NUM_LIKE = new Set(["number", "rating"]);
 
 function choices(field: Field): Choice[] {
@@ -46,6 +46,15 @@ export function toText(field: Field, value: unknown): string {
   if (SELECT_LIKE.has(t)) return choiceLabel(field, String(value));
   if (t === "multi_select" && Array.isArray(value))
     return value.map((id) => choiceLabel(field, String(id))).join(", ");
+  if (t === "files" && Array.isArray(value))
+    return value
+      .map((item) =>
+        item && typeof item === "object" && "name" in item
+          ? String((item as { name?: unknown }).name ?? "")
+          : String(item),
+      )
+      .filter(Boolean)
+      .join(", ");
   if (t === "date" && typeof value === "object" && value !== null)
     return String((value as { start?: string }).start ?? "");
   if (Array.isArray(value)) return value.join(", ");

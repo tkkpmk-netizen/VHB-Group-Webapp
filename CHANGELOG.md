@@ -5,6 +5,53 @@ Changelog gộp, mới nhất ở trên. (Trước đây tách thành `CHANGELOG
 
 ---
 
+## 2026-07-07 — CM7 Google Drive Files & Media
+
+- Thêm field type `files` cho Database, upload nhiều ảnh/tệp vào từng row.
+- File bytes lưu trên Google Drive Shared Drive qua service account; database
+  chỉ lưu metadata/reference.
+- Thêm API upload, preview inline và delete có kiểm tra quyền database
+  read/write.
+- Table UI hỗ trợ `Files & media`, upload, xem ảnh/PDF/text trong modal nội bộ
+  và xóa file.
+- Cleanup Drive objects khi xóa field, row hoặc database chứa file.
+
+---
+
+## 2026-07-06 — CM5 Google identity and CM6 notifications
+
+- Thêm Google Identity Services login, OAuth-only accounts và explicit account
+  linking/unlinking an toàn.
+- Thêm Account Settings cho connected identities và notification preferences.
+- Thêm durable notification inbox, Redis unread count và bell UI.
+- Membership/resource grant changes tạo notification qua transactional outbox.
+- Email preference tạo idempotent durable job và gửi qua SMTP với retry.
+
+---
+
+## 2026-07-06 — CM4 Dashboard Designer
+
+- Thêm Dashboard và DashboardWidget domain với Metric, Bar và Table widgets.
+- Mở rộng F4 RowQuery bằng grouped aggregations giới hạn 100 nhóm.
+- Widget data API thực thi query server-side và kiểm tra đồng thời quyền
+  Dashboard lẫn Database.
+- Thêm Dashboard list/designer, cấu hình database/field/calculation, Share qua
+  CM3 và tự refresh dữ liệu mỗi 30 giây.
+
+---
+
+## 2026-07-06 — CM3 generic resource authorization
+
+- Tổng quát hóa `DatabaseGrant` thành workspace-scoped `ResourceGrant`.
+- Migration bảo toàn database grants hiện có và chuyển enforcement sang policy
+  `read/write/manage` dùng chung.
+- Documents hỗ trợ resource-level viewer/editor/manager; grant có thể nâng hoặc
+  hạ quyền workspace và owner/admin luôn giữ toàn quyền.
+- Thêm generic grant API, audit events, cleanup khi xóa resource và Share dialog
+  dùng chung cho Databases/Documents.
+
+---
+
 ## 2026-07-03 — Database export reliability
 
 - Sửa lỗi export XLSX/CSV với JSONB như date range, list và object lồng nhau.
@@ -96,7 +143,8 @@ Trạng thái: backend ruff/mypy/30 test ✓ · Alembic head `9a4b2c6d8e1f` ✓ 
 frontend typecheck/lint/16 test/build ✓.
 
 ### Production roadmap
-- Thêm `PRODUCTION_PLAN.md` làm roadmap hiện hành; `PLAN.md` giữ vai trò lịch sử MVP.
+- Thêm `PRODUCTION_PLAN.md` làm roadmap hiện hành; các plan MVP cũ sau đó được
+  gộp vào changelog và xóa để tránh hai nguồn sự thật.
 - Chốt modular monolith + worker, tách business data khỏi platform resources.
 
 ### Workspace resources

@@ -1,21 +1,37 @@
-# ADR 0002 — Authorization: FastAPI owns authz, RLS as tier-2 defense
+# ADR 0002 — FastAPI-owned workspace and resource authorization
 
 - Status: Accepted
 - Date: 2026-06-24
+- Updated: 2026-07-06
 
 ## Context
-Hybrid với Supabase: FastAPI truy cập Postgres của Supabase bằng SQLAlchemy với một role đặc quyền → **RLS không chặn được query của FastAPI**. RLS chỉ có hiệu lực cho truy cập trực tiếp bằng Supabase client (JWT). Cần một mô hình phân quyền rõ ràng, nhất quán, cô lập tenant (workspace).
+
+The application uses app-issued JWT sessions and PostgreSQL through SQLAlchemy.
+FastAPI is the only data-access boundary. Tenant isolation and resource
+permissions therefore must be enforced consistently in the API rather than
+delegated to a frontend or an external database client.
 
 ## Decision
-- **FastAPI sở hữu toàn bộ authorization.** FastAPI verify JWT do Supabase Auth phát (qua `SUPABASE_JWT_SECRET` / JWKS) → lấy `user_id`.
-- Mọi truy vấn dữ liệu **bắt buộc** đi qua dependency `get_current_membership(user_id, workspace_id)` → scope theo `workspace_id` mà user là thành viên. Không có truy vấn nào bỏ qua scope.
-- **RLS = phòng thủ tầng 2** cho mọi truy cập trực tiếp qua Supabase client (realtime/storage sau này).
-- Test cô lập tenant (AC5) chạy ở tầng API/server, không chỉ dựa RLS.
+
+- FastAPI authenticates email/password or linked identity providers and issues
+  JWTs backed by the Redis session registry.
+- Every tenant request resolves an explicit workspace membership. Accounts with
+  multiple workspaces must send `X-Workspace-ID`.
+- Workspace roles provide default `read`, `write`, and `manage` actions.
+- `ResourceGrant` can override that default for a specific Database, Document,
+  Dashboard, or later resource type.
+- Owner/admin memberships retain full workspace access.
+- Every resource lookup validates workspace ownership; no frontend check is a
+  security boundary.
 
 ## Consequences
-- (+) Một nơi duy nhất kiểm soát authz → dễ kiểm thử, dễ suy luận.
-- (+) Giải quyết gọn rủi ro "ORM vượt mặt RLS".
-- (−) Mọi data layer phải kỷ luật đi qua scope; cần review để không lọt truy vấn bỏ scope.
 
-## Alternatives
-- Dựa hoàn toàn vào RLS + query bằng Supabase client: mất type-safety & sức mạnh của SQLAlchemy; logic phức tạp khó đặt trong policy SQL.
+- Authorization behavior is centralized and integration-testable.
+- New resource domains must register with the generic policy and clean up
+  polymorphic grants when resources are deleted.
+- Direct database access from the frontend is prohibited.
+
+## Related decisions
+
+- [ADR 0006](0006-generic-resource-authorization.md)
+- [ADR 0008](0008-google-identity-linking.md)

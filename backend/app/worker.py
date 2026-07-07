@@ -6,6 +6,7 @@ Run with: uv run python -m app.worker
 import asyncio
 import socket
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -17,6 +18,9 @@ from app.models.asset import Asset, AssetStatus
 from app.models.database import Database
 from app.models.field import Field, Row
 from app.models.job import Job
+from app.models.notification import Notification
+from app.models.user import User
+from app.services.email import send_email
 from app.services.events import publish_next_outbox_event
 from app.services.jobs import claim_next_job, complete_job, fail_job
 from app.services.spreadsheets import export_rows, import_rows, read_tabular
@@ -105,6 +109,21 @@ async def execute_job(db: AsyncSession, job: Job, storage: ObjectStorage) -> dic
         db.add(asset)
         await db.commit()
         return {"asset_id": str(asset.id), "rows_exported": len(rows)}
+    if job.type == "notification.email":
+        notification = await db.get(Notification, uuid.UUID(str(job.payload["notification_id"])))
+        if notification is None or notification.workspace_id != job.workspace_id:
+            raise ValueError("Notification not found")
+        user = await db.get(User, notification.user_id)
+        if user is None:
+            raise ValueError("Notification user not found")
+        await send_email(
+            recipient=user.email,
+            subject=notification.title,
+            body=notification.body,
+        )
+        notification.emailed_at = datetime.now(UTC)
+        await db.commit()
+        return {"notification_id": str(notification.id), "recipient": user.email}
     raise ValueError(f"No handler for job type: {job.type}")
 
 

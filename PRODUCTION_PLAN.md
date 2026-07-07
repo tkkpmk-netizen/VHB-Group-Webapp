@@ -1,7 +1,13 @@
 # VHB Platform — Production Roadmap
 
-Status: **Accepted — Foundation complete, Core Mini Apps next**  
-Updated: 2026-07-03
+Status: **Active — Foundation and Core Functions complete; Design/Publishing next**
+Updated: 2026-07-07
+
+Verified baseline:
+
+- Alembic: `2b4d6f8a0c1e (head)`, no schema drift.
+- Backend: ruff + mypy + 62/62 tests.
+- Frontend: typecheck + lint + 16/16 tests + production build.
 
 ## Product Direction
 
@@ -71,9 +77,8 @@ Foundation exit criteria:
 
 Phase 1 closes out Core Functions; Phase 2 composes them into broader product
 capabilities.
-CM3 (generic resource grants) is a hard prerequisite for Documents,
-Dashboards, and Sites — every non-database resource type must reuse it
-instead of inventing its own permission table.
+CM3 provides generic grants for Documents and Dashboards. Sites must reuse the
+same policy instead of inventing another permission table.
 
 ### Phase 1 — Finish what is started
 
@@ -86,10 +91,11 @@ instead of inventing its own permission table.
 
 | Order | Initiative | Depends on |
 |---:|---|---|
-| CM3 | Generic `ResourceGrant` (resource_type + resource_id), generalizing `DatabaseGrant`; centralized enforcement reused by Documents/Dashboards/Sites | F3 |
-| CM4 | Dashboard Designer — widgets bound to the F4 query API (aggregations as data source) | F3, F4, F8, CM3 |
-| CM5 | Google OAuth and account linking | F3, F7, F8 |
-| CM6 | In-app notifications (bell + Redis) and email notifications (outbox → job worker) | F3, F6, F7, F8 |
+| CM3 | Generic `ResourceGrant` (resource_type + resource_id), generalizing `DatabaseGrant`; centralized enforcement reused by Documents/Dashboards/Sites | F3 | Completed |
+| CM4 | Dashboard Designer — widgets bound to the F4 query API (aggregations as data source) | F3, F4, F8, CM3 | MVP completed |
+| CM5 | Google OAuth and account linking | F3, F7, F8 | Completed; provider configuration required |
+| CM6 | In-app notifications (bell + Redis) and email notifications (outbox → job worker) | F3, F6, F7, F8 | MVP completed; SMTP configuration required |
+| CM7 | Database Files & Media field backed by Google Drive Shared Drive storage | F3, F4, F6 | MVP completed; Google Drive service account configuration required |
 
 ## Later — Design and Publishing
 
@@ -205,13 +211,61 @@ CM2 introduced:
 - Atomic block JSON saves with optimistic version conflict detection.
 - Debounced autosave and editable document titles.
 
+CM3 introduced:
+
+- Workspace-scoped polymorphic `ResourceGrant` with database, document, and
+  dashboard resource types plus a migration preserving existing database grants.
+- One centralized policy for read/write/manage actions, with resource roles
+  overriding workspace defaults while owner/admin retain full access.
+- Generic grant CRUD, audit events, cleanup on resource deletion, and a shared
+  Share dialog used by Databases and Documents.
+
+CM4 introduced:
+
+- Workspace-scoped Dashboards and query-bound Metric, Bar, and Table widgets.
+- F4 `RowQuery` grouped aggregations, bounded to 100 groups for chart sources.
+- Dashboard CRUD, widget CRUD/data APIs, CM3 authorization, and automatic grant
+  cleanup.
+- Dashboard list/designer UI with inline metadata editing, shared access,
+  database/field binding, and 30-second data refresh.
+
+CM5 introduced:
+
+- Google Identity Services ID-token sign-in with server-side signature,
+  audience, issuer, expiry, and verified-email validation through Google's
+  official client library.
+- Provider-subject identity accounts, OAuth-only users, explicit linking for
+  existing password accounts, safe unlink rules, and audit events.
+- Google sign-in on Login plus connected-account management in Account Settings.
+
+CM6 introduced:
+
+- Durable workspace/user notifications, read state, delivery preferences, and
+  notification creation for membership and resource-access changes.
+- Redis-cached unread counts, polling bell UI, mark-read/all-read actions, and
+  self-service notification settings.
+- Transactional `notification.created` outbox fanout to idempotent
+  `notification.email` jobs with retryable SMTP delivery.
+
+CM7 introduced:
+
+- `files` database field type for attaching images and documents to rows.
+- Google Drive service-account storage adapter targeting a configured Shared
+  Drive folder; PostgreSQL stores only file metadata and row cell references.
+- Authorized upload, inline preview, and delete APIs scoped by workspace,
+  database, row, and field.
+- Table UI for multi-file upload, authenticated in-app previews for images,
+  PDFs and text files, and file deletion without public Drive links.
+- Cleanup hooks that remove Drive objects when a file field, row, or database is
+  deleted.
+
 Terminology: these are **Core Functions**, not mini apps. Mini apps are later
 composed experiences that consume Core Functions.
 
-## UI Modernization Gate
+## UI Modernization Baseline
 
-The UI modernization gate remains active for U4, but no longer blocks completed
-backend foundation work:
+The U1–U4 modernization gate is complete. Preserve these baseline rules in all
+new modules:
 
 - Product shell and hierarchy navigation are shared by every mini app.
 - Workspace, Space, Folder, People, Roles, and database grants are manageable

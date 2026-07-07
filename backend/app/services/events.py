@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.event import AuditEvent, OutboxEvent
+from app.models.job import Job
+from app.models.notification import NotificationPreference
 
 
 def record_event(
@@ -62,6 +64,29 @@ async def publish_next_outbox_event(db: AsyncSession) -> OutboxEvent | None:
     if event is None:
         return None
     event.attempts += 1
+    if event.topic == "notification.created" and event.workspace_id is not None:
+        notification_id = event.payload.get("notification_id")
+        user_id = event.payload.get("user_id")
+        if notification_id and user_id:
+            parsed_user_id = uuid.UUID(str(user_id))
+            preference = await db.scalar(
+                select(NotificationPreference).where(
+                    NotificationPreference.workspace_id == event.workspace_id,
+                    NotificationPreference.user_id == parsed_user_id,
+                    NotificationPreference.email_enabled.is_(True),
+                )
+            )
+            if preference is not None:
+                db.add(
+                    Job(
+                        workspace_id=event.workspace_id,
+                        created_by_id=parsed_user_id,
+                        type="notification.email",
+                        payload={"notification_id": str(notification_id)},
+                        max_attempts=3,
+                        idempotency_key=f"notification-email:{notification_id}",
+                    )
+                )
     event.published_at = datetime.now(UTC)
     await db.commit()
     return event

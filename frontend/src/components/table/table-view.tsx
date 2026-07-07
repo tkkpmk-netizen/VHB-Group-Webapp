@@ -42,6 +42,7 @@ const FIELD_TYPES: { value: string; label: string; choices: boolean }[] = [
   { value: "email", label: "Email", choices: false },
   { value: "phone", label: "Phone", choices: false },
   { value: "country", label: "Country", choices: false },
+  { value: "files", label: "Files & media", choices: false },
   { value: "relation", label: "Relation", choices: false },
   { value: "rollup", label: "Rollup", choices: false },
   { value: "formula", label: "Formula", choices: false },
@@ -923,6 +924,8 @@ export function TableView({
                     <CellEditor
                       key={isEditing ? "edit" : "view"}
                       field={f}
+                      databaseId={databaseId}
+                      rowId={row.id}
                       value={(row.data as Record<string, unknown>)[f.id] ?? null}
                       onCommit={(v) => commitCell(row, f, v)}
                       autoEdit={isEditing}
@@ -931,7 +934,7 @@ export function TableView({
                   )}
                   {/* 1st click selects; click on the already-selected cell or
                       double-click enters edit (dropdowns auto-open via autoEdit). */}
-                  {!isEditing && f.type !== "unique_id" && (
+                  {!isEditing && f.type !== "unique_id" && f.type !== "files" && (
                     <div
                       className="absolute inset-0 z-[1] cursor-cell"
                       onMouseDown={() => {

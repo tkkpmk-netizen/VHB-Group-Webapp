@@ -1,14 +1,17 @@
 """ORM models. Import here so Alembic autogenerate sees them."""
 
 from app.models.asset import Asset, AssetStatus
+from app.models.dashboard import Dashboard, DashboardWidget, WidgetType
 from app.models.database import Database
 from app.models.document import Document
+from app.models.drive_file import DriveFile
 from app.models.event import AuditEvent, OutboxEvent
 from app.models.field import Field, FieldType, Row, RowLink
 from app.models.job import Job, JobStatus
-from app.models.permission import DatabaseGrant, ResourceRole
+from app.models.notification import Notification, NotificationPreference
+from app.models.permission import ResourceGrant, ResourceRole, ResourceType
 from app.models.resource import Folder, Space
-from app.models.user import User
+from app.models.user import IdentityAccount, User
 from app.models.view import View, ViewType
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
 
@@ -17,16 +20,23 @@ __all__ = [
     "AssetStatus",
     "AuditEvent",
     "Database",
-    "DatabaseGrant",
+    "Dashboard",
+    "DashboardWidget",
     "Document",
+    "DriveFile",
+    "ResourceGrant",
     "ResourceRole",
+    "ResourceType",
     "Field",
     "FieldType",
     "Folder",
     "Job",
     "JobStatus",
+    "IdentityAccount",
     "MemberRole",
     "OutboxEvent",
+    "Notification",
+    "NotificationPreference",
     "Row",
     "RowLink",
     "Space",
@@ -35,4 +45,5 @@ __all__ = [
     "ViewType",
     "Workspace",
     "WorkspaceMember",
+    "WidgetType",
 ]

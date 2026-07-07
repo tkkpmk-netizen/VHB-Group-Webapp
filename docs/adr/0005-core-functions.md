@@ -5,9 +5,9 @@ Date: 2026-07-03
 
 ## Terminology
 
-Database, Import/Export, Documents, Identity, and Notifications are Core
-Functions. Mini apps are composed product experiences built on these shared
-functions and resources.
+Database, Import/Export, Documents, Resource Grants, Dashboards, Identity,
+Notifications, and Files & Media are Core Functions. Mini apps are composed
+product experiences built on these shared functions and resources.
 
 ## Database transfers
 

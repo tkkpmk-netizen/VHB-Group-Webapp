@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Bell,
   ChevronDown,
   ChevronRight,
   Database,
@@ -29,6 +28,7 @@ import {
 import { clearToken, getToken } from "@/lib/auth";
 import type { components } from "@/lib/api/schema";
 import { PRODUCT_MODULES } from "@/modules/registry";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 
 type Membership = components["schemas"]["MembershipOut"];
 type Workspace = components["schemas"]["WorkspaceOut"];
@@ -322,9 +322,7 @@ function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
       <button type="button" title="AI assistant" className="rounded p-1.5 hover:bg-muted">
         <Sparkles className="size-4 text-violet-600" />
       </button>
-      <button type="button" title="Notifications" className="rounded p-1.5 hover:bg-muted">
-        <Bell className="size-4" />
-      </button>
+      <NotificationBell />
       <button
         type="button"
         title="Log out"

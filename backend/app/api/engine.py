@@ -24,11 +24,13 @@ from app.schemas.engine import (
     FormulaPreviewResult,
     ReorderRequest,
     RowCreate,
+    RowGroup,
     RowOut,
     RowPage,
     RowQuery,
     RowUpdate,
 )
+from app.services.drive_file_cleanup import cleanup_drive_files
 from app.services.engine import (
     CellValidationError,
     check_formula,
@@ -411,6 +413,7 @@ async def delete_field(
     if field is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Field not found")
     await _scoped_database(field.database_id, workspace, db)
+    await cleanup_drive_files(db, field_id=field.id)
     await db.delete(field)
     await db.commit()
 
@@ -561,6 +564,41 @@ async def query_rows(
         value = await db.scalar(select(aggregate).select_from(Row).where(*conditions))
         aggregates[f"{aggregation_item.function}:{aggregation_item.field_id}"] = value
 
+    groups: list[RowGroup] = []
+    if payload.group_by:
+        group_expression = _field_expression(payload.group_by, field_map)
+        selections = [group_expression.label("group_key")]
+        aggregate_keys: list[str] = []
+        for aggregation_item in payload.aggregations:
+            expression = _field_expression(aggregation_item.field_id, field_map)
+            aggregate = {
+                "count": func.count(expression),
+                "sum": func.sum(expression),
+                "avg": func.avg(expression),
+                "min": func.min(expression),
+                "max": func.max(expression),
+            }[aggregation_item.function]
+            key = f"{aggregation_item.function}:{aggregation_item.field_id}"
+            aggregate_keys.append(key)
+            selections.append(aggregate.label(f"aggregate_{len(aggregate_keys)}"))
+        grouped = await db.execute(
+            select(*selections)
+            .select_from(Row)
+            .where(*conditions)
+            .group_by(group_expression)
+            .order_by(group_expression.asc().nullslast())
+            .limit(100)
+        )
+        for grouped_row in grouped:
+            groups.append(
+                RowGroup(
+                    key=grouped_row[0],
+                    aggregates={
+                        key: grouped_row[index + 1] for index, key in enumerate(aggregate_keys)
+                    },
+                )
+            )
+
     return RowPage(
         items=rows,
         page=payload.page,
@@ -568,6 +606,7 @@ async def query_rows(
         total=total,
         pages=(total + payload.page_size - 1) // payload.page_size,
         aggregates=aggregates,
+        groups=groups,
     )
 
 
@@ -695,6 +734,7 @@ async def delete_row(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Row not found")
     await _scoped_database(row.database_id, workspace, db)
+    await cleanup_drive_files(db, row_id=row.id)
     await db.delete(row)
     await db.commit()
 

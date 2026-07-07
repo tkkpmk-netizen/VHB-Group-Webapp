@@ -11,18 +11,18 @@ from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
 from app.models.database import Database
 from app.models.field import Field, FieldType
-from app.models.permission import DatabaseGrant
+from app.models.permission import ResourceType
 from app.models.resource import Folder, Space
 from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember
-from app.schemas.workspace import (
-    DatabaseCreate,
-    DatabaseGrantOut,
-    DatabaseGrantUpsert,
-    DatabaseOut,
+from app.models.workspace import Workspace
+from app.schemas.workspace import DatabaseCreate, DatabaseOut
+from app.services.authorization import (
+    Action,
+    delete_resource_grants,
+    require_database_action,
+    require_workspace_action,
 )
-from app.services.authorization import Action, require_database_action, require_workspace_action
-from app.services.events import record_event
+from app.services.drive_file_cleanup import cleanup_drive_files
 
 router = APIRouter(prefix="/databases", tags=["databases"])
 
@@ -113,77 +113,12 @@ async def delete_database(
         user_id=current_user.id,
         action=Action.manage,
     )
+    await delete_resource_grants(
+        db,
+        workspace_id=workspace.id,
+        resource_type=ResourceType.database,
+        resource_id=database.id,
+    )
+    await cleanup_drive_files(db, database_id=database.id)
     await db.delete(database)
     await db.commit()
-
-
-@router.get("/{database_id}/grants", response_model=list[DatabaseGrantOut])
-async def list_database_grants(
-    database_id: uuid.UUID,
-    workspace: Workspace = Depends(get_current_workspace),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[DatabaseGrant]:
-    database = await db.get(Database, database_id)
-    if database is None or database.workspace_id != workspace.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Database not found")
-    await require_database_action(
-        db,
-        database_id=database_id,
-        workspace_id=workspace.id,
-        user_id=current_user.id,
-        action=Action.manage,
-    )
-    result = await db.execute(select(DatabaseGrant).where(DatabaseGrant.database_id == database_id))
-    return list(result.scalars())
-
-
-@router.put("/{database_id}/grants", response_model=DatabaseGrantOut)
-async def upsert_database_grant(
-    database_id: uuid.UUID,
-    payload: DatabaseGrantUpsert,
-    workspace: Workspace = Depends(get_current_workspace),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> DatabaseGrant:
-    database = await db.get(Database, database_id)
-    if database is None or database.workspace_id != workspace.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Database not found")
-    await require_database_action(
-        db,
-        database_id=database_id,
-        workspace_id=workspace.id,
-        user_id=current_user.id,
-        action=Action.manage,
-    )
-    member = await db.scalar(
-        select(WorkspaceMember).where(
-            WorkspaceMember.workspace_id == workspace.id,
-            WorkspaceMember.user_id == payload.user_id,
-        )
-    )
-    if member is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "User is not a workspace member")
-    grant = await db.scalar(
-        select(DatabaseGrant).where(
-            DatabaseGrant.database_id == database_id,
-            DatabaseGrant.user_id == payload.user_id,
-        )
-    )
-    if grant is None:
-        grant = DatabaseGrant(database_id=database_id, user_id=payload.user_id, role=payload.role)
-        db.add(grant)
-    else:
-        grant.role = payload.role
-    record_event(
-        db,
-        action="database.grant_changed",
-        resource_type="database",
-        resource_id=str(database_id),
-        workspace_id=workspace.id,
-        actor_id=current_user.id,
-        data={"user_id": str(payload.user_id), "role": payload.role.value},
-    )
-    await db.commit()
-    await db.refresh(grant)
-    return grant

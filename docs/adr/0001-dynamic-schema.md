@@ -8,7 +8,9 @@ App cần "database kiểu Notion": người dùng tạo bảng (Database) và f
 
 ## Decision
 Dùng **meta-schema cố định + JSONB**:
-- Bảng meta cố định, quản lý bằng SQLAlchemy + Alembic: `Workspace`, `WorkspaceMember`, `Invite`, `Database`, `Field`, `Row`, `View`, `RowLink`.
+- Bảng meta cố định, quản lý bằng SQLAlchemy + Alembic: `Workspace`,
+  `WorkspaceMember`, `Space`, `Folder`, `Database`, `Field`, `Row`, `View`,
+  `RowLink`.
 - `Field` mô tả cột (type, name, options, order).
 - Dữ liệu mỗi bản ghi nằm trong `Row.data` (JSONB) keyed theo `field.id`.
 - GIN index trên `Row.data` để hỗ trợ filter.

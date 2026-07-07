@@ -1,11 +1,24 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, ChevronLeft, ChevronRight, ExternalLink, Star } from "lucide-react";
+import {
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  File as FileIcon,
+  Image as ImageIcon,
+  Loader2,
+  Paperclip,
+  Star,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { Dropdown, MultiDropdown } from "@/components/ui/dropdown";
-import { apiFetch } from "@/lib/api/client";
+import { API_BASE_URL, apiFetch, getWorkspaceId } from "@/lib/api/client";
+import { getToken } from "@/lib/auth";
 import { chipColor } from "@/lib/field-colors";
 import {
   COUNTRY_OPTIONS,
@@ -116,11 +129,55 @@ type CellProps = {
   field: Field;
   value: unknown;
   onCommit: (value: unknown) => void;
+  /** Files & media need the owning database/row for upload/delete/preview routes. */
+  databaseId?: string;
+  rowId?: string;
   /** When the cell is double-click-activated, text/number/phone open their input. */
   autoEdit?: boolean;
   /** Called after a keyboard/mouse editing session ends. */
   onFinish?: (move?: "down" | "next" | "previous") => void;
 };
+
+type FileRef = {
+  id: string;
+  name: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+};
+
+function fileRefs(value: unknown): FileRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.reduce<FileRef[]>((acc, item) => {
+    if (!item || typeof item !== "object") return acc;
+    const obj = item as {
+      id?: unknown;
+      name?: unknown;
+      mime_type?: unknown;
+      size_bytes?: unknown;
+    };
+    if (typeof obj.id !== "string" || typeof obj.name !== "string") return acc;
+    acc.push({
+      id: obj.id,
+      name: obj.name,
+      mime_type: typeof obj.mime_type === "string" ? obj.mime_type : null,
+      size_bytes: typeof obj.size_bytes === "number" ? obj.size_bytes : null,
+    });
+    return acc;
+  }, []);
+}
+
+function formatBytes(bytes?: number | null): string {
+  if (!bytes || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let n = bytes / 1024;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i += 1;
+  }
+  return `${n >= 10 ? n.toFixed(0) : n.toFixed(1)} ${units[i]}`;
+}
 
 type NumberOptions = {
   format?: "plain" | "integer" | "decimal" | "percent" | "currency";
@@ -972,10 +1029,257 @@ function ProgressCell({ value, onCommit, autoEdit, onFinish }: CellProps) {
   );
 }
 
+function FilesCell({ field, value, databaseId, rowId, onFinish }: CellProps) {
+  const qc = useQueryClient();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const files = fileRefs(value);
+  const [preview, setPreview] = useState<{
+    file: FileRef;
+    url?: string;
+    loading: boolean;
+    error?: string;
+  } | null>(null);
+  const canWrite = !!databaseId && !!rowId;
+
+  useEffect(
+    () => () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+    },
+    [preview?.url],
+  );
+
+  const refreshRows = () => {
+    if (!databaseId) return;
+    qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+    qc.invalidateQueries({ queryKey: ["rows-search", databaseId] });
+  };
+
+  const upload = useMutation({
+    mutationFn: (selected: FileList) => {
+      if (!databaseId || !rowId) throw new Error("Missing row context");
+      const body = new FormData();
+      Array.from(selected).forEach((file) => body.append("files", file));
+      return apiFetch<unknown[]>(
+        `/databases/${databaseId}/rows/${rowId}/fields/${field.id}/files`,
+        { method: "POST", body },
+      );
+    },
+    onSuccess: () => {
+      refreshRows();
+      onFinish?.();
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (fileId: string) => {
+      if (!databaseId) throw new Error("Missing database context");
+      return apiFetch<void>(`/databases/${databaseId}/drive-files/${fileId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      refreshRows();
+      onFinish?.();
+    },
+  });
+
+  async function loadPreview(file: FileRef) {
+    if (!databaseId) return;
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    setPreview({ file, loading: true });
+    try {
+      const token = getToken();
+      const workspaceId = getWorkspaceId();
+      const res = await fetch(
+        `${API_BASE_URL}/databases/${databaseId}/drive-files/${file.id}/content`,
+        {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(workspaceId ? { "X-Workspace-ID": workspaceId } : {}),
+          },
+        },
+      );
+      if (!res.ok) throw new Error(`Preview failed (${res.status})`);
+      const blob = await res.blob();
+      setPreview({ file, url: URL.createObjectURL(blob), loading: false });
+    } catch (err) {
+      setPreview({
+        file,
+        loading: false,
+        error: err instanceof Error ? err.message : "Cannot preview file",
+      });
+    }
+  }
+
+  const closePreview = () => {
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  };
+
+  return (
+    <>
+      <div className="flex min-h-[34px] items-center gap-1.5 overflow-hidden px-1 py-1">
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) upload.mutate(e.target.files);
+            e.currentTarget.value = "";
+          }}
+        />
+        {files.length === 0 ? (
+          <span className="px-1 text-sm text-muted-foreground">—</span>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+            {files.slice(0, 3).map((file) => {
+              const isImage = file.mime_type?.startsWith("image/");
+              return (
+                <button
+                  key={file.id}
+                  type="button"
+                  onClick={() => loadPreview(file)}
+                  title={`${file.name}${file.size_bytes ? ` · ${formatBytes(file.size_bytes)}` : ""}`}
+                  className="inline-flex max-w-[140px] items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 text-xs hover:bg-muted"
+                >
+                  {isImage ? (
+                    <ImageIcon className="size-3.5 shrink-0 text-primary" />
+                  ) : (
+                    <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="truncate">{file.name}</span>
+                </button>
+              );
+            })}
+            {files.length > 3 && (
+              <span className="text-xs text-muted-foreground">+{files.length - 3}</span>
+            )}
+          </div>
+        )}
+        {canWrite && (
+          <button
+            type="button"
+            disabled={upload.isPending}
+            onClick={() => inputRef.current?.click()}
+            title="Upload files"
+            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            {upload.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Upload className="size-3.5" />
+            )}
+          </button>
+        )}
+      </div>
+      {upload.isError && (
+        <div className="px-2 pb-1 text-xs text-destructive">Upload failed</div>
+      )}
+      {preview &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6">
+            <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl">
+              <div className="flex items-center gap-3 border-b px-4 py-3">
+                {preview.file.mime_type?.startsWith("image/") ? (
+                  <ImageIcon className="size-5 text-primary" />
+                ) : (
+                  <FileIcon className="size-5 text-muted-foreground" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{preview.file.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[preview.file.mime_type, formatBytes(preview.file.size_bytes)]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+                {preview.url && (
+                  <a
+                    href={preview.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    Open
+                  </a>
+                )}
+                {canWrite && (
+                  <button
+                    type="button"
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      remove.mutate(preview.file.id);
+                      closePreview();
+                    }}
+                    className="rounded-md px-2 py-1 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                  >
+                    <Trash2 className="inline size-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={closePreview}
+                  className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="min-h-[320px] flex-1 overflow-auto bg-muted/30 p-4">
+                {preview.loading ? (
+                  <div className="flex h-[320px] items-center justify-center text-muted-foreground">
+                    <Loader2 className="mr-2 size-5 animate-spin" /> Loading preview…
+                  </div>
+                ) : preview.error ? (
+                  <div className="flex h-[320px] items-center justify-center text-sm text-destructive">
+                    {preview.error}
+                  </div>
+                ) : preview.url && preview.file.mime_type?.startsWith("image/") ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={preview.url}
+                    alt={preview.file.name}
+                    className="mx-auto max-h-[68vh] max-w-full rounded-lg object-contain"
+                  />
+                ) : preview.url &&
+                  (preview.file.mime_type === "application/pdf" ||
+                    preview.file.mime_type?.startsWith("text/")) ? (
+                  <iframe
+                    src={preview.url}
+                    title={preview.file.name}
+                    className="h-[68vh] w-full rounded-lg border bg-background"
+                  />
+                ) : (
+                  <div className="flex h-[320px] flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+                    <FileIcon className="size-10" />
+                    <span>This file type cannot be previewed inline.</span>
+                    {preview.url && (
+                      <a
+                        href={preview.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground"
+                      >
+                        Open file
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 export function CellEditor({
   field,
   value,
   onCommit,
+  databaseId,
+  rowId,
   autoEdit,
   onFinish,
 }: CellProps) {
@@ -1030,6 +1334,17 @@ export function CellEditor({
   if (field.type === "relation")
     return (
       <RelationCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+    );
+  if (field.type === "files")
+    return (
+      <FilesCell
+        field={field}
+        value={value}
+        onCommit={onCommit}
+        databaseId={databaseId}
+        rowId={rowId}
+        onFinish={onFinish}
+      />
     );
   if (field.type === "rollup" || field.type === "formula")
     return <RollupCell field={field} value={value} onCommit={onCommit} />;

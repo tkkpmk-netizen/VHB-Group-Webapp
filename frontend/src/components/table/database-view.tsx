@@ -8,7 +8,7 @@ import { apiFetch } from "@/lib/api/client";
 import { SearchBar } from "@/components/table/search-box";
 import { ViewsBar } from "@/components/table/views-bar";
 import { ViewShell } from "@/components/table/view-shell";
-import { DatabaseAccess } from "@/components/table/database-access";
+import { ResourceAccess } from "@/components/access/resource-access";
 import { DatabaseTransfers } from "@/components/table/database-transfers";
 import { matchedRowIds, searchHits } from "@/lib/search";
 import type { components } from "@/lib/api/schema";
@@ -116,7 +116,11 @@ export function DatabaseView({ databaseId }: { databaseId: string }) {
         </button>
         <div className="ml-auto flex items-center gap-2">
           <DatabaseTransfers databaseId={databaseId} />
-          <DatabaseAccess databaseId={databaseId} />
+          <ResourceAccess
+            resourceType="database"
+            resourceId={databaseId}
+            resourceLabel="Database"
+          />
           <button type="button" title="More actions" className="rounded p-1.5 hover:bg-muted">
             <MoreHorizontal className="size-4" />
           </button>

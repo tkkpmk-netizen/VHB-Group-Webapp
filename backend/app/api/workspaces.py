@@ -20,6 +20,7 @@ from app.schemas.workspace import (
 )
 from app.services.authorization import Action, require_workspace_action
 from app.services.events import record_event
+from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
@@ -131,6 +132,15 @@ async def add_workspace_member(
         workspace_id=workspace.id,
         actor_id=current_user.id,
         data={"role": payload.role.value, "email": user.email},
+    )
+    await create_notification(
+        db,
+        workspace_id=workspace.id,
+        user_id=user.id,
+        notification_type="workspace.member_added",
+        title=f"You joined {workspace.name}",
+        body=f"You were added to {workspace.name} as {payload.role.value}.",
+        data={"workspace_id": str(workspace.id), "role": payload.role.value},
     )
     await db.commit()
     return MemberOut(

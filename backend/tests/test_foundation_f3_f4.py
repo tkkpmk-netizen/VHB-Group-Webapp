@@ -67,7 +67,7 @@ async def test_database_grant_can_reduce_editor_access(
     )
     database_id = database.json()["id"]
     grant = await client.put(
-        f"/databases/{database_id}/grants",
+        f"/resource-grants/database/{database_id}",
         json={"user_id": editor.json()["id"], "role": "viewer"},
         headers=_headers(owner_token),
     )

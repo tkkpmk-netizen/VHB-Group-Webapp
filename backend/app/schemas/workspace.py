@@ -4,7 +4,6 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.permission import ResourceRole
 from app.models.workspace import MemberRole
 
 
@@ -39,20 +38,6 @@ class MemberRoleUpdate(BaseModel):
 class MemberAdd(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     role: MemberRole = MemberRole.editor
-
-
-class DatabaseGrantUpsert(BaseModel):
-    user_id: uuid.UUID
-    role: ResourceRole
-
-
-class DatabaseGrantOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    database_id: uuid.UUID
-    user_id: uuid.UUID
-    role: ResourceRole
 
 
 class DatabaseCreate(BaseModel):

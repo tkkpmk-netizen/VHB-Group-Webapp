@@ -8,11 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.deps.auth import get_current_user
+from app.models.permission import ResourceType
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.services.authorization import (
     Action,
-    require_database_action,
+    require_resource_action,
     require_workspace_action,
 )
 
@@ -49,13 +50,16 @@ async def get_current_workspace(
         selected_workspace = next((item for item in workspaces if item.id == workspace_id), None)
     if selected_workspace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-    await require_workspace_action(
-        db,
-        workspace_id=selected_workspace.id,
-        user_id=current_user.id,
-        action=Action.read if request.method == "GET" else Action.write,
+    # Notification mutations only affect the authenticated user's own inbox and
+    # preferences, so workspace viewers may perform them.
+    action = (
+        Action.read
+        if request.method == "GET" or request.url.path.startswith("/notifications")
+        else Action.write
     )
     database_id: uuid.UUID | None = None
+    resource_type: ResourceType | None = None
+    resource_id: uuid.UUID | None = None
     raw_database_id = request.path_params.get("database_id")
     if raw_database_id:
         database_id = uuid.UUID(str(raw_database_id))
@@ -70,11 +74,34 @@ async def get_current_workspace(
         row = await db.get(Row, uuid.UUID(str(raw_row_id)))
         database_id = row.database_id if row else None
     if database_id is not None:
-        await require_database_action(
+        resource_type = ResourceType.database
+        resource_id = database_id
+    elif raw_document_id := request.path_params.get("document_id"):
+        resource_type = ResourceType.document
+        resource_id = uuid.UUID(str(raw_document_id))
+    elif raw_dashboard_id := request.path_params.get("dashboard_id"):
+        resource_type = ResourceType.dashboard
+        resource_id = uuid.UUID(str(raw_dashboard_id))
+    elif (raw_resource_type := request.path_params.get("resource_type")) and (
+        raw_resource_id := request.path_params.get("resource_id")
+    ):
+        resource_type = ResourceType(str(raw_resource_type))
+        resource_id = uuid.UUID(str(raw_resource_id))
+
+    if resource_type is not None and resource_id is not None:
+        await require_resource_action(
             db,
-            database_id=database_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
             workspace_id=selected_workspace.id,
             user_id=current_user.id,
-            action=Action.read if request.method == "GET" else Action.write,
+            action=action,
+        )
+    else:
+        await require_workspace_action(
+            db,
+            workspace_id=selected_workspace.id,
+            user_id=current_user.id,
+            action=action,
         )
     return selected_workspace

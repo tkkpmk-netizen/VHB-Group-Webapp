@@ -72,6 +72,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Google Login */
+        post: operations["google_login_auth_google_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Identities */
+        get: operations["list_identities_auth_identities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/google/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link Google */
+        post: operations["link_google_auth_google_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/identities/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unlink Identity */
+        delete: operations["unlink_identity_auth_identities__provider__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces": {
         parameters: {
             query?: never;
@@ -243,24 +311,6 @@ export interface paths {
         post?: never;
         /** Delete Database */
         delete: operations["delete_database_databases__database_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/databases/{database_id}/grants": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Database Grants */
-        get: operations["list_database_grants_databases__database_id__grants_get"];
-        /** Upsert Database Grant */
-        put: operations["upsert_database_grant_databases__database_id__grants_put"];
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -536,6 +586,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dashboards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Dashboards */
+        get: operations["list_dashboards_dashboards_get"];
+        put?: never;
+        /** Create Dashboard */
+        post: operations["create_dashboard_dashboards_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dashboards/{dashboard_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Dashboard */
+        get: operations["get_dashboard_dashboards__dashboard_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Dashboard */
+        delete: operations["delete_dashboard_dashboards__dashboard_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Dashboard */
+        patch: operations["update_dashboard_dashboards__dashboard_id__patch"];
+        trace?: never;
+    };
+    "/dashboards/{dashboard_id}/widgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Widgets */
+        get: operations["list_widgets_dashboards__dashboard_id__widgets_get"];
+        put?: never;
+        /** Create Widget */
+        post: operations["create_widget_dashboards__dashboard_id__widgets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dashboard-widgets/{widget_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Widget */
+        delete: operations["delete_widget_dashboard_widgets__widget_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Widget */
+        patch: operations["update_widget_dashboard_widgets__widget_id__patch"];
+        trace?: never;
+    };
+    "/dashboard-widgets/{widget_id}/data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Widget Data */
+        get: operations["get_widget_data_dashboard_widgets__widget_id__data_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets": {
         parameters: {
             query?: never;
@@ -616,6 +756,74 @@ export interface paths {
         post?: never;
         /** Delete Asset */
         delete: operations["delete_asset_assets__asset_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/google-drive/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Drive Status */
+        get: operations["drive_status_integrations_google_drive_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/{database_id}/rows/{row_id}/fields/{field_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Drive Files */
+        post: operations["upload_drive_files_databases__database_id__rows__row_id__fields__field_id__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/{database_id}/drive-files/{file_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** View Drive File */
+        get: operations["view_drive_file_databases__database_id__drive_files__file_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/{database_id}/drive-files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Drive File */
+        delete: operations["delete_drive_file_databases__database_id__drive_files__file_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -734,6 +942,127 @@ export interface paths {
         /** List Audit Events */
         get: operations["list_audit_events_audit_events_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resource-grants/{resource_type}/{resource_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Resource Grants */
+        get: operations["list_resource_grants_resource_grants__resource_type___resource_id__get"];
+        /** Upsert Resource Grant */
+        put: operations["upsert_resource_grant_resource_grants__resource_type___resource_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resource-grants/{resource_type}/{resource_id}/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Resource Grant */
+        delete: operations["delete_resource_grant_resource_grants__resource_type___resource_id___user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notifications */
+        get: operations["list_notifications_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Unread Count */
+        get: operations["get_unread_count_notifications_unread_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Notification Read */
+        post: operations["mark_notification_read_notifications__notification_id__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark All Read */
+        post: operations["mark_all_read_notifications_read_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Preferences */
+        get: operations["read_preferences_notifications_preferences_get"];
+        /** Update Preferences */
+        put: operations["update_preferences_notifications_preferences_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -867,10 +1196,49 @@ export interface components {
              */
             created_at: string;
         };
+        /** Body_upload_drive_files_databases__database_id__rows__row_id__fields__field_id__files_post */
+        Body_upload_drive_files_databases__database_id__rows__row_id__fields__field_id__files_post: {
+            /** Files */
+            files: string[];
+        };
         /** BulkRowCreate */
         BulkRowCreate: {
             /** Count */
             count: number;
+        };
+        /** DashboardCreate */
+        DashboardCreate: {
+            /**
+             * Name
+             * @default Untitled dashboard
+             */
+            name: string;
+            /** Description */
+            description?: string | null;
+        };
+        /** DashboardOut */
+        DashboardOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+        };
+        /** DashboardUpdate */
+        DashboardUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
         };
         /** DatabaseCreate */
         DatabaseCreate: {
@@ -889,34 +1257,6 @@ export interface components {
              * @enum {string}
              */
             format: "csv" | "xlsx";
-        };
-        /** DatabaseGrantOut */
-        DatabaseGrantOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Database Id
-             * Format: uuid
-             */
-            database_id: string;
-            /**
-             * User Id
-             * Format: uuid
-             */
-            user_id: string;
-            role: components["schemas"]["ResourceRole"];
-        };
-        /** DatabaseGrantUpsert */
-        DatabaseGrantUpsert: {
-            /**
-             * User Id
-             * Format: uuid
-             */
-            user_id: string;
-            role: components["schemas"]["ResourceRole"];
         };
         /** DatabaseImportCreate */
         DatabaseImportCreate: {
@@ -1024,6 +1364,47 @@ export interface components {
             /** Icon */
             icon?: string | null;
         };
+        /** DriveFileOut */
+        DriveFileOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Database Id
+             * Format: uuid
+             */
+            database_id: string;
+            /**
+             * Row Id
+             * Format: uuid
+             */
+            row_id: string;
+            /**
+             * Field Id
+             * Format: uuid
+             */
+            field_id: string;
+            /** Filename */
+            filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** DriveStatusOut */
+        DriveStatusOut: {
+            /** Configured */
+            configured: boolean;
+            /** Max File Bytes */
+            max_file_bytes: number;
+        };
         /** FieldCreate */
         FieldCreate: {
             /** Name */
@@ -1060,7 +1441,7 @@ export interface components {
          * FieldType
          * @enum {string}
          */
-        FieldType: "text" | "long_text" | "number" | "checkbox" | "date" | "url" | "email" | "phone" | "select" | "multi_select" | "status" | "priority" | "rating" | "country" | "unique_id" | "relation" | "rollup" | "formula" | "people" | "progress" | "created_time" | "created_by" | "last_edited_time" | "last_edited_by";
+        FieldType: "text" | "long_text" | "number" | "checkbox" | "date" | "url" | "email" | "phone" | "select" | "multi_select" | "status" | "priority" | "rating" | "country" | "unique_id" | "relation" | "rollup" | "formula" | "people" | "progress" | "created_time" | "created_by" | "last_edited_time" | "last_edited_by" | "files";
         /** FieldUpdate */
         FieldUpdate: {
             /** Name */
@@ -1119,6 +1500,11 @@ export interface components {
             /** Error */
             error?: string | null;
         };
+        /** GoogleCredentialRequest */
+        GoogleCredentialRequest: {
+            /** Credential */
+            credential: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1132,6 +1518,21 @@ export interface components {
             service: string;
             /** Version */
             version: string;
+        };
+        /** IdentityOut */
+        IdentityOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /** JobCreate */
         JobCreate: {
@@ -1247,16 +1648,106 @@ export interface components {
             name: string;
             role: components["schemas"]["MemberRole"];
         };
+        /** NotificationOut */
+        NotificationOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Type */
+            type: string;
+            /** Title */
+            title: string;
+            /** Body */
+            body: string;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            /** Read At */
+            read_at: string | null;
+            /** Emailed At */
+            emailed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** NotificationPreferenceOut */
+        NotificationPreferenceOut: {
+            /** In App Enabled */
+            in_app_enabled: boolean;
+            /** Email Enabled */
+            email_enabled: boolean;
+        };
+        /** NotificationPreferenceUpdate */
+        NotificationPreferenceUpdate: {
+            /** In App Enabled */
+            in_app_enabled: boolean;
+            /** Email Enabled */
+            email_enabled: boolean;
+        };
         /** ReorderRequest */
         ReorderRequest: {
             /** Ids */
             ids: string[];
+        };
+        /** ResourceGrantOut */
+        ResourceGrantOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            resource_type: components["schemas"]["ResourceType"];
+            /**
+             * Resource Id
+             * Format: uuid
+             */
+            resource_id: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            role: components["schemas"]["ResourceRole"];
+        };
+        /** ResourceGrantUpsert */
+        ResourceGrantUpsert: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            role: components["schemas"]["ResourceRole"];
         };
         /**
          * ResourceRole
          * @enum {string}
          */
         ResourceRole: "viewer" | "editor" | "manager";
+        /**
+         * ResourceType
+         * @enum {string}
+         */
+        ResourceType: "database" | "document" | "dashboard";
         /** RowAggregation */
         RowAggregation: {
             /** Field Id */
@@ -1285,6 +1776,15 @@ export interface components {
             operator: "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte" | "is_empty" | "is_not_empty";
             /** Value */
             value?: unknown;
+        };
+        /** RowGroup */
+        RowGroup: {
+            /** Key */
+            key: unknown;
+            /** Aggregates */
+            aggregates?: {
+                [key: string]: unknown;
+            };
         };
         /** RowOut */
         RowOut: {
@@ -1321,6 +1821,8 @@ export interface components {
             aggregates?: {
                 [key: string]: unknown;
             };
+            /** Groups */
+            groups?: components["schemas"]["RowGroup"][];
         };
         /** RowQuery */
         RowQuery: {
@@ -1340,6 +1842,8 @@ export interface components {
             sorts?: components["schemas"]["RowSort"][];
             /** Aggregations */
             aggregations?: components["schemas"]["RowAggregation"][];
+            /** Group By */
+            group_by?: string | null;
         };
         /** RowSort */
         RowSort: {
@@ -1426,6 +1930,11 @@ export interface components {
         TransferJobOut: {
             job: components["schemas"]["JobOut"];
         };
+        /** UnreadCountOut */
+        UnreadCountOut: {
+            /** Count */
+            count: number;
+        };
         /** UserOut */
         UserOut: {
             /**
@@ -1501,6 +2010,80 @@ export interface components {
             type?: components["schemas"]["ViewType"] | null;
             /** Config */
             config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Order */
+            order?: number | null;
+        };
+        /** WidgetCreate */
+        WidgetCreate: {
+            /**
+             * Database Id
+             * Format: uuid
+             */
+            database_id: string;
+            /** Title */
+            title: string;
+            type: components["schemas"]["WidgetType"];
+            query?: components["schemas"]["RowQuery"];
+            /** Visualization */
+            visualization?: {
+                [key: string]: unknown;
+            };
+        };
+        /** WidgetDataOut */
+        WidgetDataOut: {
+            /**
+             * Widget Id
+             * Format: uuid
+             */
+            widget_id: string;
+            data: components["schemas"]["RowPage"];
+        };
+        /** WidgetOut */
+        WidgetOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Dashboard Id
+             * Format: uuid
+             */
+            dashboard_id: string;
+            /**
+             * Database Id
+             * Format: uuid
+             */
+            database_id: string;
+            /** Title */
+            title: string;
+            type: components["schemas"]["WidgetType"];
+            /** Query */
+            query: {
+                [key: string]: unknown;
+            };
+            /** Visualization */
+            visualization: {
+                [key: string]: unknown;
+            };
+            /** Order */
+            order: number;
+        };
+        /**
+         * WidgetType
+         * @enum {string}
+         */
+        WidgetType: "metric" | "bar" | "table";
+        /** WidgetUpdate */
+        WidgetUpdate: {
+            /** Title */
+            title?: string | null;
+            type?: components["schemas"]["WidgetType"] | null;
+            query?: components["schemas"]["RowQuery"] | null;
+            /** Visualization */
+            visualization?: {
                 [key: string]: unknown;
             } | null;
             /** Order */
@@ -1632,6 +2215,121 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    google_login_auth_google_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_identities_auth_identities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityOut"][];
+                };
+            };
+        };
+    };
+    link_google_auth_google_link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_identity_auth_identities__provider__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -2146,76 +2844,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_database_grants_databases__database_id__grants_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-ID"?: string | null;
-            };
-            path: {
-                database_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DatabaseGrantOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upsert_database_grant_databases__database_id__grants_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-Workspace-ID"?: string | null;
-            };
-            path: {
-                database_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DatabaseGrantUpsert"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DatabaseGrantOut"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -3068,6 +3696,346 @@ export interface operations {
             };
         };
     };
+    list_dashboards_dashboards_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_dashboard_dashboards_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dashboard_dashboards__dashboard_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                dashboard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_dashboard_dashboards__dashboard_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                dashboard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_dashboard_dashboards__dashboard_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                dashboard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_widgets_dashboards__dashboard_id__widgets_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                dashboard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WidgetOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_widget_dashboards__dashboard_id__widgets_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                dashboard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WidgetCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WidgetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_widget_dashboard_widgets__widget_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                widget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_widget_dashboard_widgets__widget_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                widget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WidgetUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WidgetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_widget_data_dashboard_widgets__widget_id__data_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+            };
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                widget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WidgetDataOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_assets_assets_get: {
         parameters: {
             query?: {
@@ -3211,6 +4179,142 @@ export interface operations {
             };
             path: {
                 asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    drive_status_integrations_google_drive_status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveStatusOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_drive_files_databases__database_id__rows__row_id__fields__field_id__files_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+                row_id: string;
+                field_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_drive_files_databases__database_id__rows__row_id__fields__field_id__files_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveFileOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    view_drive_file_databases__database_id__drive_files__file_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_drive_file_databases__database_id__drive_files__file_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+                file_id: string;
             };
             cookie?: never;
         };
@@ -3499,6 +4603,304 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_resource_grants_resource_grants__resource_type___resource_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                resource_type: components["schemas"]["ResourceType"];
+                resource_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceGrantOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_resource_grant_resource_grants__resource_type___resource_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                resource_type: components["schemas"]["ResourceType"];
+                resource_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResourceGrantUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceGrantOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_resource_grant_resource_grants__resource_type___resource_id___user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                resource_type: components["schemas"]["ResourceType"];
+                resource_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_notifications_notifications_get: {
+        parameters: {
+            query?: {
+                unread_only?: boolean;
+                limit?: number;
+            };
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_unread_count_notifications_unread_count_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_notification_read_notifications__notification_id__read_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_read_notifications_read_all_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_preferences_notifications_preferences_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferenceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_preferences_notifications_preferences_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPreferenceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferenceOut"];
                 };
             };
             /** @description Validation Error */

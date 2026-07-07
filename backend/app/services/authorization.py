@@ -1,13 +1,13 @@
-"""Central authorization policy for workspace and database resources."""
+"""Central authorization policy for workspace and generic resources."""
 
 import enum
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.permission import DatabaseGrant, ResourceRole
+from app.models.permission import ResourceGrant, ResourceRole, ResourceType
 from app.models.workspace import MemberRole, WorkspaceMember
 
 
@@ -49,10 +49,11 @@ async def require_workspace_action(
     return membership
 
 
-async def require_database_action(
+async def require_resource_action(
     db: AsyncSession,
     *,
-    database_id: uuid.UUID,
+    resource_type: ResourceType,
+    resource_id: uuid.UUID,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     action: Action,
@@ -66,11 +67,49 @@ async def require_database_action(
     if membership.role in {MemberRole.owner, MemberRole.admin}:
         return
     grant = await db.scalar(
-        select(DatabaseGrant).where(
-            DatabaseGrant.database_id == database_id,
-            DatabaseGrant.user_id == user_id,
+        select(ResourceGrant).where(
+            ResourceGrant.workspace_id == workspace_id,
+            ResourceGrant.resource_type == resource_type,
+            ResourceGrant.resource_id == resource_id,
+            ResourceGrant.user_id == user_id,
         )
     )
     allowed = _RESOURCE_ACTIONS[grant.role] if grant else _WORKSPACE_ACTIONS[membership.role]
     if action not in allowed:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permission")
+
+
+async def require_database_action(
+    db: AsyncSession,
+    *,
+    database_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action: Action,
+) -> None:
+    """Compatibility wrapper while database callers migrate to generic policy."""
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.database,
+        resource_id=database_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        action=action,
+    )
+
+
+async def delete_resource_grants(
+    db: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    resource_type: ResourceType,
+    resource_id: uuid.UUID,
+) -> None:
+    """Remove polymorphic grants before deleting their parent resource."""
+    await db.execute(
+        delete(ResourceGrant).where(
+            ResourceGrant.workspace_id == workspace_id,
+            ResourceGrant.resource_type == resource_type,
+            ResourceGrant.resource_id == resource_id,
+        )
+    )

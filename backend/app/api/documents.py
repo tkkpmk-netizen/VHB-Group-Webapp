@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
 from app.models.document import Document
+from app.models.permission import ResourceType
 from app.models.resource import Folder, Space
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -18,6 +19,11 @@ from app.schemas.document import (
     DocumentCreate,
     DocumentOut,
     DocumentUpdate,
+)
+from app.services.authorization import (
+    Action,
+    delete_resource_grants,
+    require_resource_action,
 )
 from app.services.events import record_event
 
@@ -155,6 +161,14 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     document = await _scoped_document(document_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.document,
+        resource_id=document.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.manage,
+    )
     record_event(
         db,
         action="document.deleted",
@@ -162,6 +176,12 @@ async def delete_document(
         resource_id=str(document.id),
         workspace_id=workspace.id,
         actor_id=current_user.id,
+    )
+    await delete_resource_grants(
+        db,
+        workspace_id=workspace.id,
+        resource_type=ResourceType.document,
+        resource_id=document.id,
     )
     await db.delete(document)
     await db.commit()

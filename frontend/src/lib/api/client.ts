@@ -38,11 +38,13 @@ export async function apiFetch<T>(
   const { getToken } = await import("@/lib/auth");
   const token = getToken();
   const workspaceId = getWorkspaceId();
+  const isFormData =
+    typeof FormData !== "undefined" && init?.body instanceof FormData;
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(workspaceId ? { "X-Workspace-ID": workspaceId } : {}),
       ...init?.headers,

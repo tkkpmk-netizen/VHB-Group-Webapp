@@ -279,6 +279,23 @@ def validate_cell(field: Field, value: Any) -> Any:
             raise CellValidationError(f"{field.name}: expected number")
         return max(0, min(100, value))
 
+    if t is FieldType.files:
+        if not isinstance(value, list):
+            raise CellValidationError(f"{field.name}: expected a file list")
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict) or not item.get("id") or not item.get("name"):
+                raise CellValidationError(f"{field.name}: invalid file reference")
+            normalized.append(
+                {
+                    "id": str(item["id"]),
+                    "name": str(item["name"]),
+                    "mime_type": str(item.get("mime_type") or "application/octet-stream"),
+                    "size_bytes": int(item.get("size_bytes") or 0),
+                }
+            )
+        return normalized
+
     # Reserved types (relation, …) — not editable yet.
     raise CellValidationError(f"{field.name}: field type not supported yet")
 

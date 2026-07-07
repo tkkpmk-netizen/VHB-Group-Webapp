@@ -9,6 +9,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { MantineProvider } from "@mantine/core";
 import { Check, Cloud, LoaderCircle } from "lucide-react";
 import { useRef, useState } from "react";
+import { ResourceAccess } from "@/components/access/resource-access";
 import { apiFetch } from "@/lib/api/client";
 
 type DocumentData = {
@@ -79,6 +80,11 @@ export function BlockDocumentEditor({
             )}
             {saveState}
           </span>
+          <ResourceAccess
+            resourceType="document"
+            resourceId={initialDocument.id}
+            resourceLabel="Document"
+          />
         </header>
         <div className="mx-auto w-full max-w-4xl flex-1 py-10">
           <BlockNoteView

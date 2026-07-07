@@ -43,6 +43,22 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     auth_rate_limit_per_minute: int = 20
 
+    # Google Identity Services.
+    google_client_id: str | None = None
+
+    # Email notifications. Empty host keeps email delivery disabled.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str = "notifications@vhb.local"
+    smtp_use_tls: bool = True
+
+    # CM7 Google Shared Drive storage.
+    google_drive_service_account_file: str | None = None
+    google_drive_folder_id: str | None = None
+    google_drive_max_file_bytes: int = 100 * 1024 * 1024
+
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
         if self.environment == "production":

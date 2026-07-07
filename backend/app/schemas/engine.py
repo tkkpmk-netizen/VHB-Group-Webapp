@@ -74,6 +74,12 @@ class RowQuery(BaseModel):
     filters: list[RowFilter] = PField(default_factory=list, max_length=20)
     sorts: list[RowSort] = PField(default_factory=list, max_length=5)
     aggregations: list[RowAggregation] = PField(default_factory=list, max_length=20)
+    group_by: str | None = None
+
+
+class RowGroup(BaseModel):
+    key: Any
+    aggregates: dict[str, Any] = PField(default_factory=dict)
 
 
 class RowPage(BaseModel):
@@ -83,6 +89,7 @@ class RowPage(BaseModel):
     total: int
     pages: int
     aggregates: dict[str, Any] = PField(default_factory=dict)
+    groups: list[RowGroup] = PField(default_factory=list)
 
 
 class ReorderRequest(BaseModel):
