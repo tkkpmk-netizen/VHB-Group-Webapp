@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
+from app.models.resource import Space
 from app.models.user import User
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
 from app.schemas.auth import SignupRequest
@@ -35,21 +36,39 @@ async def create_user(db: AsyncSession, payload: SignupRequest) -> User:
     workspace = Workspace(name=ws_name)
     db.add(workspace)
     await db.flush()
-    db.add(
-        WorkspaceMember(
-            workspace_id=workspace.id, user_id=user.id, role=MemberRole.owner
-        )
-    )
+    db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role=MemberRole.owner))
+    db.add(Space(workspace_id=workspace.id, name="General", order=0))
 
     await db.commit()
     await db.refresh(user)
     return user
 
 
-async def authenticate_user(
-    db: AsyncSession, email: str, password: str
-) -> User | None:
+async def create_oauth_user(db: AsyncSession, *, email: str, full_name: str | None) -> User:
+    user = User(email=email.lower(), hashed_password=None, full_name=full_name)
+    db.add(user)
+    await db.flush()
+    ws_name = f"{full_name or email.split('@')[0]}'s Workspace"
+    workspace = Workspace(name=ws_name)
+    db.add(workspace)
+    await db.flush()
+    db.add(
+        WorkspaceMember(
+            workspace_id=workspace.id,
+            user_id=user.id,
+            role=MemberRole.owner,
+        )
+    )
+    db.add(Space(workspace_id=workspace.id, name="General", order=0))
+    return user
+
+
+async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:
     user = await get_user_by_email(db, email)
-    if user is None or not verify_password(password, user.hashed_password):
+    if (
+        user is None
+        or user.hashed_password is None
+        or not verify_password(password, user.hashed_password)
+    ):
         return None
     return user

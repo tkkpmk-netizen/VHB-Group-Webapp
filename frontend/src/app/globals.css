@@ -1,48 +1,49 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "grapesjs/dist/css/grapes.min.css";
 
 @custom-variant dark (&:is(.dark *));
 
-/* DashStack-inspired theme (temporary — will be replaced by official design). */
+/* VHB product system — dense, workspace-first UI inspired by ClickUp patterns. */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
-  --background: #f5f6fa; /* app canvas */
-  --foreground: #202224;
+  --background: #f7f8fa;
+  --foreground: #292d34;
 
   --card: #ffffff;
-  --card-foreground: #202224;
+  --card-foreground: #292d34;
 
   --popover: #ffffff;
-  --popover-foreground: #202224;
+  --popover-foreground: #292d34;
 
-  --primary: #4880ff; /* DashStack blue */
+  --primary: #0b8ff3;
   --primary-foreground: #ffffff;
 
-  --secondary: #eef2ff;
-  --secondary-foreground: #202224;
+  --secondary: #edf4ff;
+  --secondary-foreground: #292d34;
 
-  --muted: #f1f4f9;
-  --muted-foreground: #64748b;
+  --muted: #f2f3f5;
+  --muted-foreground: #6b7078;
 
-  --accent: #eef2ff;
-  --accent-foreground: #4880ff;
+  --accent: #e8f1ff;
+  --accent-foreground: #1264d7;
 
   --destructive: #ef3826;
   --destructive-foreground: #ffffff;
 
-  --border: #e0e0e0;
-  --input: #d5d5d5;
-  --ring: #4880ff;
+  --border: #e3e5e8;
+  --input: #d8dadd;
+  --ring: #0b8ff3;
 
   --sidebar: #ffffff;
-  --sidebar-foreground: #202224;
-  --sidebar-primary: #4880ff;
+  --sidebar-foreground: #292d34;
+  --sidebar-primary: #0b8ff3;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #4880ff;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #e0e0e0;
-  --sidebar-ring: #4880ff;
+  --sidebar-accent: #e8f1ff;
+  --sidebar-accent-foreground: #1264d7;
+  --sidebar-border: #e3e5e8;
+  --sidebar-ring: #0b8ff3;
 }
 
 .dark {
@@ -130,4 +131,61 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
+  font-size: 14px;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+a,
+input {
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ring) 70%, transparent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: #cfe5ff;
+  color: #163c6b;
+}
+
+/* DP3 Web Designer: keep GrapesJS controls inside the ClickUp-style shell. */
+.web-designer-blocks .gjs-block {
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 8px;
+  border-radius: 10px;
+  border-color: var(--color-border);
+  box-shadow: none;
+}
+
+.web-designer-styles .gjs-sm-sector {
+  border-color: var(--color-border);
+}
+
+.gjs-one-bg {
+  background-color: #ffffff;
+}
+
+.gjs-two-color,
+.gjs-four-color-h:hover {
+  color: #292d34;
+}
+
+.gjs-three-bg {
+  background-color: #0b8ff3;
+}
+
+.gjs-four-color,
+.gjs-four-color-h:hover {
+  color: #0b8ff3;
 }

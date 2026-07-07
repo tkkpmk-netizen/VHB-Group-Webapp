@@ -7,11 +7,18 @@ dependencies = [
     "alembic>=1.18.4",
     "asteval>=1.0.9",
     "asyncpg>=0.31.0",
+    "boto3>=1.39.0",
     "fastapi>=0.138.0",
+    "google-api-python-client>=2.170.0",
+    "google-auth>=2.40.0",
+    "openpyxl>=3.1.5",
     "pwdlib[argon2]>=0.3.0",
     "pydantic-settings>=2",
     "pydantic[email]>=2.13.4",
     "pyjwt>=2.13.0",
+    "python-multipart>=0.0.20",
+    "redis>=6.2.0",
+    "requests>=2.32.0",
     "sqlalchemy[asyncio]>=2",
     "uvicorn[standard]>=0.49.0",
 ]
@@ -23,6 +30,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.15.19",
+    "types-openpyxl>=3.1.5",
 ]
 
 [tool.ruff]

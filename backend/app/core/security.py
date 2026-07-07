@@ -1,5 +1,6 @@
 """Password hashing and JWT issuing/verification (app-owned auth)."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,10 +21,11 @@ def verify_password(password: str, hashed: str) -> bool:
     return _password_hash.verify(password, hashed)
 
 
-def create_access_token(subject: str) -> str:
+def create_access_token(subject: str, session_id: str | None = None) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": subject,
+        "jti": session_id or str(uuid.uuid4()),
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
     }
@@ -32,6 +34,4 @@ def create_access_token(subject: str) -> str:
 
 def decode_access_token(token: str) -> dict[str, Any]:
     """Decode & verify a JWT. Raises jwt.PyJWTError on invalid/expired tokens."""
-    return jwt.decode(
-        token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
-    )
+    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])

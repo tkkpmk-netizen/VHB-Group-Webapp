@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api/client";
 import { setToken } from "@/lib/auth";
 import type { components } from "@/lib/api/schema";
+import { GoogleSignIn } from "@/components/auth/google-sign-in";
 
 type TokenResponse = components["schemas"]["TokenResponse"];
 
@@ -105,6 +106,29 @@ export default function LoginPage() {
                 : "Đăng ký"}
           </button>
         </form>
+
+        <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          or
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <GoogleSignIn
+          onCredential={async (credential) => {
+            setError(null);
+            try {
+              const result = await apiFetch<TokenResponse>("/auth/google", {
+                method: "POST",
+                body: JSON.stringify({ credential }),
+              });
+              setToken(result.access_token);
+              router.push("/");
+            } catch {
+              setError(
+                "Không thể đăng nhập Google. Nếu email đã tồn tại, hãy đăng nhập bằng mật khẩu rồi liên kết trong Settings.",
+              );
+            }
+          }}
+        />
 
         <button
           onClick={() => {

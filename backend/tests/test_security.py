@@ -35,9 +35,7 @@ def test_jwt_invalid_signature_rejected() -> None:
 
 
 def test_jwt_expired_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        security.settings, "access_token_expire_minutes", -1, raising=False
-    )
+    monkeypatch.setattr(security.settings, "access_token_expire_minutes", -1, raising=False)
     token = create_access_token("user-123")
     time.sleep(0.01)
     with pytest.raises(jwt.ExpiredSignatureError):

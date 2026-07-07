@@ -45,7 +45,5 @@ async def test_me_without_token_rejected(client: httpx.AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_me_with_bad_token_rejected(client: httpx.AsyncClient) -> None:
-    r = await client.get(
-        "/auth/me", headers={"Authorization": "Bearer not-a-real-token"}
-    )
+    r = await client.get("/auth/me", headers={"Authorization": "Bearer not-a-real-token"})
     assert r.status_code == 401

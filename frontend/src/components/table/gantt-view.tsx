@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
-import { ValueChip } from "@/components/table/cell-editor";
+import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import {
   PERIODS,
   applyDrag,
@@ -30,6 +30,7 @@ import {
   type SortRule,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
+import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
 type Row = components["schemas"]["RowOut"];
@@ -188,6 +189,7 @@ export function GanttView({
   const [extBefore, setExtBefore] = useState(0); // window extensions (earlier)
   const [extAfter, setExtAfter] = useState(0); // window extensions (later)
   const [edges, setEdges] = useState({ left: false, right: false });
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>(() => ({
     ...ganttColWidths,
   }));
@@ -251,7 +253,30 @@ export function GanttView({
         method: "POST",
         body: JSON.stringify({ data: {} }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: (created) => {
+      setEditingRowId(created.id);
+      setPages(Math.floor((rowsQ.data?.length ?? 0) / limit));
+      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+    },
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        e.key.toLowerCase() !== "n" ||
+        e.metaKey ||
+        e.ctrlKey ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      )
+        return;
+      e.preventDefault();
+      addRow.mutate();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   const fields = fieldsQ.data ?? [];
@@ -376,8 +401,8 @@ export function GanttView({
           <div className="mb-2">{controls()}</div>
         )}
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-          Timeline cần một field ngày — <b>Date</b>, <b>Created time</b>,{" "}
-          <b>Last edited time</b>, hoặc <b>Formula</b> trả về ngày.
+          Timeline needs a date field: <b>Date</b>, <b>Created time</b>,{" "}
+          <b>Last edited time</b>, or a date-returning <b>Formula</b>.
         </div>
       </div>
     );
@@ -570,6 +595,14 @@ export function GanttView({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
+      <ViewQueryState
+        loading={fieldsQ.isLoading || rowsQ.isLoading}
+        error={fieldsQ.isError || rowsQ.isError}
+        onRetry={() => {
+          void fieldsQ.refetch();
+          void rowsQ.refetch();
+        }}
+      />
       {toolbarSlot ? (
         createPortal(controls(scrollToToday), toolbarSlot)
       ) : (
@@ -595,7 +628,7 @@ export function GanttView({
               style={{ height: HDR_H * 2 }}
             >
               <div className={`${colCls} flex items-center`} style={{ width: nameW }}>
-                {titleField?.name ?? "Tên"}
+                {titleField?.name ?? "Name"}
                 {resizeHandle(TITLE_KEY, nameW)}
               </div>
               <div
@@ -616,7 +649,7 @@ export function GanttView({
                     onClick={() =>
                       setGanttLeftFields(ganttLeftFields.filter((id) => id !== f.id))
                     }
-                    title="Bỏ cột"
+                    title="Remove column"
                     className="shrink-0 text-muted-foreground/60 hover:text-destructive"
                   >
                     ×
@@ -646,13 +679,32 @@ export function GanttView({
                   style={{ width: nameW }}
                 >
                   <span className="min-w-0 flex-1 truncate" title={title(r)}>
-                    {title(r)}
+                    {titleField ? (
+                      <CellEditor
+                        key={editingRowId === r.id ? "edit" : "view"}
+                        field={titleField}
+                        value={
+                          (r.data as Record<string, unknown>)[titleField.id] ?? null
+                        }
+                        onCommit={(value) =>
+                          save.mutate({
+                            rowId: r.id,
+                            fieldId: titleField.id,
+                            value,
+                          })
+                        }
+                        autoEdit={editingRowId === r.id}
+                        onFinish={() => setEditingRowId(null)}
+                      />
+                    ) : (
+                      title(r)
+                    )}
                   </span>
                   {span && (
                     <button
                       onClick={() => scrollToX(xOf(span.start))}
-                      title="Nhảy tới timeblock"
-                      className="shrink-0 text-muted-foreground/50 opacity-0 hover:text-primary group-hover:opacity-100"
+                      title="Jump to time block"
+                      className="shrink-0 rounded p-0.5 text-muted-foreground/60 transition hover:bg-primary/10 hover:text-primary"
                     >
                       <LocateFixed className="size-3.5" />
                     </button>
@@ -825,9 +877,10 @@ export function GanttView({
         )}
         <button
           onClick={() => addRow.mutate()}
+          title="Create a new row and edit its name"
           className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted"
         >
-          <Plus className="size-4" /> New
+          <Plus className="size-4" /> New <kbd className="text-[10px] opacity-60">N</kbd>
         </button>
       </div>
 
@@ -835,10 +888,10 @@ export function GanttView({
       {undatedRows.length > 0 && (
         <div className="mt-2 shrink-0 overflow-hidden rounded-xl border">
           <div className="border-b bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            Chưa có ngày ({undatedRows.length}) ·{" "}
+            Unscheduled ({undatedRows.length}) ·{" "}
             {editable
-              ? "click hoặc kéo trên timeline để đặt ngày"
-              : "field này không đặt ngày được"}
+              ? "click or drag on the timeline to set a date"
+              : "this field cannot be edited"}
           </div>
           <div
             ref={trayScrollRef}
@@ -862,7 +915,27 @@ export function GanttView({
                         style={{ width: nameW }}
                         title={title(r)}
                       >
-                        {title(r)}
+                        {titleField ? (
+                          <CellEditor
+                            key={editingRowId === r.id ? "edit" : "view"}
+                            field={titleField}
+                            value={
+                              (r.data as Record<string, unknown>)[titleField.id] ??
+                              null
+                            }
+                            onCommit={(value) =>
+                              save.mutate({
+                                rowId: r.id,
+                                fieldId: titleField.id,
+                                value,
+                              })
+                            }
+                            autoEdit={editingRowId === r.id}
+                            onFinish={() => setEditingRowId(null)}
+                          />
+                        ) : (
+                          title(r)
+                        )}
                       </div>
                       <div
                         className={`${colCls} flex items-center text-xs ${

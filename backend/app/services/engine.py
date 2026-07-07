@@ -117,9 +117,9 @@ FORMULA_FUNCS: dict[str, Any] = {
     "concat": lambda *a: "".join(str(x) for x in a if x is not None),
     "join": lambda sep, *a: str(sep).join(str(x) for x in _flatten(a) if x is not None),
     "length": lambda x: len(x) if x is not None else 0,
-    "substring": lambda s, a, b=None: str(s)[int(a) : (int(b) if b is not None else None)]
-    if s is not None
-    else "",
+    "substring": lambda s, a, b=None: (
+        str(s)[int(a) : (int(b) if b is not None else None)] if s is not None else ""
+    ),
     "replace": lambda s, o, n: str(s).replace(str(o), str(n)) if s is not None else "",
     "contains": lambda s, sub: (str(sub) in str(s)) if s is not None else False,
     "lower": lambda s: str(s).lower() if s is not None else "",
@@ -155,9 +155,7 @@ def evaluate_formula(expression: str, value_lookup: dict[str, Any]) -> Any:
     return value
 
 
-def check_formula(
-    expression: str, value_lookup: dict[str, Any]
-) -> tuple[Any, str | None]:
+def check_formula(expression: str, value_lookup: dict[str, Any]) -> tuple[Any, str | None]:
     """Evaluate and also return a human-readable error (for the editor preview)."""
     expr = _RESERVED_CALL.sub(lambda m: f"_{m.group(1)}(", expression)
     interp = Interpreter()
@@ -280,6 +278,23 @@ def validate_cell(field: Field, value: Any) -> Any:
         if not _is_number(value):
             raise CellValidationError(f"{field.name}: expected number")
         return max(0, min(100, value))
+
+    if t is FieldType.files:
+        if not isinstance(value, list):
+            raise CellValidationError(f"{field.name}: expected a file list")
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict) or not item.get("id") or not item.get("name"):
+                raise CellValidationError(f"{field.name}: invalid file reference")
+            normalized.append(
+                {
+                    "id": str(item["id"]),
+                    "name": str(item["name"]),
+                    "mime_type": str(item.get("mime_type") or "application/octet-stream"),
+                    "size_bytes": int(item.get("size_bytes") or 0),
+                }
+            )
+        return normalized
 
     # Reserved types (relation, …) — not editable yet.
     raise CellValidationError(f"{field.name}: field type not supported yet")

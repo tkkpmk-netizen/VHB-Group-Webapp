@@ -51,7 +51,7 @@
 | key | mô tả | phụ thuộc |
 |---|---|---|
 | `people` | gán thành viên workspace (array user id) | đã có members |
-| `files` | đính kèm tệp | **cần Storage** |
+| `files` | đính kèm ảnh/tệp, metadata trong PostgreSQL, bytes trên Google Drive Shared Drive | **CM7 đã có** |
 
 ### F. Relation & Computed
 | key | mô tả | phụ thuộc |
@@ -85,7 +85,7 @@
 `people`, `relation`, `rollup`, `formula`, `unique_id`, `created_time/by`, `last_edited_time/by`
 
 **Phase E3 — cần hạ tầng thêm:**
-`files` (Storage), `location` (Maps), `progress` (subtask)
+`files` (CM7 Google Drive-backed), `location` (Maps), `progress` (subtask)
 
 ## Views (ghi nhận, làm sau theo phase riêng)
 Notion: table, board, calendar, timeline, gallery, list, form, chart, map, dashboard.

@@ -1,0 +1,89 @@
+"""Database CSV/XLSX import and export job APIs."""
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import get_settings
+from app.db.session import get_db
+from app.deps.auth import get_current_user
+from app.deps.workspace import get_current_workspace
+from app.models.asset import Asset, AssetStatus
+from app.models.database import Database
+from app.models.user import User
+from app.models.workspace import Workspace
+from app.schemas.job import JobOut
+from app.schemas.transfer import (
+    DatabaseExportCreate,
+    DatabaseImportCreate,
+    TransferJobOut,
+)
+from app.services.jobs import enqueue_job
+
+router = APIRouter(tags=["transfers"])
+settings = get_settings()
+
+
+async def _database(database_id: uuid.UUID, workspace: Workspace, db: AsyncSession) -> Database:
+    database = await db.get(Database, database_id)
+    if database is None or database.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Database not found")
+    return database
+
+
+@router.post(
+    "/databases/{database_id}/imports",
+    response_model=TransferJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_database(
+    database_id: uuid.UUID,
+    payload: DatabaseImportCreate,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TransferJobOut:
+    await _database(database_id, workspace, db)
+    asset = await db.get(Asset, payload.asset_id)
+    if asset is None or asset.workspace_id != workspace.id or asset.status is not AssetStatus.ready:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Ready asset required")
+    job = await enqueue_job(
+        db,
+        workspace_id=workspace.id,
+        created_by_id=current_user.id,
+        job_type="database.import",
+        payload={
+            "database_id": str(database_id),
+            "asset_id": str(asset.id),
+            "format": payload.format,
+            "mapping": {key: str(value) for key, value in payload.mapping.items()},
+            "create_missing_fields": payload.create_missing_fields,
+        },
+        max_attempts=settings.worker_max_attempts,
+    )
+    return TransferJobOut(job=JobOut.model_validate(job))
+
+
+@router.post(
+    "/databases/{database_id}/exports",
+    response_model=TransferJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def export_database(
+    database_id: uuid.UUID,
+    payload: DatabaseExportCreate,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TransferJobOut:
+    await _database(database_id, workspace, db)
+    job = await enqueue_job(
+        db,
+        workspace_id=workspace.id,
+        created_by_id=current_user.id,
+        job_type="database.export",
+        payload={"database_id": str(database_id), "format": payload.format},
+        max_attempts=settings.worker_max_attempts,
+    )
+    return TransferJobOut(job=JobOut.model_validate(job))

@@ -22,7 +22,7 @@ export function emptyGroup(): FilterGroup {
 type Choice = { id: string; label: string };
 
 const SELECT_LIKE = new Set(["select", "status", "priority"]);
-const MULTI_LIKE = new Set(["multi_select", "relation"]);
+const MULTI_LIKE = new Set(["multi_select", "relation", "files"]);
 const NUM_LIKE = new Set(["number", "rating"]);
 
 function choices(field: Field): Choice[] {
@@ -46,10 +46,41 @@ export function toText(field: Field, value: unknown): string {
   if (SELECT_LIKE.has(t)) return choiceLabel(field, String(value));
   if (t === "multi_select" && Array.isArray(value))
     return value.map((id) => choiceLabel(field, String(id))).join(", ");
+  if (t === "files" && Array.isArray(value))
+    return value
+      .map((item) =>
+        item && typeof item === "object" && "name" in item
+          ? String((item as { name?: unknown }).name ?? "")
+          : String(item),
+      )
+      .filter(Boolean)
+      .join(", ");
   if (t === "date" && typeof value === "object" && value !== null)
     return String((value as { start?: string }).start ?? "");
   if (Array.isArray(value)) return value.join(", ");
   return String(value);
+}
+
+/** Human-friendly value for read-only display (List/Gallery): formats dates
+ *  (start → end, no raw ISO "T"); falls back to toText otherwise. */
+export function displayText(field: Field, value: unknown): string {
+  if (value == null || value === "") return "";
+  const fmtIso = (s?: string | null) => {
+    if (!s) return "";
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s;
+    return s.includes("T") ? d.toLocaleString() : d.toLocaleDateString();
+  };
+  if (field.type === "date") {
+    const o =
+      typeof value === "object"
+        ? (value as { start?: string; end?: string | null })
+        : { start: String(value), end: null };
+    return fmtIso(o.start) + (o.end ? ` → ${fmtIso(o.end)}` : "");
+  }
+  if (field.type === "created_time" || field.type === "last_edited_time")
+    return fmtIso(String(value));
+  return toText(field, value);
 }
 
 function toNum(value: unknown): number | null {

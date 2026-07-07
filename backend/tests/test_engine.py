@@ -59,9 +59,7 @@ async def test_row_crud_and_inline_update(client: httpx.AsyncClient) -> None:
     assert r.json()["data"][name_f] == "Acme"
 
     # inline update one cell
-    r = await client.patch(
-        f"/rows/{row_id}", json={"data": {amt_f: 250}}, headers=headers
-    )
+    r = await client.patch(f"/rows/{row_id}", json={"data": {amt_f: 250}}, headers=headers)
     assert r.status_code == 200
     assert r.json()["data"][amt_f] == 250
     assert r.json()["data"][name_f] == "Acme"  # untouched cell preserved
@@ -78,9 +76,7 @@ async def test_bulk_create_rows(client: httpx.AsyncClient) -> None:
     headers, db_id = await _setup(client)
     await _add_field(client, headers, db_id, "Name", "text")
 
-    r = await client.post(
-        f"/databases/{db_id}/rows/bulk", json={"count": 5}, headers=headers
-    )
+    r = await client.post(f"/databases/{db_id}/rows/bulk", json={"count": 5}, headers=headers)
     assert r.status_code == 201, r.text
     assert len(r.json()) == 5
     seqs = sorted(row["seq"] for row in r.json())
@@ -90,9 +86,7 @@ async def test_bulk_create_rows(client: httpx.AsyncClient) -> None:
     assert len(r.json()) == 5
 
     # count bounds enforced (max 100)
-    r = await client.post(
-        f"/databases/{db_id}/rows/bulk", json={"count": 101}, headers=headers
-    )
+    r = await client.post(f"/databases/{db_id}/rows/bulk", json={"count": 101}, headers=headers)
     assert r.status_code == 422
 
 
@@ -169,9 +163,7 @@ async def test_new_e1_field_types(client: httpx.AsyncClient) -> None:
     )
 
     # rating out of range rejected
-    r = await client.post(
-        f"/databases/{db_id}/rows", json={"data": {rating_f: 9}}, headers=headers
-    )
+    r = await client.post(f"/databases/{db_id}/rows", json={"data": {rating_f: 9}}, headers=headers)
     assert r.status_code == 422
 
     # valid rating + multi_select + status
@@ -282,14 +274,10 @@ async def test_rollup_sum_and_count(client: httpx.AsyncClient) -> None:
     rollup = ru.json()["id"]
 
     b1 = (
-        await client.post(
-            f"/databases/{db_b}/rows", json={"data": {amt: 100}}, headers=headers
-        )
+        await client.post(f"/databases/{db_b}/rows", json={"data": {amt: 100}}, headers=headers)
     ).json()["id"]
     b2 = (
-        await client.post(
-            f"/databases/{db_b}/rows", json={"data": {amt: 250}}, headers=headers
-        )
+        await client.post(f"/databases/{db_b}/rows", json={"data": {amt: 250}}, headers=headers)
     ).json()["id"]
 
     a = await client.post(
@@ -387,9 +375,7 @@ async def test_system_and_people_progress_fields(client: httpx.AsyncClient) -> N
     assert row["data"][ct_f]  # created_time injected (non-empty ISO string)
 
     # progress must be numeric
-    bad = await client.post(
-        f"/databases/{db}/rows", json={"data": {prog_f: "x"}}, headers=headers
-    )
+    bad = await client.post(f"/databases/{db}/rows", json={"data": {prog_f: "x"}}, headers=headers)
     assert bad.status_code == 422
 
     # members endpoint lists the creator

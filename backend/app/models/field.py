@@ -37,6 +37,7 @@ class FieldType(enum.StrEnum):
     created_by = "created_by"  # auto, set to creator on insert
     last_edited_time = "last_edited_time"  # auto, read-only = Row.updated_at
     last_edited_by = "last_edited_by"  # auto, set to editor on insert+update
+    files = "files"  # Google Drive-backed attachment metadata
 
 
 class Field(Base, TimestampMixin):
@@ -66,9 +67,7 @@ class RowLink(Base, TimestampMixin):
 
     __tablename__ = "row_links"
     __table_args__ = (
-        UniqueConstraint(
-            "field_id", "source_row_id", "target_row_id", name="uq_row_link"
-        ),
+        UniqueConstraint("field_id", "source_row_id", "target_row_id", name="uq_row_link"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)

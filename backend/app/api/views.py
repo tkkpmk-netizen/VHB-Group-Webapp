@@ -58,9 +58,7 @@ async def create_view(
     db: AsyncSession = Depends(get_db),
 ) -> View:
     await _scoped_database(database_id, workspace, db)
-    existing = await db.execute(
-        select(View.order).where(View.database_id == database_id)
-    )
+    existing = await db.execute(select(View.order).where(View.database_id == database_id))
     order = max(list(existing.scalars().all()), default=-1) + 1
     view = View(
         database_id=database_id,
@@ -75,9 +73,7 @@ async def create_view(
     return view
 
 
-async def _scoped_view(
-    view_id: uuid.UUID, workspace: Workspace, db: AsyncSession
-) -> View:
+async def _scoped_view(view_id: uuid.UUID, workspace: Workspace, db: AsyncSession) -> View:
     view = await db.get(View, view_id)
     if view is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "View not found")

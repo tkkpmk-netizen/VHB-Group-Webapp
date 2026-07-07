@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { Database as DatabaseIcon, MoreHorizontal, Star } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { SearchBar } from "@/components/table/search-box";
 import { ViewsBar } from "@/components/table/views-bar";
 import { ViewShell } from "@/components/table/view-shell";
+import { ResourceAccess } from "@/components/access/resource-access";
+import { DatabaseTransfers } from "@/components/table/database-transfers";
 import { matchedRowIds, searchHits } from "@/lib/search";
 import type { components } from "@/lib/api/schema";
 
@@ -37,12 +39,13 @@ export function DatabaseView({ databaseId }: { databaseId: string }) {
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
   const rowsQ = useQuery<Row[]>({
-    queryKey: ["rows", databaseId],
+    queryKey: ["rows-search", databaseId],
     queryFn: () => apiFetch<Row[]>(`/databases/${databaseId}/rows`),
+    enabled: search.trim().length > 0,
   });
 
   const dbName = dbQ.data?.find((d) => d.id === databaseId)?.name ?? "Database";
-  const views = viewsQ.data ?? [];
+  const views = useMemo(() => viewsQ.data ?? [], [viewsQ.data]);
   const active = views.find((v) => v.id === activeId) ?? views[0];
   const fields = fieldsQ.data ?? [];
   const rows = rowsQ.data ?? [];
@@ -55,6 +58,37 @@ export function DatabaseView({ databaseId }: { databaseId: string }) {
   const hits = searchActive ? searchHits(rows, searchFields, search) : [];
   const matchedIds = searchActive ? matchedRowIds(hits) : null;
 
+  useEffect(() => {
+    const shortcuts: Record<string, View["type"]> = {
+      t: "table",
+      b: "board",
+      l: "list",
+      c: "calendar",
+      g: "gallery",
+      y: "gantt",
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      )
+        return;
+      const type = shortcuts[e.key.toLowerCase()];
+      const targetView = type && views.find((v) => v.type === type);
+      if (targetView) {
+        e.preventDefault();
+        setActiveId(targetView.id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [views]);
+
   function jumpToRow(id: string) {
     setFlashId(id);
     requestAnimationFrame(() =>
@@ -66,22 +100,37 @@ export function DatabaseView({ databaseId }: { databaseId: string }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="shrink-0">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
         <Link
           href="/databases"
-          className="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="size-4" />
+          <DatabaseIcon className="size-3.5 text-violet-600" />
           Databases
         </Link>
-        <h1 className="text-2xl font-bold">{dbName}</h1>
+        <span className="text-muted-foreground">/</span>
+        <h1 className="truncate text-sm font-semibold">{dbName}</h1>
+        <button type="button" title="Favorite" className="rounded p-1 hover:bg-muted">
+          <Star className="size-3.5 text-muted-foreground" />
+        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <DatabaseTransfers databaseId={databaseId} />
+          <ResourceAccess
+            resourceType="database"
+            resourceId={databaseId}
+            resourceLabel="Database"
+          />
+          <button type="button" title="More actions" className="rounded p-1.5 hover:bg-muted">
+            <MoreHorizontal className="size-4" />
+          </button>
+        </div>
       </div>
 
       {active ? (
         <>
           {/* Layout (tabs) row — search bar sits opposite, on the right. */}
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b">
+          <div className="flex shrink-0 flex-col gap-2 border-b px-3 pt-1 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0 overflow-x-auto">
               <ViewsBar
                 databaseId={databaseId}
@@ -90,7 +139,7 @@ export function DatabaseView({ databaseId }: { databaseId: string }) {
                 setActiveId={setActiveId}
               />
             </div>
-            <div className="w-80 shrink-0 pb-1">
+            <div className="w-full shrink-0 pb-1 xl:w-80">
               <SearchBar
                 fields={fields}
                 hits={hits}

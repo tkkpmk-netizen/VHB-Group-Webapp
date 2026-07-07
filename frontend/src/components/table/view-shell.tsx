@@ -338,8 +338,8 @@ export function ViewShell({
     <div className="flex h-full min-h-0 flex-col gap-3">
       {/* Toolbar: Quick View preset (left) · gantt controls · search +
           Filter/Sort/Group + Customize (right). */}
-      <div className="flex items-center gap-1">
-        <div className="w-44 shrink-0">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="w-40 shrink-0 sm:w-44">
           <Dropdown
             value={activePreset}
             placeholder="Default view"
@@ -379,10 +379,13 @@ export function ViewShell({
           ))}
 
         {view.type === "gantt" && (
-          <div ref={setGanttToolbar} className="flex flex-wrap items-center gap-3" />
+          <div
+            ref={setGanttToolbar}
+            className="order-last flex w-full flex-wrap items-center gap-2 xl:order-none xl:w-auto"
+          />
         )}
 
-        <div className="ml-auto flex min-w-0 items-center gap-1">
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-1 xl:ml-auto xl:w-auto xl:justify-end">
           <button onClick={openQuick("filter")} className={quickCls(nRules > 0)}>
             <ListFilter className="size-4" />
             Filter{nRules > 0 ? ` · ${nRules}` : ""}
@@ -426,9 +429,40 @@ export function ViewShell({
                 top: quick.y,
                 left:
                   typeof window !== "undefined"
-                    ? Math.min(quick.x, window.innerWidth - (quick.kind === "filter" ? 540 : 360) - 8)
+                    ? Math.max(
+                        8,
+                        Math.min(
+                          quick.x,
+                          window.innerWidth -
+                            Math.min(
+                              quick.kind === "filter"
+                                ? 520
+                                : quick.kind === "sort"
+                                  ? 360
+                                  : 300,
+                              window.innerWidth - 16,
+                            ) -
+                            8,
+                        ),
+                      )
                     : quick.x,
-                width: quick.kind === "filter" ? 520 : quick.kind === "sort" ? 360 : 300,
+                width:
+                  typeof window !== "undefined"
+                    ? Math.min(
+                        quick.kind === "filter"
+                          ? 520
+                          : quick.kind === "sort"
+                            ? 360
+                            : 300,
+                        window.innerWidth - 16,
+                      )
+                    : quick.kind === "filter"
+                      ? 520
+                      : quick.kind === "sort"
+                        ? 360
+                        : 300,
+                maxHeight: "calc(100vh - 16px)",
+                overflowY: "auto",
               }}
             >
               {quick.kind === "filter" && (

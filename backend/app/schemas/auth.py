@@ -21,6 +21,18 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class GoogleCredentialRequest(BaseModel):
+    credential: str = Field(min_length=20, max_length=10_000)
+
+
+class IdentityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    provider: str
+    email: EmailStr
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

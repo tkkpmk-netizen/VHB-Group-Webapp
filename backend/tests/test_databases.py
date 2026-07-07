@@ -25,6 +25,9 @@ async def test_signup_creates_workspace(client: httpx.AsyncClient) -> None:
     body = r.json()
     assert body["member_count"] == 1
     assert "Workspace" in body["name"]
+    spaces = await client.get("/spaces", headers=_auth(token))
+    assert spaces.status_code == 200
+    assert [space["name"] for space in spaces.json()] == ["General"]
 
 
 @pytest.mark.asyncio
@@ -37,9 +40,7 @@ async def test_database_crud(client: httpx.AsyncClient) -> None:
     assert r.json() == []
 
     # create
-    r = await client.post(
-        "/databases", json={"name": "CRM", "icon": "📇"}, headers=_auth(token)
-    )
+    r = await client.post("/databases", json={"name": "CRM", "icon": "📇"}, headers=_auth(token))
     assert r.status_code == 201, r.text
     db_id = r.json()["id"]
 
