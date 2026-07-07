@@ -1,12 +1,12 @@
 # VHB Platform — Production Roadmap
 
-Status: **Active — Foundation and Core Functions complete; Design/Publishing next**
+Status: **Active — DP4 design import pipeline complete; DP5 build pipeline next**
 Updated: 2026-07-07
 
 Verified baseline:
 
-- Alembic: `2b4d6f8a0c1e (head)`, no schema drift.
-- Backend: ruff + mypy + 62/62 tests.
+- Alembic: `3c5e7f9b0d1a (head)`, no schema drift.
+- Backend: ruff + mypy + 66/66 tests.
 - Frontend: typecheck + lint + 16/16 tests + production build.
 
 ## Product Direction
@@ -97,22 +97,22 @@ same policy instead of inventing another permission table.
 | CM6 | In-app notifications (bell + Redis) and email notifications (outbox → job worker) | F3, F6, F7, F8 | MVP completed; SMTP configuration required |
 | CM7 | Database Files & Media field backed by Google Drive Shared Drive storage | F3, F4, F6 | MVP completed; Google Drive service account configuration required |
 
-## Later — Design and Publishing
+## Design and Publishing (DP)
 
 Ordering rule: the Site domain and its dependencies stay after Phase 2 —
 data binding reuses Dashboard query patterns, and publishing requires
 stable jobs/notifications. If Web Designer must be pulled earlier, it may
 start no sooner than after CM3.
 
-| Order | Initiative | Depends on |
-|---:|---|---|
-| 1 | Site/Page/DataBinding domain | F2, F3, F4, F5, CM3 |
-| 2 | Public Runtime API | Site domain, F3, F8, F9 |
-| 3 | Web Designer using GrapesJS project JSON | Site domain, F5 |
-| 4 | Penpot/Figma import pipeline (design locally; import artifacts through assets — Penpot/Figma are never embedded in the server) | Web Designer, F5, F6 |
-| 5 | Build and Deployment pipeline | Site domain, F5, F6, F9 |
-| 6 | Domains, environments and rollback | Deployment pipeline |
-| 7 | Realtime collaboration for Docs/Design | Documents, F7, F8 |
+| ID | Initiative | Depends on | Status |
+|---:|---|---|---|
+| DP1 | Site/Page/DataBinding domain | F2, F3, F4, F5, CM3 | MVP completed |
+| DP2 | Public Runtime API | DP1, F3, F8, F9 | MVP completed |
+| DP3 | Web Designer using GrapesJS project JSON | DP1, F5 | MVP completed |
+| DP4 | Penpot/Figma import pipeline (design locally; import artifacts through assets — Penpot/Figma are never embedded in the server) | DP3, F5, F6 | MVP completed |
+| DP5 | Build and Deployment pipeline | DP1, F5, F6, F9 | Planned |
+| DP6 | Domains, environments and rollback | DP5 | Planned |
+| DP7 | Realtime collaboration for Docs/Design | Documents, F7, F8 | Planned |
 
 ## Architecture Rules
 
@@ -258,6 +258,52 @@ CM7 introduced:
   PDFs and text files, and file deletion without public Drive links.
 - Cleanup hooks that remove Drive objects when a file field, row, or database is
   deleted.
+
+DP1 introduced:
+
+- Workspace-scoped Sites with global slugs, optional folder placement, publish
+  state, homepage path, CM3 `ResourceGrant` support, and audit event creation.
+- Site Pages with per-site unique paths, JSON content source, publish state, and
+  ordering.
+- Site Data Bindings that attach a bounded F4 `RowQuery` to a database and
+  explicitly whitelist public `field_ids`.
+- Sites UI in the product rail with site creation, publish/unpublish, page JSON
+  editing, binding creation, and Share access management.
+
+DP2 introduced:
+
+- Restricted unauthenticated public runtime endpoints under `/public/sites`.
+- Published-site and published-page checks before any public response.
+- Runtime binding reads that execute the saved query but prune every row to the
+  binding's whitelisted `field_ids`.
+- Public page manifest including only published pages and public binding
+  summaries.
+
+DP3 introduced:
+
+- GrapesJS-backed Web Designer mounted inside the Sites workspace UI.
+- `SitePage.content` now stores editor source as a `grapesjs` project envelope;
+  generated HTML remains a future build artifact.
+- Designer block palette for Hero, Section, Text, Button, Image, and Data
+  Binding markers.
+- Live canvas with desktop/tablet/mobile device modes, style inspector, reset,
+  and explicit save to `PATCH /site-pages/{id}`.
+- New site pages default to GrapesJS-compatible project JSON instead of raw
+  `{blocks: []}` content.
+
+DP4 introduced:
+
+- `POST /site-pages/{page_id}/import-design` for replacing a page's designer
+  source with an imported design artifact.
+- Import payloads for generic HTML/CSS, Figma HTML/export, Penpot HTML/export,
+  and GrapesJS project JSON.
+- Backend normalization to the same `type: "grapesjs"` content envelope used by
+  DP3, with import metadata stored in `content.meta`.
+- Conservative server-side sanitizer that strips scriptable HTML attributes,
+  executable tags, `javascript:` URLs, and dangerous CSS constructs from
+  imported HTML/CSS artifacts.
+- Site Manager UI panel for uploading `.html`, `.css`, or `.json` artifacts, or
+  pasting HTML/CSS/project JSON directly into the selected page.
 
 Terminology: these are **Core Functions**, not mini apps. Mini apps are later
 composed experiences that consume Core Functions.

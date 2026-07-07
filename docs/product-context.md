@@ -53,14 +53,16 @@ Notion business model rather than the ClickUp demo data.
 - Email/password and Google identity with explicit account linking
 - In-app notifications and outbox-driven SMTP email jobs
 - Google Drive-backed Database Files & Media field with in-app previews
+- Site/Page/DataBinding domain and restricted Public Runtime API
+- GrapesJS-backed Web Designer storing project JSON in page source
+- Design import pipeline for local Figma/Penpot/static HTML artifacts
 - Audit trail, Redis sessions/cache, observability, backups, and CI
 
 ## Active roadmap
 
 The authoritative delivery sequence and current status live in
-[Production Plan](../PRODUCTION_PLAN.md). The next phase covers Site/Page data
-bindings, public runtime APIs, Web Designer, design-import pipelines, builds,
-deployments, domains, and rollback.
+[Production Plan](../PRODUCTION_PLAN.md). The next phase covers DP5 build and
+deployment pipelines, domains, environments, and rollback.
 
 Historical implementation details belong in [Changelog](../CHANGELOG.md), not in
 parallel plans or memory files.

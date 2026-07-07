@@ -13,6 +13,7 @@ from app.models.dashboard import Dashboard
 from app.models.database import Database
 from app.models.document import Document
 from app.models.permission import ResourceGrant, ResourceType
+from app.models.site import Site
 from app.models.user import User
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
 from app.schemas.permission import ResourceGrantOut, ResourceGrantUpsert
@@ -29,13 +30,15 @@ async def _require_scoped_resource(
     workspace: Workspace,
     db: AsyncSession,
 ) -> None:
-    resource: Database | Document | Dashboard | None
+    resource: Database | Document | Dashboard | Site | None
     if resource_type is ResourceType.database:
         resource = await db.get(Database, resource_id)
     elif resource_type is ResourceType.document:
         resource = await db.get(Document, resource_id)
-    else:
+    elif resource_type is ResourceType.dashboard:
         resource = await db.get(Dashboard, resource_id)
+    else:
+        resource = await db.get(Site, resource_id)
     if resource is None or resource.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Resource not found")
 

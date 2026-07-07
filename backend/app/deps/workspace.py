@@ -82,6 +82,21 @@ async def get_current_workspace(
     elif raw_dashboard_id := request.path_params.get("dashboard_id"):
         resource_type = ResourceType.dashboard
         resource_id = uuid.UUID(str(raw_dashboard_id))
+    elif raw_site_id := request.path_params.get("site_id"):
+        resource_type = ResourceType.site
+        resource_id = uuid.UUID(str(raw_site_id))
+    elif raw_page_id := request.path_params.get("page_id"):
+        from app.models.site import SitePage
+
+        page = await db.get(SitePage, uuid.UUID(str(raw_page_id)))
+        resource_type = ResourceType.site
+        resource_id = page.site_id if page else None
+    elif raw_binding_id := request.path_params.get("binding_id"):
+        from app.models.site import SiteDataBinding
+
+        binding = await db.get(SiteDataBinding, uuid.UUID(str(raw_binding_id)))
+        resource_type = ResourceType.site
+        resource_id = binding.site_id if binding else None
     elif (raw_resource_type := request.path_params.get("resource_type")) and (
         raw_resource_id := request.path_params.get("resource_id")
     ):

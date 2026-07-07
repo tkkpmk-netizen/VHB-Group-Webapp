@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "grapesjs/dist/css/grapes.min.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -155,4 +156,36 @@ input:focus-visible,
 ::selection {
   background: #cfe5ff;
   color: #163c6b;
+}
+
+/* DP3 Web Designer: keep GrapesJS controls inside the ClickUp-style shell. */
+.web-designer-blocks .gjs-block {
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 8px;
+  border-radius: 10px;
+  border-color: var(--color-border);
+  box-shadow: none;
+}
+
+.web-designer-styles .gjs-sm-sector {
+  border-color: var(--color-border);
+}
+
+.gjs-one-bg {
+  background-color: #ffffff;
+}
+
+.gjs-two-color,
+.gjs-four-color-h:hover {
+  color: #292d34;
+}
+
+.gjs-three-bg {
+  background-color: #0b8ff3;
+}
+
+.gjs-four-color,
+.gjs-four-color-h:hover {
+  color: #0b8ff3;
 }

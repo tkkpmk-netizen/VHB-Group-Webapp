@@ -8,7 +8,7 @@ import type { components } from "@/lib/api/schema";
 
 type Member = components["schemas"]["MemberOut"];
 type ResourceRole = "manager" | "editor" | "viewer";
-type ResourceType = "database" | "document" | "dashboard";
+type ResourceType = "database" | "document" | "dashboard" | "site";
 type Grant = {
   id: string;
   workspace_id: string;

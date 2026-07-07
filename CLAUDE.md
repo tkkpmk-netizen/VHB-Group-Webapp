@@ -4,8 +4,8 @@
 
 VHB Group's internal B2B trading/export super app, intended to replace a mature
 Notion business hub and a lightly used ClickUp setup. Foundation F1–F9, UI
-modernization U1–U4, and Core Functions CM1–CM7 are complete. The next product
-phase is Site/Web Designer and publishing.
+modernization U1–U4, Core Functions CM1–CM7, and Design & Publishing DP1–DP4
+are complete. The next product phase is DP5 Build and Deployment pipeline.
 
 ## Current Architecture
 
@@ -34,9 +34,12 @@ Accepted decisions are recorded under `docs/adr/`.
 - Core Functions CM1–CM7 provide transfers, BlockNote documents, generic
   resource grants, dashboards, Google identity, notifications, and Google
   Drive-backed Database Files & Media.
-- Current green baseline: backend ruff/mypy/62 tests; frontend
+- Design & Publishing DP1–DP4 provide Sites, Pages, Data Bindings, the
+  restricted Public Runtime API, a GrapesJS-backed Web Designer, and local
+  Figma/Penpot/static artifact import into designer source.
+- Current green baseline: backend ruff/mypy/66 tests; frontend
   typecheck/lint/16 tests/production build.
-- Alembic head: `2b4d6f8a0c1e`.
+- Alembic head: `3c5e7f9b0d1a`.
 - Preserve unrelated dirty-worktree changes.
 
 ## Non-Negotiable UX Rules
@@ -83,6 +86,9 @@ Frontend dev: `cd frontend && pnpm dev`
 | Product requirements and roadmap | `docs/product-context.md`, `PRODUCTION_PLAN.md` |
 | Field catalog | `docs/field-catalog.md` |
 | Google Drive files design | `docs/adr/0010-google-drive-files-media.md` |
+| Sites/public runtime design | `docs/adr/0011-sites-public-runtime.md` |
+| Web Designer source model | `docs/adr/0012-web-designer-grapesjs-source.md` |
+| Design import boundary | `docs/adr/0013-design-import-artifacts.md` |
 | UX rules | `docs/ux-guidelines.md` |
 | Architecture decisions | `docs/adr/` |
 | Frontend local instructions | `frontend/AGENTS.md`, `frontend/CLAUDE.md` |

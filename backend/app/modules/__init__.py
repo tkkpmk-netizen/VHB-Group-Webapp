@@ -20,6 +20,7 @@ from app.api.jobs import router as jobs_router
 from app.api.notifications import router as notifications_router
 from app.api.resource_grants import router as resource_grants_router
 from app.api.resources import router as resources_router
+from app.api.sites import router as sites_router
 from app.api.transfers import router as transfers_router
 from app.api.views import router as views_router
 from app.api.workspaces import router as workspaces_router
@@ -49,6 +50,11 @@ MODULES = (
         "dashboards",
         (dashboards_router,),
         ("dashboards", "dashboard_widgets"),
+    ),
+    PlatformModule(
+        "publishing",
+        (sites_router,),
+        ("sites", "site_pages", "site_data_bindings"),
     ),
     PlatformModule(
         "transfers",

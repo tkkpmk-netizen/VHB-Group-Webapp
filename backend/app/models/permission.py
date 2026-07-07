@@ -19,6 +19,7 @@ class ResourceType(enum.StrEnum):
     database = "database"
     document = "document"
     dashboard = "dashboard"
+    site = "site"
 
 
 class ResourceGrant(Base, TimestampMixin):

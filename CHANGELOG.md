@@ -5,6 +5,39 @@ Changelog gộp, mới nhất ở trên. (Trước đây tách thành `CHANGELOG
 
 ---
 
+## 2026-07-07 — DP4 Design import pipeline
+
+- Thêm endpoint `POST /site-pages/{page_id}/import-design` để import artifact
+  thiết kế vào page đang chọn.
+- Hỗ trợ HTML/CSS export từ Figma/Penpot/static tools và GrapesJS project JSON.
+- Chuẩn hóa mọi import về `SitePage.content.type = "grapesjs"` để Web Designer
+  mở và chỉnh tiếp được.
+- Thêm sanitizer backend cho HTML/CSS import nhằm loại script, event handler,
+  `javascript:` URL và CSS nguy hiểm.
+- Thêm UI import trong Site Manager: upload `.html`, `.css`, `.json` hoặc paste
+  source trực tiếp.
+
+---
+
+## 2026-07-07 — DP3 Web Designer
+
+- Thêm GrapesJS vào frontend và mount Web Designer trong màn hình Sites.
+- `SitePage.content` chuyển sang source envelope `type: "grapesjs"` cho page mới.
+- Designer có block palette, canvas, style inspector, device preview và save project JSON.
+- Thêm Data Binding block marker để DP5/runtime có thể map dữ liệu vào page.
+
+---
+
+## 2026-07-07 — DP1/DP2 Sites and Public Runtime
+
+- Đổi nhóm Design and Publishing sang mã task DP.
+- DP1: thêm Site/Page/DataBinding domain với CRUD, CM3 resource grants và UI Sites.
+- DP2: thêm public runtime API `/public/sites/...` chỉ phục vụ site/page đã publish.
+- Public data binding chạy F4 RowQuery đã lưu và chỉ trả các `field_ids` được whitelist.
+- Thêm migration `3c5e7f9b0d1a` và tests cho publish gate, field pruning và site grants.
+
+---
+
 ## 2026-07-07 — CM7 Google Drive Files & Media
 
 - Thêm field type `files` cho Database, upload nhiều ảnh/tệp vào từng row.
