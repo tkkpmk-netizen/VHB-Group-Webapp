@@ -1,12 +1,12 @@
 # VHB Platform — Production Roadmap
 
-Status: **Active — DP4 design import pipeline complete; DP5 build pipeline next**
+Status: **Active — DP7 realtime collaboration MVP complete; Design & Publishing phase complete**
 Updated: 2026-07-07
 
 Verified baseline:
 
-- Alembic: `3c5e7f9b0d1a (head)`, no schema drift.
-- Backend: ruff + mypy + 66/66 tests.
+- Alembic: `5a7c9e1f3b2d (head)`, no schema drift.
+- Backend: ruff + mypy + 68/68 tests.
 - Frontend: typecheck + lint + 16/16 tests + production build.
 
 ## Product Direction
@@ -110,9 +110,9 @@ start no sooner than after CM3.
 | DP2 | Public Runtime API | DP1, F3, F8, F9 | MVP completed |
 | DP3 | Web Designer using GrapesJS project JSON | DP1, F5 | MVP completed |
 | DP4 | Penpot/Figma import pipeline (design locally; import artifacts through assets — Penpot/Figma are never embedded in the server) | DP3, F5, F6 | MVP completed |
-| DP5 | Build and Deployment pipeline | DP1, F5, F6, F9 | Planned |
-| DP6 | Domains, environments and rollback | DP5 | Planned |
-| DP7 | Realtime collaboration for Docs/Design | Documents, F7, F8 | Planned |
+| DP5 | Build and Deployment pipeline | DP1, F5, F6, F9 | MVP completed |
+| DP6 | Domains, environments and rollback | DP5 | MVP completed |
+| DP7 | Realtime collaboration for Docs/Design | Documents, F7, F8 | MVP completed |
 
 ## Architecture Rules
 
@@ -304,6 +304,53 @@ DP4 introduced:
   imported HTML/CSS artifacts.
 - Site Manager UI panel for uploading `.html`, `.css`, or `.json` artifacts, or
   pasting HTML/CSS/project JSON directly into the selected page.
+
+DP5 introduced:
+
+- `SiteDeployment` records with version, status, job id, artifact asset id,
+  entry path, manifest, and error state.
+- Migration `4f6a8c0d2e1b` for the deployment table.
+- `POST /sites/{site_id}/deployments` to enqueue a durable `site.build` job.
+- Worker handler that builds published site pages into a static HTML artifact
+  stored in object storage as an `Asset`.
+- Public deployment metadata endpoint `/public/sites/{slug}/deployment`.
+- Public render endpoint `/public/sites/{slug}/render[/path]` that serves the
+  latest ready deployment artifact only when the site is published.
+- Generated artifact runtime that hydrates `data-vhb-binding` markers by calling
+  the restricted DP2 public binding API.
+- Site Manager Deploy panel with Build & deploy action, polling deployment
+  statuses, and latest deployment preview link.
+
+DP6 introduced:
+
+- `production` and `preview` deployment environments.
+- Active deployment selection per site/environment, with latest-ready fallback
+  for older deployment records.
+- Rollback/promote endpoint `POST /site-deployments/{deployment_id}/promote`.
+- Build jobs auto-activate the successful deployment in its environment.
+- `SiteDomain` domain mappings with hostname, environment, verified and primary
+  state.
+- Domain management APIs under `/sites/{site_id}/domains` and `/site-domains`.
+- Public domain render endpoints under `/public/domains/{hostname}/render`.
+- Site Manager controls for environment builds, active deployment preview,
+  rollback/promote, domain creation, verification marking, primary domain and
+  removal.
+
+DP7 introduced:
+
+- WebSocket collaboration endpoint
+  `/collaboration/ws/{resource_type}/{resource_id}`.
+- Token + active session + workspace scoped authorization for realtime rooms.
+- Collaboration rooms for `document` and `site_page` resources.
+- Presence snapshot, join and leave events.
+- Ephemeral collaboration events for cursor, selection, document content
+  changes and design changes.
+- Shared frontend `useCollaboration` hook.
+- Document editor presence avatars and content-change broadcast while preserving
+  the existing optimistic autosave as source of truth.
+- Web Designer presence avatars and design-change broadcast on save/reset.
+- In-process hub contract that can be replaced by Redis pub/sub fanout later
+  without changing frontend event payloads.
 
 Terminology: these are **Core Functions**, not mini apps. Mini apps are later
 composed experiences that consume Core Functions.

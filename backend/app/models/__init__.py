@@ -11,7 +11,15 @@ from app.models.job import Job, JobStatus
 from app.models.notification import Notification, NotificationPreference
 from app.models.permission import ResourceGrant, ResourceRole, ResourceType
 from app.models.resource import Folder, Space
-from app.models.site import Site, SiteDataBinding, SitePage
+from app.models.site import (
+    Site,
+    SiteDataBinding,
+    SiteDeployment,
+    SiteDeploymentStatus,
+    SiteDomain,
+    SiteEnvironment,
+    SitePage,
+)
 from app.models.user import IdentityAccount, User
 from app.models.view import View, ViewType
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
@@ -43,6 +51,10 @@ __all__ = [
     "Space",
     "Site",
     "SiteDataBinding",
+    "SiteDeployment",
+    "SiteDeploymentStatus",
+    "SiteDomain",
+    "SiteEnvironment",
     "SitePage",
     "User",
     "View",

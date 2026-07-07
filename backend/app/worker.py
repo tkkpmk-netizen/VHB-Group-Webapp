@@ -19,10 +19,12 @@ from app.models.database import Database
 from app.models.field import Field, Row
 from app.models.job import Job
 from app.models.notification import Notification
+from app.models.site import SiteDeployment, SiteDeploymentStatus
 from app.models.user import User
 from app.services.email import send_email
 from app.services.events import publish_next_outbox_event
 from app.services.jobs import claim_next_job, complete_job, fail_job
+from app.services.site_build import build_site_deployment
 from app.services.spreadsheets import export_rows, import_rows, read_tabular
 from app.services.storage import ObjectStorage, get_object_storage
 
@@ -124,6 +126,17 @@ async def execute_job(db: AsyncSession, job: Job, storage: ObjectStorage) -> dic
         notification.emailed_at = datetime.now(UTC)
         await db.commit()
         return {"notification_id": str(notification.id), "recipient": user.email}
+    if job.type == "site.build":
+        deployment = await db.get(SiteDeployment, uuid.UUID(str(job.payload["deployment_id"])))
+        if deployment is None or deployment.workspace_id != job.workspace_id:
+            raise ValueError("Site deployment not found")
+        try:
+            return await build_site_deployment(db, deployment=deployment, storage=storage)
+        except Exception as exc:
+            deployment.status = SiteDeploymentStatus.failed
+            deployment.error = f"{type(exc).__name__}: {exc}"[:4000]
+            await db.commit()
+            raise
     raise ValueError(f"No handler for job type: {job.type}")
 
 

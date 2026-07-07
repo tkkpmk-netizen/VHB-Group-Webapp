@@ -1,6 +1,15 @@
 "use client";
 
-import { Check, Database, Globe2, LoaderCircle, Plus, Trash2 } from "lucide-react";
+import {
+  Check,
+  Database,
+  ExternalLink,
+  Globe2,
+  LoaderCircle,
+  Plus,
+  Rocket,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ResourceAccess } from "@/components/access/resource-access";
@@ -39,6 +48,27 @@ type Binding = {
   name: string;
   field_ids: string[];
   expose_public: boolean;
+};
+type Deployment = {
+  id: string;
+  site_id: string;
+  job_id: string | null;
+  asset_id: string | null;
+  version: number;
+  environment: "production" | "preview";
+  active: boolean;
+  status: "queued" | "building" | "ready" | "failed";
+  entry_path: string;
+  manifest: Record<string, unknown>;
+  error: string | null;
+};
+type SiteDomain = {
+  id: string;
+  site_id: string;
+  hostname: string;
+  environment: "production" | "preview";
+  verified: boolean;
+  primary: boolean;
 };
 type Db = { id: string; name: string };
 type Field = { id: string; name: string; type: string };
@@ -183,6 +213,9 @@ export function SiteManager({ siteId }: { siteId: string }) {
   const queryClient = useQueryClient();
   const [newPath, setNewPath] = useState("/new-page");
   const [activePageId, setActivePageId] = useState<string | null>(null);
+  const [buildEnvironment, setBuildEnvironment] =
+    useState<Deployment["environment"]>("production");
+  const [newDomain, setNewDomain] = useState("");
   const { data: site, isLoading } = useQuery<Site>({
     queryKey: ["site", siteId],
     queryFn: () => apiFetch<Site>(`/sites/${siteId}`),
@@ -194,6 +227,20 @@ export function SiteManager({ siteId }: { siteId: string }) {
   const { data: bindings = [] } = useQuery<Binding[]>({
     queryKey: ["site-bindings", siteId],
     queryFn: () => apiFetch<Binding[]>(`/sites/${siteId}/bindings`),
+  });
+  const { data: deployments = [] } = useQuery<Deployment[]>({
+    queryKey: ["site-deployments", siteId],
+    queryFn: () => apiFetch<Deployment[]>(`/sites/${siteId}/deployments`),
+    refetchInterval: (query) =>
+      query.state.data?.some((deployment) =>
+        ["queued", "building"].includes(deployment.status),
+      )
+        ? 2000
+        : false,
+  });
+  const { data: domains = [] } = useQuery<SiteDomain[]>({
+    queryKey: ["site-domains", siteId],
+    queryFn: () => apiFetch<SiteDomain[]>(`/sites/${siteId}/domains`),
   });
   const publish = useMutation({
     mutationFn: (published: boolean) =>
@@ -248,6 +295,50 @@ export function SiteManager({ siteId }: { siteId: string }) {
       queryClient.invalidateQueries({ queryKey: ["site-pages", siteId] });
     },
   });
+  const buildSite = useMutation({
+    mutationFn: () =>
+      apiFetch<{ deployment: Deployment; job: Record<string, unknown> }>(
+        `/sites/${siteId}/deployments`,
+        {
+          method: "POST",
+          body: JSON.stringify({ environment: buildEnvironment }),
+        },
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["site-deployments", siteId] }),
+  });
+  const promoteDeployment = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<Deployment>(`/site-deployments/${id}/promote`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["site-deployments", siteId] }),
+  });
+  const createDomain = useMutation({
+    mutationFn: () =>
+      apiFetch<SiteDomain>(`/sites/${siteId}/domains`, {
+        method: "POST",
+        body: JSON.stringify({
+          hostname: newDomain,
+          environment: buildEnvironment,
+          verified: false,
+          primary: domains.length === 0,
+        }),
+      }),
+    onSuccess: () => {
+      setNewDomain("");
+      queryClient.invalidateQueries({ queryKey: ["site-domains", siteId] });
+    },
+  });
+  const updateDomain = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<SiteDomain> }) =>
+      apiFetch<SiteDomain>(`/site-domains/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["site-domains", siteId] }),
+  });
+  const deleteDomain = useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/site-domains/${id}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["site-domains", siteId] }),
+  });
   const deleteBinding = useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/site-bindings/${id}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["site-bindings", siteId] }),
@@ -296,6 +387,15 @@ export function SiteManager({ siteId }: { siteId: string }) {
   }
 
   const publicSiteUrl = `${API_BASE_URL}/public/sites/${site.slug}`;
+  const renderUrl = `${API_BASE_URL}/public/sites/${site.slug}/render?environment=${buildEnvironment}`;
+  const selectedDeployments = deployments.filter(
+    (deployment) => deployment.environment === buildEnvironment,
+  );
+  const latestDeployment = selectedDeployments[0];
+  const latestReadyDeployment = deployments.find(
+    (deployment) =>
+      deployment.status === "ready" && deployment.environment === buildEnvironment,
+  );
 
   return (
     <div className="min-h-full bg-[#fafbfc]">
@@ -464,6 +564,202 @@ export function SiteManager({ siteId }: { siteId: string }) {
           )}
         </section>
         <aside className="space-y-4">
+          <section className="rounded-xl border bg-card p-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-lg bg-purple-50 p-2 text-purple-700">
+                <Rocket className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-semibold">Deploy</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Build designer source into a public HTML artifact.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-md border">
+              <Dropdown
+                value={buildEnvironment}
+                allowClear={false}
+                options={[
+                  { value: "production", label: "Production" },
+                  { value: "preview", label: "Preview" },
+                ]}
+                onChange={(value) => {
+                  if (value === "production" || value === "preview") {
+                    setBuildEnvironment(value);
+                  }
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              disabled={buildSite.isPending || !pages.some((page) => page.is_published)}
+              onClick={() => buildSite.mutate()}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {buildSite.isPending ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <Rocket className="size-4" />
+              )}
+              Build & deploy {buildEnvironment}
+            </button>
+            <div className="mt-4 space-y-2">
+              {latestReadyDeployment && (
+                <a
+                  href={renderUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between rounded-lg border bg-background px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                >
+                  Open active {buildEnvironment}
+                  <ExternalLink className="size-3.5" />
+                </a>
+              )}
+              {latestDeployment ? (
+                selectedDeployments.slice(0, 4).map((deployment) => (
+                  <div
+                    key={deployment.id}
+                    className="rounded-lg border bg-background px-3 py-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">
+                        v{deployment.version}
+                        {deployment.active && (
+                          <span className="ml-1 rounded-full bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                            active
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 ${
+                          deployment.status === "ready"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : deployment.status === "failed"
+                              ? "bg-red-50 text-red-700"
+                              : "bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {deployment.status}
+                      </span>
+                    </div>
+                    {deployment.status === "ready" && !deployment.active && (
+                      <button
+                        type="button"
+                        disabled={promoteDeployment.isPending}
+                        onClick={() => promoteDeployment.mutate(deployment.id)}
+                        className="mt-2 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                      >
+                        Promote / rollback to this version
+                      </button>
+                    )}
+                    {deployment.error && (
+                      <p className="mt-1 line-clamp-2 text-red-600">{deployment.error}</p>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+                  No deployment yet.
+                </p>
+              )}
+            </div>
+          </section>
+          <section className="rounded-xl border bg-card p-4">
+            <h2 className="text-sm font-semibold">Domains</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Map hostnames to production or preview deployments. Verified domains can
+              render public artifacts.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <input
+                value={newDomain}
+                onChange={(event) => setNewDomain(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && newDomain.trim()) createDomain.mutate();
+                }}
+                placeholder="landing.example.com"
+                className="h-9 min-w-0 flex-1 rounded-md border px-3 text-sm outline-none focus:border-blue-400"
+              />
+              <button
+                type="button"
+                disabled={!newDomain.trim() || createDomain.isPending}
+                onClick={() => createDomain.mutate()}
+                className="rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {domains.map((domain) => (
+                <div key={domain.id} className="rounded-lg border bg-background p-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Globe2 className="size-4 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{domain.hostname}</p>
+                      <p className="text-muted-foreground">
+                        {domain.environment}
+                        {domain.primary ? " · primary" : ""}
+                        {domain.verified ? " · verified" : " · pending DNS"}
+                      </p>
+                    </div>
+                    {domain.verified && (
+                      <a
+                        href={`${API_BASE_URL}/public/domains/${domain.hostname}/render`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded p-1 text-blue-700 hover:bg-blue-50"
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </a>
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {!domain.verified && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateDomain.mutate({
+                            id: domain.id,
+                            payload: { verified: true },
+                          })
+                        }
+                        className="rounded-md border px-2 py-1 hover:bg-muted"
+                      >
+                        Mark verified
+                      </button>
+                    )}
+                    {!domain.primary && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateDomain.mutate({
+                            id: domain.id,
+                            payload: { primary: true },
+                          })
+                        }
+                        className="rounded-md border px-2 py-1 hover:bg-muted"
+                      >
+                        Make primary
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => deleteDomain.mutate(domain.id)}
+                      className="rounded-md border px-2 py-1 text-red-600 hover:bg-red-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!domains.length && (
+                <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+                  No custom domains yet.
+                </p>
+              )}
+            </div>
+          </section>
           <BindingCreator
             siteId={siteId}
             pages={pages}

@@ -713,6 +713,77 @@ export interface paths {
         patch: operations["update_site_sites__site_id__patch"];
         trace?: never;
     };
+    "/sites/{site_id}/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Site Deployments */
+        get: operations["list_site_deployments_sites__site_id__deployments_get"];
+        put?: never;
+        /** Create Site Deployment */
+        post: operations["create_site_deployment_sites__site_id__deployments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/site-deployments/{deployment_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote Site Deployment */
+        post: operations["promote_site_deployment_site_deployments__deployment_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sites/{site_id}/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Site Domains */
+        get: operations["list_site_domains_sites__site_id__domains_get"];
+        put?: never;
+        /** Create Site Domain */
+        post: operations["create_site_domain_sites__site_id__domains_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/site-domains/{domain_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Site Domain */
+        delete: operations["delete_site_domain_site_domains__domain_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Site Domain */
+        patch: operations["update_site_domain_site_domains__domain_id__patch"];
+        trace?: never;
+    };
     "/sites/{site_id}/pages": {
         parameters: {
             query?: never;
@@ -862,6 +933,108 @@ export interface paths {
         };
         /** Get Public Binding Data */
         get: operations["get_public_binding_data_public_sites__slug__bindings__binding_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/sites/{slug}/deployment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Public Latest Deployment */
+        get: operations["get_public_latest_deployment_public_sites__slug__deployment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/sites/{slug}/render/{page_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Render Public Site */
+        get: operations["render_public_site_public_sites__slug__render__page_path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/sites/{slug}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Render Public Site */
+        get: operations["render_public_site_public_sites__slug__render_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/domains/{hostname}/deployment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Public Domain Deployment */
+        get: operations["get_public_domain_deployment_public_domains__hostname__deployment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/domains/{hostname}/render/{page_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Render Public Domain */
+        get: operations["render_public_domain_public_domains__hostname__render__page_path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/domains/{hostname}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Render Public Domain */
+        get: operations["render_public_domain_public_domains__hostname__render_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2125,6 +2298,11 @@ export interface components {
             /** Full Name */
             full_name?: string | null;
         };
+        /** SiteBuildOut */
+        SiteBuildOut: {
+            deployment: components["schemas"]["SiteDeploymentOut"];
+            job: components["schemas"]["JobOut"];
+        };
         /** SiteCreate */
         SiteCreate: {
             /**
@@ -2211,6 +2389,57 @@ export interface components {
             /** Order */
             order?: number | null;
         };
+        /** SiteDeploymentCreate */
+        SiteDeploymentCreate: {
+            /** @default production */
+            environment: components["schemas"]["SiteEnvironment"];
+        };
+        /** SiteDeploymentOut */
+        SiteDeploymentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Site Id
+             * Format: uuid
+             */
+            site_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Created By Id
+             * Format: uuid
+             */
+            created_by_id: string;
+            /** Job Id */
+            job_id: string | null;
+            /** Asset Id */
+            asset_id: string | null;
+            /** Version */
+            version: number;
+            environment: components["schemas"]["SiteEnvironment"];
+            /** Active */
+            active: boolean;
+            status: components["schemas"]["SiteDeploymentStatus"];
+            /** Entry Path */
+            entry_path: string;
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /** Error */
+            error: string | null;
+        };
+        /**
+         * SiteDeploymentStatus
+         * @enum {string}
+         */
+        SiteDeploymentStatus: "queued" | "building" | "ready" | "failed";
         /** SiteDesignImport */
         SiteDesignImport: {
             /**
@@ -2230,6 +2459,63 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** SiteDomainCreate */
+        SiteDomainCreate: {
+            /** Hostname */
+            hostname: string;
+            /** @default production */
+            environment: components["schemas"]["SiteEnvironment"];
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
+            /**
+             * Primary
+             * @default false
+             */
+            primary: boolean;
+        };
+        /** SiteDomainOut */
+        SiteDomainOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Site Id
+             * Format: uuid
+             */
+            site_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Hostname */
+            hostname: string;
+            environment: components["schemas"]["SiteEnvironment"];
+            /** Verified */
+            verified: boolean;
+            /** Primary */
+            primary: boolean;
+        };
+        /** SiteDomainUpdate */
+        SiteDomainUpdate: {
+            /** Hostname */
+            hostname?: string | null;
+            environment?: components["schemas"]["SiteEnvironment"] | null;
+            /** Verified */
+            verified?: boolean | null;
+            /** Primary */
+            primary?: boolean | null;
+        };
+        /**
+         * SiteEnvironment
+         * @enum {string}
+         */
+        SiteEnvironment: "production" | "preview";
         /** SiteOut */
         SiteOut: {
             /**
@@ -4660,6 +4946,247 @@ export interface operations {
             };
         };
     };
+    list_site_deployments_sites__site_id__deployments_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDeploymentOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_site_deployment_sites__site_id__deployments_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SiteDeploymentCreate"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteBuildOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_site_deployment_site_deployments__deployment_id__promote_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                deployment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDeploymentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_site_domains_sites__site_id__domains_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDomainOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_site_domain_sites__site_id__domains_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteDomainCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDomainOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_site_domain_site_domains__domain_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_site_domain_site_domains__domain_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteDomainUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDomainOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_site_pages_sites__site_id__pages_get: {
         parameters: {
             query?: never;
@@ -5089,6 +5616,203 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicBindingDataOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_public_latest_deployment_public_sites__slug__deployment_get: {
+        parameters: {
+            query?: {
+                environment?: components["schemas"]["SiteEnvironment"];
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDeploymentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_public_site_public_sites__slug__render__page_path__get: {
+        parameters: {
+            query?: {
+                environment?: components["schemas"]["SiteEnvironment"];
+            };
+            header?: never;
+            path: {
+                slug: string;
+                page_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_public_site_public_sites__slug__render_get: {
+        parameters: {
+            query?: {
+                page_path?: string;
+                environment?: components["schemas"]["SiteEnvironment"];
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_public_domain_deployment_public_domains__hostname__deployment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostname: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteDeploymentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_public_domain_public_domains__hostname__render__page_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hostname: string;
+                page_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_public_domain_public_domains__hostname__render_get: {
+        parameters: {
+            query?: {
+                page_path?: string;
+            };
+            header?: never;
+            path: {
+                hostname: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
                 };
             };
             /** @description Validation Error */

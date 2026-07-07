@@ -4,8 +4,8 @@
 
 VHB Group's internal B2B trading/export super app, intended to replace a mature
 Notion business hub and a lightly used ClickUp setup. Foundation F1–F9, UI
-modernization U1–U4, Core Functions CM1–CM7, and Design & Publishing DP1–DP4
-are complete. The next product phase is DP5 Build and Deployment pipeline.
+modernization U1–U4, Core Functions CM1–CM7, and Design & Publishing DP1–DP7
+are complete at MVP level.
 
 ## Current Architecture
 
@@ -34,12 +34,14 @@ Accepted decisions are recorded under `docs/adr/`.
 - Core Functions CM1–CM7 provide transfers, BlockNote documents, generic
   resource grants, dashboards, Google identity, notifications, and Google
   Drive-backed Database Files & Media.
-- Design & Publishing DP1–DP4 provide Sites, Pages, Data Bindings, the
+- Design & Publishing DP1–DP7 provide Sites, Pages, Data Bindings, the
   restricted Public Runtime API, a GrapesJS-backed Web Designer, and local
-  Figma/Penpot/static artifact import into designer source.
-- Current green baseline: backend ruff/mypy/66 tests; frontend
+  Figma/Penpot/static artifact import into designer source, plus durable
+  build/deployment artifacts, environments, domains, rollback and realtime
+  presence/events for Docs/Design.
+- Current green baseline: backend ruff/mypy/68 tests; frontend
   typecheck/lint/16 tests/production build.
-- Alembic head: `3c5e7f9b0d1a`.
+- Alembic head: `5a7c9e1f3b2d`.
 - Preserve unrelated dirty-worktree changes.
 
 ## Non-Negotiable UX Rules
@@ -89,6 +91,9 @@ Frontend dev: `cd frontend && pnpm dev`
 | Sites/public runtime design | `docs/adr/0011-sites-public-runtime.md` |
 | Web Designer source model | `docs/adr/0012-web-designer-grapesjs-source.md` |
 | Design import boundary | `docs/adr/0013-design-import-artifacts.md` |
+| Site build/deployment artifacts | `docs/adr/0014-site-build-deployment-artifacts.md` |
+| Domains, environments and rollback | `docs/adr/0015-domains-environments-rollback.md` |
+| Realtime collaboration contract | `docs/adr/0016-realtime-collaboration-contract.md` |
 | UX rules | `docs/ux-guidelines.md` |
 | Architecture decisions | `docs/adr/` |
 | Frontend local instructions | `frontend/AGENTS.md`, `frontend/CLAUDE.md` |

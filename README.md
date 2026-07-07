@@ -78,8 +78,8 @@ Google Shared Drive folder.
 ## Trạng thái
 
 Foundation F1–F9, UI modernization U1–U4, Core Functions CM1–CM7 và Design &
-Publishing DP1–DP4 đã hoàn thành ở mức production baseline/MVP. Lát cắt tiếp
-theo là DP5 Build and Deployment pipeline; xem [Production Plan](PRODUCTION_PLAN.md).
+Publishing DP1–DP7 đã hoàn thành ở mức production baseline/MVP. Xem
+[Production Plan](PRODUCTION_PLAN.md) để chọn phase sản xuất tiếp theo.
 
 ## Tài liệu
 

@@ -56,13 +56,16 @@ Notion business model rather than the ClickUp demo data.
 - Site/Page/DataBinding domain and restricted Public Runtime API
 - GrapesJS-backed Web Designer storing project JSON in page source
 - Design import pipeline for local Figma/Penpot/static HTML artifacts
+- Build/deployment pipeline producing object-storage HTML artifacts
+- Deployment environments, custom domains, and rollback/promote controls
+- Realtime collaboration presence/events for Documents and Web Designer
 - Audit trail, Redis sessions/cache, observability, backups, and CI
 
 ## Active roadmap
 
 The authoritative delivery sequence and current status live in
-[Production Plan](../PRODUCTION_PLAN.md). The next phase covers DP5 build and
-deployment pipelines, domains, environments, and rollback.
+[Production Plan](../PRODUCTION_PLAN.md). Design & Publishing DP1-DP7 is
+complete at MVP level; use the roadmap to choose the next production phase.
 
 Historical implementation details belong in [Changelog](../CHANGELOG.md), not in
 parallel plans or memory files.

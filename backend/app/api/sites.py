@@ -1,9 +1,10 @@
 """Site/Page/DataBinding admin APIs and public runtime APIs."""
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,11 +13,20 @@ from app.api.engine import query_rows
 from app.db.session import get_db
 from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
+from app.models.asset import Asset, AssetStatus
 from app.models.database import Database
 from app.models.field import Field
 from app.models.permission import ResourceType
 from app.models.resource import Folder, Space
-from app.models.site import Site, SiteDataBinding, SitePage
+from app.models.site import (
+    Site,
+    SiteDataBinding,
+    SiteDeployment,
+    SiteDeploymentStatus,
+    SiteDomain,
+    SiteEnvironment,
+    SitePage,
+)
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.engine import RowPage, RowQuery
@@ -26,11 +36,17 @@ from app.schemas.site import (
     PublicPageOut,
     PublicPageSummary,
     PublicSiteOut,
+    SiteBuildOut,
     SiteCreate,
     SiteDataBindingCreate,
     SiteDataBindingOut,
     SiteDataBindingUpdate,
+    SiteDeploymentCreate,
+    SiteDeploymentOut,
     SiteDesignImport,
+    SiteDomainCreate,
+    SiteDomainOut,
+    SiteDomainUpdate,
     SiteOut,
     SitePageCreate,
     SitePageOut,
@@ -45,7 +61,10 @@ from app.services.authorization import (
     require_workspace_action,
 )
 from app.services.events import record_event
+from app.services.jobs import enqueue_job
+from app.services.site_build import next_site_deployment_version
 from app.services.site_design import default_grapesjs_content, imported_grapesjs_content
+from app.services.storage import ObjectStorage, StoredObjectNotFoundError, get_object_storage
 
 router = APIRouter(tags=["sites"])
 
@@ -57,6 +76,15 @@ def _normalize_slug(slug: str) -> str:
 def _normalize_path(path: str) -> str:
     clean = "/" + path.strip().strip("/")
     return "/" if clean == "/" else clean
+
+
+def _normalize_hostname(hostname: str) -> str:
+    clean = hostname.strip().lower()
+    clean = clean.removeprefix("https://").removeprefix("http://")
+    clean = clean.split("/", 1)[0].split(":", 1)[0].strip(".")
+    if not clean or " " in clean or "." not in clean:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid hostname")
+    return clean
 
 
 async def _scoped_site(site_id: uuid.UUID, workspace: Workspace, db: AsyncSession) -> Site:
@@ -84,6 +112,52 @@ async def _scoped_binding(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site data binding not found")
     site = await _scoped_site(binding.site_id, workspace, db)
     return binding, site
+
+
+async def _scoped_domain(
+    domain_id: uuid.UUID, workspace: Workspace, db: AsyncSession
+) -> tuple[SiteDomain, Site]:
+    domain = await db.get(SiteDomain, domain_id)
+    if domain is None or domain.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site domain not found")
+    site = await _scoped_site(domain.site_id, workspace, db)
+    return domain, site
+
+
+async def _active_ready_deployment(
+    site: Site,
+    db: AsyncSession,
+    *,
+    environment: SiteEnvironment = SiteEnvironment.production,
+) -> SiteDeployment | None:
+    active = await db.scalar(
+        select(SiteDeployment)
+        .where(
+            SiteDeployment.site_id == site.id,
+            SiteDeployment.environment == environment,
+            SiteDeployment.status == SiteDeploymentStatus.ready,
+            SiteDeployment.asset_id.is_not(None),
+            SiteDeployment.active.is_(True),
+        )
+        .order_by(SiteDeployment.version.desc(), SiteDeployment.created_at.desc())
+        .limit(1)
+    )
+    if active is not None:
+        return active
+    return cast(
+        SiteDeployment | None,
+        await db.scalar(
+            select(SiteDeployment)
+            .where(
+                SiteDeployment.site_id == site.id,
+                SiteDeployment.environment == environment,
+                SiteDeployment.status == SiteDeploymentStatus.ready,
+                SiteDeployment.asset_id.is_not(None),
+            )
+            .order_by(SiteDeployment.version.desc(), SiteDeployment.created_at.desc())
+            .limit(1)
+        ),
+    )
 
 
 async def _validate_folder(
@@ -279,6 +353,300 @@ async def delete_site(
         resource_id=site.id,
     )
     await db.delete(site)
+    await db.commit()
+
+
+@router.get("/sites/{site_id}/deployments", response_model=list[SiteDeploymentOut])
+async def list_site_deployments(
+    site_id: uuid.UUID,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SiteDeployment]:
+    site = await _scoped_site(site_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.site,
+        resource_id=site.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.read,
+    )
+    result = await db.execute(
+        select(SiteDeployment)
+        .where(SiteDeployment.site_id == site.id)
+        .order_by(SiteDeployment.version.desc(), SiteDeployment.created_at.desc())
+        .limit(20)
+    )
+    return list(result.scalars())
+
+
+@router.post(
+    "/sites/{site_id}/deployments",
+    response_model=SiteBuildOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_site_deployment(
+    site_id: uuid.UUID,
+    payload: SiteDeploymentCreate | None = None,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteBuildOut:
+    site = await _scoped_site(site_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.site,
+        resource_id=site.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.write,
+    )
+    environment = payload.environment if payload is not None else SiteEnvironment.production
+    version = await next_site_deployment_version(db, site.id)
+    deployment = SiteDeployment(
+        site_id=site.id,
+        workspace_id=workspace.id,
+        created_by_id=current_user.id,
+        version=version,
+        environment=environment,
+        status=SiteDeploymentStatus.queued,
+        entry_path=site.homepage_path,
+        manifest={"site_id": str(site.id), "slug": site.slug, "environment": environment.value},
+    )
+    db.add(deployment)
+    await db.commit()
+    await db.refresh(deployment)
+    job = await enqueue_job(
+        db,
+        workspace_id=workspace.id,
+        created_by_id=current_user.id,
+        job_type="site.build",
+        payload={
+            "site_id": str(site.id),
+            "deployment_id": str(deployment.id),
+            "environment": environment.value,
+        },
+        max_attempts=3,
+        idempotency_key=f"site-build:{deployment.id}",
+    )
+    deployment.job_id = job.id
+    site.updated_by_id = current_user.id
+    record_event(
+        db,
+        action="site.deployment_queued",
+        resource_type="site",
+        resource_id=str(site.id),
+        workspace_id=workspace.id,
+        actor_id=current_user.id,
+        data={
+            "deployment_id": str(deployment.id),
+            "job_id": str(job.id),
+            "version": version,
+            "environment": environment.value,
+        },
+    )
+    await db.commit()
+    await db.refresh(deployment)
+    await db.refresh(job)
+    return SiteBuildOut(deployment=SiteDeploymentOut.model_validate(deployment), job=job)
+
+
+@router.post("/site-deployments/{deployment_id}/promote", response_model=SiteDeploymentOut)
+async def promote_site_deployment(
+    deployment_id: uuid.UUID,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteDeployment:
+    deployment = await db.get(SiteDeployment, deployment_id)
+    if deployment is None or deployment.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site deployment not found")
+    site = await _scoped_site(deployment.site_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.site,
+        resource_id=site.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.write,
+    )
+    if deployment.status is not SiteDeploymentStatus.ready or deployment.asset_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only ready deployments can be promoted")
+    result = await db.execute(
+        select(SiteDeployment).where(
+            SiteDeployment.site_id == site.id,
+            SiteDeployment.environment == deployment.environment,
+            SiteDeployment.active.is_(True),
+        )
+    )
+    for active in result.scalars():
+        active.active = False
+    deployment.active = True
+    site.updated_by_id = current_user.id
+    record_event(
+        db,
+        action="site.deployment_promoted",
+        resource_type="site",
+        resource_id=str(site.id),
+        workspace_id=workspace.id,
+        actor_id=current_user.id,
+        data={
+            "deployment_id": str(deployment.id),
+            "version": deployment.version,
+            "environment": deployment.environment.value,
+        },
+    )
+    await db.commit()
+    await db.refresh(deployment)
+    return deployment
+
+
+@router.get("/sites/{site_id}/domains", response_model=list[SiteDomainOut])
+async def list_site_domains(
+    site_id: uuid.UUID,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SiteDomain]:
+    site = await _scoped_site(site_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.site,
+        resource_id=site.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.read,
+    )
+    result = await db.execute(
+        select(SiteDomain)
+        .where(SiteDomain.site_id == site.id)
+        .order_by(SiteDomain.primary.desc(), SiteDomain.hostname)
+    )
+    return list(result.scalars())
+
+
+@router.post(
+    "/sites/{site_id}/domains",
+    response_model=SiteDomainOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_site_domain(
+    site_id: uuid.UUID,
+    payload: SiteDomainCreate,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteDomain:
+    site = await _scoped_site(site_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.site,
+        resource_id=site.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.write,
+    )
+    if payload.primary:
+        result = await db.execute(
+            select(SiteDomain).where(
+                SiteDomain.site_id == site.id,
+                SiteDomain.environment == payload.environment,
+                SiteDomain.primary.is_(True),
+            )
+        )
+        for existing in result.scalars():
+            existing.primary = False
+    domain = SiteDomain(
+        site_id=site.id,
+        workspace_id=workspace.id,
+        hostname=_normalize_hostname(payload.hostname),
+        environment=payload.environment,
+        verified=payload.verified,
+        primary=payload.primary,
+    )
+    db.add(domain)
+    site.updated_by_id = current_user.id
+    record_event(
+        db,
+        action="site.domain_created",
+        resource_type="site",
+        resource_id=str(site.id),
+        workspace_id=workspace.id,
+        actor_id=current_user.id,
+        data={
+            "hostname": domain.hostname,
+            "environment": domain.environment.value,
+            "verified": domain.verified,
+        },
+    )
+    await _commit_or_conflict(db, "Domain hostname already exists")
+    await db.refresh(domain)
+    return domain
+
+
+@router.patch("/site-domains/{domain_id}", response_model=SiteDomainOut)
+async def update_site_domain(
+    domain_id: uuid.UUID,
+    payload: SiteDomainUpdate,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteDomain:
+    domain, site = await _scoped_domain(domain_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.site,
+        resource_id=site.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.write,
+    )
+    next_environment = payload.environment or domain.environment
+    next_primary = payload.primary if payload.primary is not None else domain.primary
+    if next_primary:
+        result = await db.execute(
+            select(SiteDomain).where(
+                SiteDomain.site_id == site.id,
+                SiteDomain.environment == next_environment,
+                SiteDomain.id != domain.id,
+                SiteDomain.primary.is_(True),
+            )
+        )
+        for existing in result.scalars():
+            existing.primary = False
+    if payload.hostname is not None:
+        domain.hostname = _normalize_hostname(payload.hostname)
+    if payload.environment is not None:
+        domain.environment = payload.environment
+    if payload.verified is not None:
+        domain.verified = payload.verified
+    if payload.primary is not None:
+        domain.primary = payload.primary
+    site.updated_by_id = current_user.id
+    await _commit_or_conflict(db, "Domain hostname already exists")
+    await db.refresh(domain)
+    return domain
+
+
+@router.delete("/site-domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_site_domain(
+    domain_id: uuid.UUID,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    domain, site = await _scoped_domain(domain_id, workspace, db)
+    await require_resource_action(
+        db,
+        resource_type=ResourceType.site,
+        resource_id=site.id,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        action=Action.write,
+    )
+    await db.delete(domain)
+    site.updated_by_id = current_user.id
     await db.commit()
 
 
@@ -714,4 +1082,114 @@ async def get_public_binding_data(
         name=binding.name,
         field_ids=binding.field_ids,
         data=_prune_row_page(data, binding.field_ids),
+    )
+
+
+@router.get(
+    "/public/sites/{slug}/deployment",
+    response_model=SiteDeploymentOut,
+)
+async def get_public_latest_deployment(
+    slug: str,
+    environment: SiteEnvironment = Query(default=SiteEnvironment.production),
+    db: AsyncSession = Depends(get_db),
+) -> SiteDeployment:
+    site = await _public_site(slug, db)
+    deployment = await _active_ready_deployment(site, db, environment=environment)
+    if deployment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published deployment not found")
+    return deployment
+
+
+@router.get("/public/sites/{slug}/render", response_class=HTMLResponse)
+@router.get("/public/sites/{slug}/render/{page_path:path}", response_class=HTMLResponse)
+async def render_public_site(
+    slug: str,
+    page_path: str = "",
+    environment: SiteEnvironment = Query(default=SiteEnvironment.production),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> Response:
+    site = await _public_site(slug, db)
+    deployment = await _active_ready_deployment(site, db, environment=environment)
+    if deployment is None or deployment.asset_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published deployment not found")
+    asset = await db.get(Asset, deployment.asset_id)
+    if asset is None or asset.status is not AssetStatus.ready:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Deployment artifact not found")
+    try:
+        data = await storage.get_bytes(asset.object_key)
+    except StoredObjectNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Deployment artifact missing") from exc
+    return HTMLResponse(
+        content=data.decode("utf-8"),
+        headers={
+            "Cache-Control": "public, max-age=60",
+            "X-VHB-Deployment-ID": str(deployment.id),
+            "X-VHB-Environment": deployment.environment.value,
+            "X-VHB-Page-Path": "/" + page_path.strip("/") if page_path else site.homepage_path,
+        },
+    )
+
+
+@router.get("/public/domains/{hostname}/deployment", response_model=SiteDeploymentOut)
+async def get_public_domain_deployment(
+    hostname: str,
+    db: AsyncSession = Depends(get_db),
+) -> SiteDeployment:
+    domain = await db.scalar(
+        select(SiteDomain).where(
+            SiteDomain.hostname == _normalize_hostname(hostname),
+            SiteDomain.verified.is_(True),
+        )
+    )
+    if domain is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Verified domain not found")
+    site = await db.get(Site, domain.site_id)
+    if site is None or not site.published:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published site not found")
+    deployment = await _active_ready_deployment(site, db, environment=domain.environment)
+    if deployment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published deployment not found")
+    return deployment
+
+
+@router.get("/public/domains/{hostname}/render", response_class=HTMLResponse)
+@router.get("/public/domains/{hostname}/render/{page_path:path}", response_class=HTMLResponse)
+async def render_public_domain(
+    hostname: str,
+    page_path: str = "",
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> Response:
+    domain = await db.scalar(
+        select(SiteDomain).where(
+            SiteDomain.hostname == _normalize_hostname(hostname),
+            SiteDomain.verified.is_(True),
+        )
+    )
+    if domain is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Verified domain not found")
+    site = await db.get(Site, domain.site_id)
+    if site is None or not site.published:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published site not found")
+    deployment = await _active_ready_deployment(site, db, environment=domain.environment)
+    if deployment is None or deployment.asset_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published deployment not found")
+    asset = await db.get(Asset, deployment.asset_id)
+    if asset is None or asset.status is not AssetStatus.ready:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Deployment artifact not found")
+    try:
+        data = await storage.get_bytes(asset.object_key)
+    except StoredObjectNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Deployment artifact missing") from exc
+    return HTMLResponse(
+        content=data.decode("utf-8"),
+        headers={
+            "Cache-Control": "public, max-age=60",
+            "X-VHB-Deployment-ID": str(deployment.id),
+            "X-VHB-Domain": domain.hostname,
+            "X-VHB-Environment": deployment.environment.value,
+            "X-VHB-Page-Path": "/" + page_path.strip("/") if page_path else site.homepage_path,
+        },
     )

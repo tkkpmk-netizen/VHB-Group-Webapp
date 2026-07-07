@@ -5,7 +5,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.site import SiteDeploymentStatus, SiteEnvironment
 from app.schemas.engine import RowPage, RowQuery
+from app.schemas.job import JobOut
 from app.services.site_design import default_grapesjs_content
 
 
@@ -115,6 +117,59 @@ class SiteDataBindingOut(BaseModel):
     field_ids: list[str]
     expose_public: bool
     order: int
+
+
+class SiteDeploymentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    site_id: uuid.UUID
+    workspace_id: uuid.UUID
+    created_by_id: uuid.UUID
+    job_id: uuid.UUID | None
+    asset_id: uuid.UUID | None
+    version: int
+    environment: SiteEnvironment
+    active: bool
+    status: SiteDeploymentStatus
+    entry_path: str
+    manifest: dict[str, Any]
+    error: str | None
+
+
+class SiteDeploymentCreate(BaseModel):
+    environment: SiteEnvironment = SiteEnvironment.production
+
+
+class SiteBuildOut(BaseModel):
+    deployment: SiteDeploymentOut
+    job: JobOut
+
+
+class SiteDomainCreate(BaseModel):
+    hostname: str = Field(min_length=3, max_length=255)
+    environment: SiteEnvironment = SiteEnvironment.production
+    verified: bool = False
+    primary: bool = False
+
+
+class SiteDomainUpdate(BaseModel):
+    hostname: str | None = Field(default=None, min_length=3, max_length=255)
+    environment: SiteEnvironment | None = None
+    verified: bool | None = None
+    primary: bool | None = None
+
+
+class SiteDomainOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    site_id: uuid.UUID
+    workspace_id: uuid.UUID
+    hostname: str
+    environment: SiteEnvironment
+    verified: bool
+    primary: bool
 
 
 class PublicPageSummary(BaseModel):

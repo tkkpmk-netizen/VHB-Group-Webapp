@@ -15,6 +15,7 @@ SUPPORTED_JOB_TYPES = {
     "database.import",
     "database.export",
     "notification.email",
+    "site.build",
 }
 
 

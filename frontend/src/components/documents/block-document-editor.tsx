@@ -11,6 +11,7 @@ import { Check, Cloud, LoaderCircle } from "lucide-react";
 import { useRef, useState } from "react";
 import { ResourceAccess } from "@/components/access/resource-access";
 import { apiFetch } from "@/lib/api/client";
+import { useCollaboration } from "@/lib/collaboration";
 
 type DocumentData = {
   id: string;
@@ -31,6 +32,10 @@ export function BlockDocumentEditor({
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">(
     "saved",
   );
+  const collaboration = useCollaboration({
+    resourceType: "document",
+    resourceId: initialDocument.id,
+  });
   const editor = useCreateBlockNote({
     initialContent: initialDocument.content as PartialBlock[],
   });
@@ -80,6 +85,23 @@ export function BlockDocumentEditor({
             )}
             {saveState}
           </span>
+          <div className="flex items-center gap-1.5 rounded-full border bg-background px-2 py-1 text-xs text-muted-foreground">
+            <span
+              className={`size-2 rounded-full ${
+                collaboration.connected ? "bg-emerald-500" : "bg-muted-foreground/40"
+              }`}
+            />
+            {collaboration.collaborators.length} online
+          </div>
+          {collaboration.collaborators.slice(0, 4).map((user) => (
+            <span
+              key={user.session_id}
+              title={user.email}
+              className="grid size-7 place-items-center rounded-full bg-blue-50 text-[10px] font-semibold text-blue-700"
+            >
+              {user.name.slice(0, 2).toUpperCase()}
+            </span>
+          ))}
           <ResourceAccess
             resourceType="document"
             resourceId={initialDocument.id}
@@ -91,6 +113,10 @@ export function BlockDocumentEditor({
             editor={editor}
             theme="light"
             onChange={() => {
+              collaboration.sendEvent("content.changed", {
+                version: version.current,
+                block_count: editor.document.length,
+              });
               if (timer.current) clearTimeout(timer.current);
               timer.current = setTimeout(
                 () => saveContent(editor.document),

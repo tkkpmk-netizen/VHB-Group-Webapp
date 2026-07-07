@@ -18,6 +18,7 @@ import {
   type GrapesContent,
   type SitePageContent,
 } from "@/lib/site-designer";
+import { useCollaboration } from "@/lib/collaboration";
 
 type SitePage = {
   id: string;
@@ -70,11 +71,13 @@ function applyProject(editor: Editor, page: SitePage): void {
   editor.setStyle(content.css ?? fallback.css ?? "");
 }
 
-function projectEnvelope(project: Record<string, unknown>): GrapesContent {
+function projectEnvelope(project: Record<string, unknown>, html: string, css: string): GrapesContent {
   return {
     type: "grapesjs",
-    version: "dp3-mvp",
+    version: "dp5-build-source",
     project,
+    html,
+    css,
     meta: { saved_at: new Date().toISOString() },
   };
 }
@@ -95,6 +98,10 @@ export function WebDesigner({
   const stylesEl = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const [ready, setReady] = useState(false);
+  const collaboration = useCollaboration({
+    resourceType: "site_page",
+    resourceId: page.id,
+  });
   const bindingKey = useMemo(
     () => bindings.map((binding) => `${binding.key}:${binding.field_ids.length}`).join("|"),
     [bindings],
@@ -215,7 +222,18 @@ export function WebDesigner({
   function saveProject() {
     const editor = editorRef.current;
     if (!editor) return;
-    onSave(projectEnvelope(editor.getProjectData() as Record<string, unknown>));
+    collaboration.sendEvent("design.changed", {
+      page_id: page.id,
+      path: page.path,
+      action: "save",
+    });
+    onSave(
+      projectEnvelope(
+        editor.getProjectData() as Record<string, unknown>,
+        editor.getHtml(),
+        editor.getCss() ?? "",
+      ),
+    );
   }
 
   function resetCanvas() {
@@ -224,6 +242,11 @@ export function WebDesigner({
     const fallback = defaultDesignerContent(page.title);
     editor.setComponents(fallback.html ?? "");
     editor.setStyle(fallback.css ?? "");
+    collaboration.sendEvent("design.changed", {
+      page_id: page.id,
+      path: page.path,
+      action: "reset",
+    });
   }
 
   function setDevice(name: "Desktop" | "Tablet" | "Mobile") {
@@ -240,6 +263,23 @@ export function WebDesigner({
             GrapesJS project source · {page.title} · {page.path}
           </p>
         </div>
+        <div className="flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs text-muted-foreground">
+          <span
+            className={`size-2 rounded-full ${
+              collaboration.connected ? "bg-emerald-500" : "bg-muted-foreground/40"
+            }`}
+          />
+          {collaboration.collaborators.length} online
+        </div>
+        {collaboration.collaborators.slice(0, 3).map((user) => (
+          <span
+            key={user.session_id}
+            title={user.email}
+            className="grid size-7 place-items-center rounded-full bg-purple-50 text-[10px] font-semibold text-purple-700"
+          >
+            {user.name.slice(0, 2).toUpperCase()}
+          </span>
+        ))}
         <div className="flex items-center gap-1">
           <button
             type="button"

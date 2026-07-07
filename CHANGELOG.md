@@ -5,6 +5,51 @@ Changelog gộp, mới nhất ở trên. (Trước đây tách thành `CHANGELOG
 
 ---
 
+## 2026-07-07 — DP7 Realtime collaboration MVP
+
+- Thêm WebSocket endpoint `/collaboration/ws/{resource_type}/{resource_id}`.
+- Hỗ trợ realtime room cho `document` và `site_page`.
+- Xác thực bằng JWT token, active session Redis và workspace-scoped resource
+  authorization.
+- Thêm presence snapshot/join/leave và event broadcast cho cursor, selection,
+  document content change, design change.
+- Thêm frontend hook `useCollaboration`.
+- Document editor hiển thị online collaborators và broadcast content change,
+  vẫn giữ autosave optimistic version làm source of truth.
+- Web Designer hiển thị online collaborators và broadcast design save/reset.
+
+---
+
+## 2026-07-07 — DP6 Domains, environments and rollback
+
+- Thêm environment `production` và `preview` cho `SiteDeployment`.
+- Thêm active deployment theo site/environment; build thành công tự activate
+  deployment mới trong environment đó.
+- Thêm rollback/promote endpoint `POST /site-deployments/{deployment_id}/promote`.
+- Thêm `SiteDomain` để quản lý hostname, environment, verified và primary.
+- Thêm public domain render endpoint `/public/domains/{hostname}/render[/path]`.
+- Site Manager có chọn environment khi build, active badge, rollback/promote,
+  domain create, mark verified, make primary và remove.
+
+---
+
+## 2026-07-07 — DP5 Build and deployment pipeline
+
+- Thêm `SiteDeployment` để quản lý version, status, job build, asset artifact,
+  manifest và lỗi build.
+- Thêm migration `4f6a8c0d2e1b_site_deployments`.
+- Thêm endpoint `POST /sites/{site_id}/deployments` để queue durable job
+  `site.build`.
+- Worker build các page đã publish thành HTML artifact và lưu vào object
+  storage qua `Asset`.
+- Thêm public render endpoint `/public/sites/{slug}/render[/path]`, chỉ phục vụ
+  artifact ready của site đã publish.
+- Artifact HTML tự hydrate các marker `data-vhb-binding` bằng DP2 public binding
+  API.
+- Site Manager có panel Deploy: Build & deploy, polling status và link preview.
+
+---
+
 ## 2026-07-07 — DP4 Design import pipeline
 
 - Thêm endpoint `POST /site-pages/{page_id}/import-design` để import artifact

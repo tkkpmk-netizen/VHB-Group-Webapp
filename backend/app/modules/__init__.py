@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from app.api.assets import router as assets_router
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
+from app.api.collaboration import router as collaboration_router
 from app.api.dashboards import router as dashboards_router
 from app.api.databases import router as databases_router
 from app.api.documents import router as documents_router
@@ -63,7 +64,7 @@ MODULES = (
     ),
     PlatformModule(
         "governance",
-        (audit_router, resource_grants_router, notifications_router),
+        (audit_router, resource_grants_router, notifications_router, collaboration_router),
         (
             "permissions",
             "audit_events",
