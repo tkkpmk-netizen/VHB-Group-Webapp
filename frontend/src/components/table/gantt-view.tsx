@@ -10,10 +10,11 @@ import {
   ChevronRight,
   LocateFixed,
   Plus,
-} from "lucide-react";
+} from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
 import { CellEditor, ValueChip } from "@/components/table/cell-editor";
+import { EntityNameDialog } from "@/components/table/entity-name-dialog";
 import {
   PERIODS,
   applyDrag,
@@ -33,7 +34,7 @@ import type { components } from "@/lib/api/schema";
 import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
-type Row = components["schemas"]["RowOut"];
+type Entity = components["schemas"]["EntityOut"];
 
 const DAY = 86_400_000;
 const ROW_H = 40;
@@ -140,11 +141,11 @@ const DATE_TYPES = new Set(["date", "created_time", "last_edited_time"]);
 
 /** Fields eligible as the timeline axis: date / created_time / last_edited_time,
  *  plus formula fields whose evaluated result looks like a date. */
-function dateLikeFields(fields: Field[], rows: Row[]): Field[] {
+function dateLikeFields(fields: Field[], entities: Entity[]): Field[] {
   return fields.filter((f) => {
     if (DATE_TYPES.has(f.type)) return true;
     if (f.type !== "formula") return false;
-    return rows.some((r) => looksDate((r.data as Record<string, unknown>)[f.id]));
+    return entities.some((r) => looksDate((r.data as Record<string, unknown>)[f.id]));
   });
 }
 
@@ -163,8 +164,10 @@ export function GanttView({
   filterRoot,
   sorts,
   limit,
+  dataSourceId,
   filterToMatches,
   matchedIds,
+  openEntity,
 }: {
   databaseId: string;
   ganttField: string | null;
@@ -180,32 +183,36 @@ export function GanttView({
   filterRoot: FilterGroup;
   sorts: SortRule[];
   limit: number;
+  dataSourceId: string | null;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
+  openEntity: (entity: Entity) => void;
 }) {
   const qc = useQueryClient();
   const [now] = useState(() => Date.now()); // stable "today" marker for this mount
-  const [pages, setPages] = useState(0); // row "load more" clicks
+  const [pages, setPages] = useState(0); // entity "load more" clicks
+  const [newEntityOpen, setNewEntityOpen] = useState(false);
   const [extBefore, setExtBefore] = useState(0); // window extensions (earlier)
   const [extAfter, setExtAfter] = useState(0); // window extensions (later)
   const [edges, setEdges] = useState({ left: false, right: false });
-  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+  const [unscheduledOpen, setUnscheduledOpen] = useState(true);
   const [widths, setWidths] = useState<Record<string, number>>(() => ({
     ...ganttColWidths,
   }));
   // Live bar drag (move / resize an end). delta is in whole days.
   const [drag, setDrag] = useState<{
-    rowId: string;
+    entityId: string;
     mode: "move" | "start" | "end";
   } | null>(null);
   const [dragDelta, setDragDelta] = useState(0);
   // Unscheduled-tray hover/drag (set a date by clicking/dragging on the strip).
   const [trayHover, setTrayHover] = useState<{
-    rowId: string;
+    entityId: string;
     s: number;
     e: number;
   } | null>(null);
-  const trayDrag = useRef<{ rowId: string; s: number; e: number } | null>(null);
+  const trayDrag = useRef<{ entityId: string; s: number; e: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const trayScrollRef = useRef<HTMLDivElement>(null);
   const syncing = useRef(false);
@@ -227,36 +234,40 @@ export function GanttView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const rowsQ = useQuery<Row[]>({
-    queryKey: ["rows", databaseId],
-    queryFn: () => apiFetch<Row[]>(`/databases/${databaseId}/rows`),
+  const entitiesQ = useQuery<Entity[]>({
+    queryKey: ["entities", databaseId, dataSourceId],
+    queryFn: () =>
+      apiFetch<Entity[]>(
+        `/databases/${databaseId}/entities${dataSourceId ? `?data_source_id=${dataSourceId}` : ""}`,
+      ),
   });
   const save = useMutation({
     mutationFn: ({
-      rowId,
+      entityId,
       fieldId,
       value,
     }: {
-      rowId: string;
+      entityId: string;
       fieldId: string;
       value: unknown;
     }) =>
-      apiFetch<Row>(`/rows/${rowId}`, {
+      apiFetch<Entity>(`/entities/${entityId}`, {
         method: "PATCH",
         body: JSON.stringify({ data: { [fieldId]: value } }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", databaseId] }),
   });
-  const addRow = useMutation({
-    mutationFn: () =>
-      apiFetch<Row>(`/databases/${databaseId}/rows`, {
+  const addEntity = useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<Entity>(`/databases/${databaseId}/entities`, {
         method: "POST",
-        body: JSON.stringify({ data: {} }),
+        body: JSON.stringify({ name, data: {} }),
       }),
     onSuccess: (created) => {
-      setEditingRowId(created.id);
-      setPages(Math.floor((rowsQ.data?.length ?? 0) / limit));
-      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+      setEditingEntityId(created.id);
+      setNewEntityOpen(false);
+      setPages(Math.floor((entitiesQ.data?.length ?? 0) / limit));
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
     },
   });
 
@@ -273,7 +284,7 @@ export function GanttView({
       )
         return;
       e.preventDefault();
-      addRow.mutate();
+      setNewEntityOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -281,18 +292,18 @@ export function GanttView({
 
   const fields = fieldsQ.data ?? [];
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
-  let rows = applyFilterTree(rowsQ.data ?? [], byId, filterRoot);
-  if (filterToMatches && matchedIds) rows = rows.filter((r) => matchedIds.has(r.id));
-  rows = applySorts(rows, byId, sorts);
+  let entities = applyFilterTree(entitiesQ.data ?? [], byId, filterRoot);
+  if (filterToMatches && matchedIds) entities = entities.filter((r) => matchedIds.has(r.id));
+  entities = applySorts(entities, byId, sorts);
 
-  const dateFields = dateLikeFields(fields, rows);
+  const dateFields = dateLikeFields(fields, entities);
   const picked = ganttField ? byId[ganttField] : undefined;
   const field =
     (picked && dateFields.includes(picked) ? picked : undefined) ?? dateFields[0];
   const titleField = fields.find((f) => ["text", "long_text"].includes(f.type));
-  const title = (r: Row) => {
+  const title = (r: Entity) => {
     const v = titleField ? (r.data as Record<string, unknown>)[titleField.id] : null;
-    return typeof v === "string" && v ? v : `#${r.seq}`;
+    return typeof v === "string" && v ? v : r.uid;
   };
 
   const period = ganttScale ?? "day";
@@ -334,7 +345,7 @@ export function GanttView({
     extra.reduce((s, f) => s + wOf(f.id, COL_W), 0) +
     (addable.length > 0 ? ADD_W : 0);
 
-  function leftCell(f: Field, r: Row) {
+  function leftCell(f: Field, r: Entity) {
     const v = (r.data as Record<string, unknown>)[f.id];
     if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) return null;
     if (DATE_TYPES.has(f.type) || looksDate(v)) {
@@ -355,39 +366,37 @@ export function GanttView({
   }
 
   const controls = (onToday?: () => void) => (
-    <div className="flex flex-wrap items-center gap-3 text-sm">
+    <div className="flex items-center gap-1 whitespace-nowrap">
       {onToday && (
         <button
           onClick={onToday}
-          className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="flex h-6 items-center gap-1 rounded-md border border-border/80 bg-background px-2 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <CalendarClock className="size-4" /> Today
+          <CalendarClock className="size-3" /> Today
         </button>
       )}
       {dateFields.length > 1 && (
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">Timeline by</span>
-          <div className="w-40">
-            <Dropdown
-              value={field?.id ?? null}
-              options={dateFields.map((f) => ({ value: f.id, label: f.name }))}
-              onChange={(v) => setGanttField(v)}
-            />
-          </div>
-        </div>
-      )}
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground">Time period</span>
-        <div className="w-32">
+        <div className="w-32 shrink-0" title="Timeline date field">
           <Dropdown
-            value={period}
-            options={(Object.keys(PERIODS) as GanttScale[]).map((k) => ({
-              value: k,
-              label: PERIODS[k].label,
-            }))}
-            onChange={(v) => setGanttScale(v as GanttScale)}
+            value={field?.id ?? null}
+            options={dateFields.map((f) => ({ value: f.id, label: f.name }))}
+            onChange={(v) => setGanttField(v)}
+            allowClear={false}
+            compact
           />
         </div>
+      )}
+      <div className="w-20 shrink-0" title="Timeline scale">
+        <Dropdown
+          value={period}
+          options={(Object.keys(PERIODS) as GanttScale[]).map((k) => ({
+            value: k,
+            label: PERIODS[k].label,
+          }))}
+          onChange={(v) => v && setGanttScale(v as GanttScale)}
+          allowClear={false}
+          compact
+        />
       </div>
     </div>
   );
@@ -407,27 +416,27 @@ export function GanttView({
       </div>
     );
 
-  // Split dated rows (timeline) from undated ones (bottom tray).
-  const allSpans = rows.map((r) => ({
+  // Split dated entities (timeline) from undated ones (bottom tray).
+  const allSpans = entities.map((r) => ({
     r,
     span: dateSpan((r.data as Record<string, unknown>)[field.id]),
   }));
   const datedAll = allSpans.filter(
-    (x): x is { r: Row; span: Span } => !!x.span,
+    (x): x is { r: Entity; span: Span } => !!x.span,
   );
-  const undatedRows = allSpans.filter((x) => !x.span).map((x) => x.r);
-  // Row load limit (mirrors the table): render first N rows, reveal more.
+  const undatedEntities = allSpans.filter((x) => !x.span).map((x) => x.r);
+  // Entity load limit (mirrors the table): render first N entities, reveal more.
   const shown = limit * (pages + 1);
-  const rowSpans = datedAll.slice(0, shown);
-  const hiddenCount = datedAll.length - rowSpans.length;
+  const entitySpans = datedAll.slice(0, shown);
+  const hiddenCount = datedAll.length - entitySpans.length;
 
   // --- Time window: today ± windowDays, auto-grown to fit every LOADED bar so
-  //     nothing is cut off. Loading more rows (below) extends it automatically.
+  //     nothing is cut off. Loading more entities (below) extends it automatically.
   //     The side "More" buttons extend it further by one window each. ---
   const center = startOfDay(now);
   let domStart = center - (1 + extBefore) * P.windowDays * DAY;
   let domEnd = center + (1 + extAfter) * P.windowDays * DAY;
-  for (const { span } of rowSpans) {
+  for (const { span } of entitySpans) {
     domStart = Math.min(domStart, span.start);
     domEnd = Math.max(domEnd, span.end);
   }
@@ -463,7 +472,7 @@ export function GanttView({
   /** Begin a drag (move the block, or resize one end) on a bar. */
   function beginDrag(
     mode: "move" | "start" | "end",
-    r: Row,
+    r: Entity,
     s: number,
     e: number,
     ev: React.MouseEvent,
@@ -472,7 +481,7 @@ export function GanttView({
     ev.preventDefault();
     ev.stopPropagation();
     const startX = ev.clientX;
-    setDrag({ rowId: r.id, mode });
+    setDrag({ entityId: r.id, mode });
     setDragDelta(0);
     const raw = (r.data as Record<string, unknown>)[field.id];
     const rawStart =
@@ -496,7 +505,7 @@ export function GanttView({
       const fmt = (t: number) => (useTime ? ymdhm(t) : ymd(t));
       const keepEnd = mode === "end" || hadEnd || ne !== ns;
       save.mutate({
-        rowId: r.id,
+        entityId: r.id,
         fieldId: field.id,
         value: { start: fmt(ns), end: keepEnd ? fmt(ne) : null },
       });
@@ -526,7 +535,7 @@ export function GanttView({
     });
   };
 
-  // Snapped timestamp under the cursor inside a tray timeline row
+  // Snapped timestamp under the cursor inside a tray timeline entity
   // (hour for the Hour period, day otherwise).
   const trayDay = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -538,23 +547,23 @@ export function GanttView({
     }
     return startOfDay(t);
   };
-  function trayMove(rowId: string, e: React.MouseEvent) {
+  function trayMove(entityId: string, e: React.MouseEvent) {
     if (!editable) return;
     const day = trayDay(e);
     const d = trayDrag.current;
-    if (d && d.rowId === rowId) {
+    if (d && d.entityId === entityId) {
       d.e = day;
-      setTrayHover({ rowId, s: d.s, e: day });
+      setTrayHover({ entityId, s: d.s, e: day });
     } else if (!d) {
-      setTrayHover({ rowId, s: day, e: day });
+      setTrayHover({ entityId, s: day, e: day });
     }
   }
-  function trayDown(rowId: string, e: React.MouseEvent) {
+  function trayDown(entityId: string, e: React.MouseEvent) {
     if (!editable) return;
     e.preventDefault();
     const day = trayDay(e);
-    trayDrag.current = { rowId, s: day, e: day };
-    setTrayHover({ rowId, s: day, e: day });
+    trayDrag.current = { entityId, s: day, e: day };
+    setTrayHover({ entityId, s: day, e: day });
     const onUp = () => {
       window.removeEventListener("mouseup", onUp);
       const d = trayDrag.current;
@@ -567,7 +576,7 @@ export function GanttView({
       // Hour: a plain click drops a 30-min block; a drag uses the snapped range.
       const endT = period === "hour" ? (lo === hi ? lo + blockMs : hi) : lo === hi ? null : hi;
       save.mutate({
-        rowId: d.rowId,
+        entityId: d.entityId,
         fieldId: field.id,
         value: { start: f(lo), end: endT == null ? null : f(endT) },
       });
@@ -596,11 +605,11 @@ export function GanttView({
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <ViewQueryState
-        loading={fieldsQ.isLoading || rowsQ.isLoading}
-        error={fieldsQ.isError || rowsQ.isError}
+        loading={fieldsQ.isLoading || entitiesQ.isLoading}
+        error={fieldsQ.isError || entitiesQ.isError}
         onRetry={() => {
           void fieldsQ.refetch();
-          void rowsQ.refetch();
+          void entitiesQ.refetch();
         }}
       />
       {toolbarSlot ? (
@@ -668,7 +677,7 @@ export function GanttView({
                 </div>
               )}
             </div>
-            {rowSpans.map(({ r, span }) => (
+            {entitySpans.map(({ r, span }) => (
               <div
                 key={r.id}
                 className="group flex items-stretch border-b"
@@ -677,24 +686,26 @@ export function GanttView({
                 <div
                   className={`${colCls} flex items-center gap-1 truncate text-sm font-medium`}
                   style={{ width: nameW }}
+                  onDoubleClick={() => openEntity(r)}
+                  title="Double-click to open entity"
                 >
                   <span className="min-w-0 flex-1 truncate" title={title(r)}>
                     {titleField ? (
                       <CellEditor
-                        key={editingRowId === r.id ? "edit" : "view"}
+                        key={editingEntityId === r.id ? "edit" : "view"}
                         field={titleField}
                         value={
                           (r.data as Record<string, unknown>)[titleField.id] ?? null
                         }
                         onCommit={(value) =>
                           save.mutate({
-                            rowId: r.id,
+                            entityId: r.id,
                             fieldId: titleField.id,
                             value,
                           })
                         }
-                        autoEdit={editingRowId === r.id}
-                        onFinish={() => setEditingRowId(null)}
+                        autoEdit={editingEntityId === r.id}
+                        onFinish={() => setEditingEntityId(null)}
                       />
                     ) : (
                       title(r)
@@ -729,7 +740,7 @@ export function GanttView({
             ))}
           </div>
 
-          {/* Right: two-row header + bars */}
+          {/* Right: two-entity header + bars */}
           <div className="relative shrink-0" style={{ width }}>
             {/* Weekend shading (lowest layer) */}
             <div className="pointer-events-none absolute inset-y-0">
@@ -742,7 +753,7 @@ export function GanttView({
               ))}
             </div>
 
-            {/* Two-row header (major group on top, minor columns below) */}
+            {/* Two-entity header (major group on top, minor columns below) */}
             <div className="sticky top-0 z-20 bg-card" style={{ height: HDR_H * 2 }}>
               {major.map((t, i) => (
                 <div
@@ -787,12 +798,12 @@ export function GanttView({
               ))}
             </div>
 
-            {rowSpans.map(({ r, span }) => {
+            {entitySpans.map(({ r, span }) => {
               if (!span)
                 return (
                   <div key={r.id} className="border-b" style={{ height: ROW_H }} />
                 );
-              const dragging = drag?.rowId === r.id;
+              const dragging = drag?.entityId === r.id;
               const dpx = dragging ? dragDelta * snapPx : 0;
               let left = xOf(span.start);
               // All-day: inclusive whole days (+1). Timed: exact duration.
@@ -876,8 +887,8 @@ export function GanttView({
           </button>
         )}
         <button
-          onClick={() => addRow.mutate()}
-          title="Create a new row and edit its name"
+          onClick={() => setNewEntityOpen(true)}
+          title="Create a new entity and edit its name"
           className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted"
         >
           <Plus className="size-4" /> New <kbd className="text-[10px] opacity-60">N</kbd>
@@ -885,25 +896,38 @@ export function GanttView({
       </div>
 
       {/* Unscheduled tray: undated items, shares the timeline axis (no header). */}
-      {undatedRows.length > 0 && (
+      {undatedEntities.length > 0 && (
         <div className="mt-2 shrink-0 overflow-hidden rounded-xl border">
-          <div className="border-b bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            Unscheduled ({undatedRows.length}) ·{" "}
-            {editable
-              ? "click or drag on the timeline to set a date"
-              : "this field cannot be edited"}
-          </div>
-          <div
-            ref={trayScrollRef}
-            onScroll={(e) => syncScroll(e.currentTarget, scrollRef.current)}
-            className="overflow-auto overscroll-x-none"
-            style={{ maxHeight: ROW_H * 5 }}
+          <button
+            type="button"
+            onClick={() => setUnscheduledOpen((open) => !open)}
+            aria-expanded={unscheduledOpen}
+            className={`flex h-7 w-full items-center gap-1.5 bg-muted/30 px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted/50 ${
+              unscheduledOpen ? "border-b" : ""
+            }`}
           >
+            <ChevronDown
+              className={`size-3 transition-transform ${unscheduledOpen ? "" : "-rotate-90"}`}
+            />
+            <span>Unscheduled ({undatedEntities.length})</span>
+            <span className="truncate font-normal opacity-70">
+              {editable
+                ? "Click or drag on the timeline to set a date"
+                : "This field cannot be edited"}
+            </span>
+          </button>
+          {unscheduledOpen && (
+            <div
+              ref={trayScrollRef}
+              onScroll={(e) => syncScroll(e.currentTarget, scrollRef.current)}
+              className="overflow-auto overscroll-x-none"
+              style={{ maxHeight: ROW_H * 5 }}
+            >
             <div className="flex" style={{ width: leftW + width }}>
               {/* Left sticky columns (match the main panel widths) */}
               <div className="sticky left-0 z-20 shrink-0 bg-card" style={{ width: leftW }}>
-                {undatedRows.map((r) => {
-                  const hov = trayHover?.rowId === r.id ? trayHover : null;
+                {undatedEntities.map((r) => {
+                  const hov = trayHover?.entityId === r.id ? trayHover : null;
                   return (
                     <div
                       key={r.id}
@@ -917,7 +941,7 @@ export function GanttView({
                       >
                         {titleField ? (
                           <CellEditor
-                            key={editingRowId === r.id ? "edit" : "view"}
+                            key={editingEntityId === r.id ? "edit" : "view"}
                             field={titleField}
                             value={
                               (r.data as Record<string, unknown>)[titleField.id] ??
@@ -925,13 +949,13 @@ export function GanttView({
                             }
                             onCommit={(value) =>
                               save.mutate({
-                                rowId: r.id,
+                                entityId: r.id,
                                 fieldId: titleField.id,
                                 value,
                               })
                             }
-                            autoEdit={editingRowId === r.id}
-                            onFinish={() => setEditingRowId(null)}
+                            autoEdit={editingEntityId === r.id}
+                            onFinish={() => setEditingEntityId(null)}
                           />
                         ) : (
                           title(r)
@@ -965,7 +989,7 @@ export function GanttView({
                 })}
               </div>
 
-              {/* Right strip: gridlines + per-row hover/drag to set a date */}
+              {/* Right strip: gridlines + per-entity hover/drag to set a date */}
               <div className="relative shrink-0" style={{ width }}>
                 <div className="pointer-events-none absolute inset-0">
                   {minor.map((t) => (
@@ -980,8 +1004,8 @@ export function GanttView({
                     style={{ left: todayX }}
                   />
                 </div>
-                {undatedRows.map((r) => {
-                  const hov = trayHover?.rowId === r.id ? trayHover : null;
+                {undatedEntities.map((r) => {
+                  const hov = trayHover?.entityId === r.id ? trayHover : null;
                   const lo = hov ? Math.min(hov.s, hov.e) : 0;
                   const hiRaw = hov ? Math.max(hov.s, hov.e) : 0;
                   // Block end: 30-min default for an hour single, inclusive day otherwise.
@@ -1017,9 +1041,16 @@ export function GanttView({
                 })}
               </div>
             </div>
-          </div>
+            </div>
+          )}
         </div>
       )}
+      <EntityNameDialog
+        open={newEntityOpen}
+        pending={addEntity.isPending}
+        onClose={() => setNewEntityOpen(false)}
+        onCreate={(name) => addEntity.mutate(name)}
+      />
     </div>
   );
 }

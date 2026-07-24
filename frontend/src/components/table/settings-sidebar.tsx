@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowDownAZ,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  ArrowUpAZ,
   ArrowUpDown,
   Bookmark,
   ChevronLeft,
@@ -17,11 +20,15 @@ import {
   ListOrdered,
   GripVertical,
   Plus,
+  Pin,
+  Sigma,
   Star,
   Table,
   Trash2,
+  WrapText,
   X,
-} from "lucide-react";
+  FaIcon,
+} from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
 import { DATE_FORMATS } from "@/components/table/gantt-view";
@@ -31,12 +38,14 @@ import {
   GroupEditor,
   SortEditor,
 } from "@/components/table/view-tools";
-import { countRules, type FilterGroup, type SortRule } from "@/lib/view";
-import type { Preset } from "@/components/table/view-shell";
+import { countRules, operatorsFor, type FilterGroup, type SortRule } from "@/lib/view";
+import type { ViewPresetT } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
+import { iconForField } from "@/lib/icon-system";
+import { calculationForField, calculationOptions } from "@/lib/calculations";
 
 type Field = components["schemas"]["FieldOut"];
-type View = components["schemas"]["ViewOut"];
+type Layout = components["schemas"]["LayoutOut"];
 type Page =
   | "main"
   | "view"
@@ -49,7 +58,7 @@ type Page =
 
 const LIMIT_OPTIONS = [10, 20, 50, 100, 200].map((n) => ({
   value: String(n),
-  label: `${n} rows`,
+  label: `${n} entities`,
 }));
 
 export function SettingsSidebar({
@@ -79,16 +88,21 @@ export function SettingsSidebar({
   setGroupFieldId,
   hideEmpty,
   setHideEmpty,
+  frozenUpTo,
+  setFrozenUpTo,
+  calc,
+  setCalc,
   presets,
-  setPresets,
-  activePreset,
-  setActivePreset,
+  activePresetId,
+  onApplyPreset,
+  onRenamePreset,
+  onDeletePreset,
   initialPage = "main",
   onClose,
 }: {
   databaseId: string;
   viewType: string;
-  views: View[];
+  views: Layout[];
   activeId: string;
   setActiveId: (id: string) => void;
   fields: Field[];
@@ -112,10 +126,15 @@ export function SettingsSidebar({
   setGroupFieldId: (id: string | null) => void;
   hideEmpty: boolean;
   setHideEmpty: (b: boolean) => void;
-  presets: Preset[];
-  setPresets: (p: Preset[]) => void;
-  activePreset: string | null;
-  setActivePreset: (id: string | null) => void;
+  frozenUpTo: number;
+  setFrozenUpTo: (value: number) => void;
+  calc: Record<string, string>;
+  setCalc: (value: Record<string, string>) => void;
+  presets: ViewPresetT[];
+  activePresetId: string | null;
+  onApplyPreset: (id: string | null) => void;
+  onRenamePreset: (id: string, name: string) => void;
+  onDeletePreset: (id: string) => void;
   initialPage?: Page;
   onClose: () => void;
 }) {
@@ -127,6 +146,15 @@ export function SettingsSidebar({
   const [viewDrag, setViewDrag] = useState<string | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
+
+  const patchField = useMutation({
+    mutationFn: ({ id, options }: { id: string; options: Record<string, unknown> }) =>
+      apiFetch<Field>(`/fields/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ options }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fields", databaseId] }),
+  });
 
   const reorder = useMutation({
     mutationFn: (ids: string[]) =>
@@ -153,17 +181,17 @@ export function SettingsSidebar({
     reorder.mutate(ids);
   }
 
-  // --- View (Layout) management ---
+  // --- Layout management ---
   const invalidateViews = () =>
-    qc.invalidateQueries({ queryKey: ["views", databaseId] });
+    qc.invalidateQueries({ queryKey: ["layouts", databaseId] });
   const patchView = useMutation({
     mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
-      apiFetch<View>(`/views/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+      apiFetch<Layout>(`/layouts/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: invalidateViews,
   });
   const createView = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiFetch<View>(`/databases/${databaseId}/views`, {
+      apiFetch<Layout>(`/databases/${databaseId}/layouts`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -173,7 +201,7 @@ export function SettingsSidebar({
     },
   });
   const deleteView = useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/views/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => apiFetch<void>(`/layouts/${id}`, { method: "DELETE" }),
     onSuccess: invalidateViews,
   });
   // Reorder = PATCH each view's `order` to its new index (no bulk endpoint).
@@ -189,7 +217,7 @@ export function SettingsSidebar({
   function setDefaultView(id: string) {
     reorderViews([id, ...views.map((v) => v.id).filter((i) => i !== id)]);
   }
-  function duplicateView(v: View) {
+  function duplicateView(v: Layout) {
     createView.mutate({ name: `${v.name} copy`, type: v.type, config: v.config });
   }
 
@@ -197,14 +225,14 @@ export function SettingsSidebar({
   const groupField = fields.find((f) => f.id === groupFieldId);
   const editField = fields.find((f) => f.id === editFieldId);
 
-  const header = (title: string, back?: () => void) => (
-    <div className="flex items-center gap-2 border-b px-4 py-3">
+  const header = (title: React.ReactNode, back?: () => void) => (
+    <div className="flex h-10 items-center gap-2 border-b px-3">
       {back && (
         <button onClick={back} className="rounded p-1 hover:bg-muted">
           <ChevronLeft className="size-4" />
         </button>
       )}
-      <h2 className="flex-1 font-semibold">{title}</h2>
+      <h2 className="flex min-w-0 flex-1 items-center gap-2 truncate text-sm font-semibold">{title}</h2>
       <button onClick={onClose} className="rounded p-1 hover:bg-muted">
         <X className="size-4" />
       </button>
@@ -219,7 +247,7 @@ export function SettingsSidebar({
   ) => (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-muted"
+      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs hover:bg-muted"
     >
       <span className="text-muted-foreground">{icon}</span>
       <span className="flex-1 text-left">{label}</span>
@@ -232,14 +260,89 @@ export function SettingsSidebar({
 
   let body: React.ReactNode;
   if (editField) {
+    const fieldIndex = fields.findIndex((field) => field.id === editField.id);
+    const isFrozen = fieldIndex >= 0 && fieldIndex <= frozenUpTo;
+    const isGrouped = groupFieldId === editField.id;
+    const sortDirection = sorts.find((sort) => sort.fieldId === editField.id)?.dir;
+    const wrapped = (editField.options as { wrap?: boolean }).wrap === true;
+    const setSort = (dir: "asc" | "desc") =>
+      setSorts([
+        { fieldId: editField.id, dir },
+        ...sorts.filter((sort) => sort.fieldId !== editField.id),
+      ]);
+    const addFilter = () =>
+      setFilterRoot({
+        ...filterRoot,
+        rules: [
+          ...filterRoot.rules,
+          {
+            fieldId: editField.id,
+            op: operatorsFor(editField.type)[0]?.value ?? "is",
+            value: "",
+          },
+        ],
+      });
+    const insert = (side: "left" | "right") => {
+      window.dispatchEvent(
+        new CustomEvent("vhb:insert-field", {
+          detail: { targetId: editField.id, side },
+        }),
+      );
+      onClose();
+    };
     body = (
       <>
-        {header(editField.name, () => setEditFieldId(null))}
+        {header(
+          <>
+            <FaIcon
+              name={iconForField(editField)}
+              className="size-3.5 shrink-0"
+              style={{ color: editField.icon_color || "var(--icon-field-text)" }}
+            />
+            <span className="truncate">Edit Field · {editField.name}</span>
+          </>,
+          () => setEditFieldId(null),
+        )}
         <div className="flex-1 overflow-y-auto p-3">
-          <FieldConfig key={editField.id} field={editField} databaseId={databaseId} />
+          <section className="mb-3 rounded-lg border bg-muted/20 p-2">
+            <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Field actions
+            </p>
+            <div className="grid grid-cols-2 gap-1">
+              <button onClick={() => setSort("asc")} className={`field-action ${sortDirection === "asc" ? "field-action-active" : ""}`}><ArrowUpAZ className="size-3.5" /> Sort ascending</button>
+              <button onClick={() => setSort("desc")} className={`field-action ${sortDirection === "desc" ? "field-action-active" : ""}`}><ArrowDownAZ className="size-3.5" /> Sort descending</button>
+              <button onClick={() => setGroupFieldId(isGrouped ? null : editField.id)} className={`field-action ${isGrouped ? "field-action-active" : ""}`}><GroupIcon className="size-3.5" /> {isGrouped ? "Ungroup" : "Group"}</button>
+              <button onClick={addFilter} className="field-action"><ListFilter className="size-3.5" /> Filter</button>
+              <button onClick={() => patchField.mutate({ id: editField.id, options: { ...editField.options, wrap: !wrapped } })} className={`field-action ${wrapped ? "field-action-active" : ""}`}><WrapText className="size-3.5" /> Wrap text</button>
+              <button onClick={() => setFrozenUpTo(isFrozen ? fieldIndex - 1 : fieldIndex)} className={`field-action ${isFrozen ? "field-action-active" : ""}`}><Pin className="size-3.5" /> {isFrozen ? "Unfreeze" : "Freeze"}</button>
+              <button onClick={() => insert("left")} className="field-action"><ArrowLeftToLine className="size-3.5" /> Insert left</button>
+              <button onClick={() => insert("right")} className="field-action"><ArrowRightToLine className="size-3.5" /> Insert right</button>
+            </div>
+            <label className="mt-2 flex items-center gap-2 px-1 text-xs text-muted-foreground">
+              <Sigma className="size-3.5" /> Calculate
+              <span className="ml-auto w-32">
+                <Dropdown
+                  value={calculationForField(
+                    editField.type,
+                    calc[editField.id],
+                  )}
+                  placeholder="None"
+                  options={calculationOptions(editField.type)}
+                  onChange={(value) =>
+                    setCalc({ ...calc, [editField.id]: value ?? "" })
+                  }
+                />
+              </span>
+            </label>
+          </section>
+          <FieldConfig
+            key={`${editField.id}:${editField.type}`}
+            field={editField}
+            databaseId={databaseId}
+          />
           <button
             onClick={() => del.mutate(editField.id)}
-            className="mt-3 flex w-full items-center gap-2 border-t pt-3 text-sm text-destructive hover:opacity-80"
+            className="mt-3 flex w-full items-center gap-2 border-t pt-3 text-xs text-destructive hover:opacity-80"
           >
             <Trash2 className="size-4" /> Delete field
           </button>
@@ -284,7 +387,7 @@ export function SettingsSidebar({
                 Timeline
               </p>
               <label className="block text-xs text-muted-foreground">
-                Định dạng ngày
+                Date format
                 <Dropdown
                   value={ganttDateFormat}
                   options={DATE_FORMATS.map((f) => ({ value: f.value, label: f.label }))}
@@ -293,16 +396,16 @@ export function SettingsSidebar({
               </label>
             </div>
           )}
-          {row(<Table className="size-4" />, "Layout", () => setPage("view"), String(views.length))}
+          {row(<Table className="size-4" />, "Layouts", () => setPage("view"), String(views.length))}
           {row(<Bookmark className="size-4" />, "View presets", () => setPage("presets"), presets.length ? String(presets.length) : undefined)}
-          {row(<Eye className="size-4" />, "Property visibility", () => setPage("visibility"), String(shownCount))}
+          {row(<Eye className="size-4" />, "Field visibility", () => setPage("visibility"), String(shownCount))}
           {row(<ListFilter className="size-4" />, "Filter", () => setPage("filter"), countRules(filterRoot) ? String(countRules(filterRoot)) : undefined)}
           {row(<ArrowUpDown className="size-4" />, "Sort", () => setPage("sort"), sorts.length ? String(sorts.length) : undefined)}
           {row(<GroupIcon className="size-4" />, "Group", () => setPage("group"), groupField?.name)}
-          {row(<ListOrdered className="size-4" />, "Edit properties", () => setPage("fields"))}
+          {row(<ListOrdered className="size-4" />, "Edit Field", () => setPage("fields"))}
           <div className="my-1 border-t" />
-          <label className="flex items-center gap-3 rounded-md px-2 py-2 text-sm">
-            <span className="flex-1 text-muted-foreground">Rows per page</span>
+          <label className="flex min-h-8 items-center gap-2 rounded-md px-2 text-xs">
+            <span className="flex-1 text-muted-foreground">Entities per page</span>
             <div className="w-28">
               <Dropdown
                 value={String(limit)}
@@ -312,7 +415,7 @@ export function SettingsSidebar({
               />
             </div>
           </label>
-          <label className="flex items-center gap-3 rounded-md px-2 py-2 text-sm">
+          <label className="flex h-8 items-center gap-2 rounded-md px-2 text-xs">
             <span className="text-muted-foreground">
               <GitBranch className="size-4" />
             </span>
@@ -332,8 +435,10 @@ export function SettingsSidebar({
       <>
         {header("Layout", () => setPage("main"))}
         <div className="flex-1 space-y-1 overflow-y-auto p-3">
-          <p className="px-1 pb-1 text-xs text-muted-foreground">
-            Kéo để sắp xếp · ★ đặt mặc định · double-click để đổi tên
+          <p className="flex items-center gap-1 px-1 pb-1 text-xs text-muted-foreground">
+            <span>Drag to reorder ·</span>
+            <Star className="size-3" />
+            <span>set default · double-click to rename</span>
           </p>
           {views.map((v, i) => {
             const isActive = v.id === activeId;
@@ -387,14 +492,14 @@ export function SettingsSidebar({
                 )}
                 <button
                   onClick={() => setDefaultView(v.id)}
-                  title="Đặt làm mặc định"
+                  title="Set as default"
                   className={isDefault ? "text-primary" : "text-muted-foreground/50 hover:text-foreground"}
                 >
                   <Star className={`size-3.5 ${isDefault ? "fill-current" : ""}`} />
                 </button>
                 <button
                   onClick={() => duplicateView(v)}
-                  title="Nhân bản"
+                  title="Duplicate"
                   className="text-muted-foreground/60 hover:text-foreground"
                 >
                   <Copy className="size-3.5" />
@@ -406,7 +511,7 @@ export function SettingsSidebar({
                     deleteView.mutate(v.id);
                   }}
                   disabled={views.length <= 1}
-                  title="Xóa"
+                  title="Delete"
                   className="text-muted-foreground/60 hover:text-destructive disabled:opacity-30"
                 >
                   <Trash2 className="size-3.5" />
@@ -449,11 +554,12 @@ export function SettingsSidebar({
         <div className="flex-1 space-y-1 overflow-y-auto p-3">
           {presets.length === 0 && (
             <p className="px-1 py-2 text-xs text-muted-foreground">
-              Chưa có preset. Lưu bộ lọc/sort/group hiện tại bằng nút “Save view” trên thanh công cụ.
+              No presets yet. Save the current filter/sort/group with the “Save preset”
+              button in the toolbar.
             </p>
           )}
           {presets.map((p) => {
-            const isActive = p.id === activePreset;
+            const isActive = p.id === activePresetId;
             return (
               <div
                 key={p.id}
@@ -468,8 +574,7 @@ export function SettingsSidebar({
                     onChange={(e) => setRenameText(e.target.value)}
                     onBlur={() => {
                       const name = renameText.trim();
-                      if (name)
-                        setPresets(presets.map((x) => (x.id === p.id ? { ...x, name } : x)));
+                      if (name) onRenamePreset(p.id, name);
                       setRenameId(null);
                     }}
                     onKeyDown={(e) => {
@@ -480,7 +585,7 @@ export function SettingsSidebar({
                   />
                 ) : (
                   <button
-                    onClick={() => setActivePreset(p.id)}
+                    onClick={() => onApplyPreset(p.id)}
                     onDoubleClick={() => {
                       setRenameId(p.id);
                       setRenameText(p.name);
@@ -491,18 +596,18 @@ export function SettingsSidebar({
                   </button>
                 )}
                 <button
-                  onClick={() => setActivePreset(p.id)}
-                  title="Đặt làm mặc định"
+                  onClick={() => onApplyPreset(p.id)}
+                  title="Set as default"
                   className={isActive ? "text-primary" : "text-muted-foreground/50 hover:text-foreground"}
                 >
                   <Star className={`size-3.5 ${isActive ? "fill-current" : ""}`} />
                 </button>
                 <button
                   onClick={() => {
-                    if (isActive) setActivePreset(null);
-                    setPresets(presets.filter((x) => x.id !== p.id));
+                    if (isActive) onApplyPreset(null);
+                    onDeletePreset(p.id);
                   }}
-                  title="Xóa"
+                  title="Delete"
                   className="text-muted-foreground/60 hover:text-destructive"
                 >
                   <Trash2 className="size-3.5" />
@@ -519,17 +624,17 @@ export function SettingsSidebar({
     );
     body = (
       <>
-        {header("Property visibility", () => setPage("main"))}
+        {header("Field visibility", () => setPage("main"))}
         <div className="flex-1 overflow-y-auto p-3">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search for a property…"
-            className="mb-3 w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+            className="mb-3 h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
           />
           <div className="mb-1 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase text-muted-foreground">
-              Properties
+              Fields
             </span>
             <button
               onClick={() => setHidden(new Set(fields.map((f) => f.id)))}
@@ -554,9 +659,13 @@ export function SettingsSidebar({
                   className="flex items-center gap-2 rounded-md px-1 py-1.5 hover:bg-muted"
                 >
                   <GripVertical className="size-3.5 cursor-grab text-muted-foreground" />
-                  <span className="flex-1 text-sm">
+                  <FaIcon
+                    name={iconForField(f)}
+                    className="size-3.5 shrink-0"
+                    style={{ color: f.icon_color || "var(--icon-field-text)" }}
+                  />
+                  <span className="flex-1 text-xs">
                     {f.name}
-                    <span className="ml-1 text-xs text-muted-foreground">{f.type}</span>
                   </span>
                   <button
                     onClick={() => {
@@ -610,20 +719,24 @@ export function SettingsSidebar({
       </>
     );
   } else {
-    // fields list (Edit properties)
+    // Fields list
     body = (
       <>
-        {header("Edit properties", () => setPage("main"))}
+        {header("Edit Field", () => setPage("main"))}
         <div className="flex-1 space-y-1 overflow-y-auto p-2">
           {fields.map((f) => (
             <button
               key={f.id}
               onClick={() => setEditFieldId(f.id)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted"
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs hover:bg-muted"
             >
+              <FaIcon
+                name={iconForField(f)}
+                className="size-3.5 shrink-0"
+                style={{ color: f.icon_color || "var(--icon-field-text)" }}
+              />
               <span className="flex-1 text-left">
                 {f.name}
-                <span className="ml-1 text-xs text-muted-foreground">{f.type}</span>
               </span>
               <ChevronRight className="size-4 text-muted-foreground" />
             </button>
@@ -633,13 +746,12 @@ export function SettingsSidebar({
     );
   }
 
-  return createPortal(
+  return (
     <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-80 flex-col border-l bg-popover text-popover-foreground shadow-xl">
+      <div className="absolute inset-0 z-40" onClick={onClose} />
+      <div className="absolute inset-y-0 right-0 z-50 flex w-80 max-w-[min(100%,24rem)] flex-col border-l bg-popover text-popover-foreground shadow-xl">
         {body}
       </div>
-    </>,
-    document.body,
+    </>
   );
 }

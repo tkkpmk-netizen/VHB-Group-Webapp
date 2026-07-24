@@ -11,7 +11,7 @@ import {
   RotateCcw,
   Save,
   SlidersHorizontal,
-} from "lucide-react";
+} from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { BoardView } from "@/components/table/board-view";
 import { CalendarView } from "@/components/table/calendar-view";
@@ -22,6 +22,7 @@ import type { GanttScale } from "@/components/table/gantt-scale";
 import { Dropdown } from "@/components/ui/dropdown";
 import { SettingsSidebar } from "@/components/table/settings-sidebar";
 import { TableView } from "@/components/table/table-view";
+import { EntityDetailDialog } from "@/components/table/entity-detail-dialog";
 import {
   FilterGroupEditor,
   GroupEditor,
@@ -36,20 +37,13 @@ import {
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
-type View = components["schemas"]["ViewOut"];
+type Layout = components["schemas"]["LayoutOut"];
+export type ViewPresetT = components["schemas"]["ViewPresetOut"];
+type DataSourceT = components["schemas"]["DataSourceOut"];
+type Entity = components["schemas"]["EntityOut"];
 
-/** A saved Quick View preset = a named snapshot of filter/sort/group. */
-export type Preset = {
-  id: string;
-  name: string;
-  filter: FilterGroup;
-  sorts: SortRule[];
-  group: string | null;
-  hideEmpty: boolean;
-};
-
-/** Persisted per-view config (everything except ephemeral UI like collapse). */
-export type ViewConfig = {
+/** Persisted per-layout config (everything except ephemeral UI like collapse). */
+export type LayoutConfig = {
   filter?: FilterGroup;
   sorts?: SortRule[];
   group?: string | null;
@@ -67,11 +61,10 @@ export type ViewConfig = {
   calendarField?: string | null;
   calendarMode?: string;
   limit?: number;
-  presets?: Preset[];
-  activePreset?: string | null;
+  dataSourceId?: string | null;
 };
 
-/** Per-view state every view renderer (Table/Board/…) reads from the shell. */
+/** Per-layout state every layout renderer (Table/Board/…) reads from the shell. */
 export type SharedViewProps = {
   filterRoot: FilterGroup;
   setFilterRoot: (g: FilterGroup) => void;
@@ -86,10 +79,12 @@ export type SharedViewProps = {
   setCalc: Dispatch<SetStateAction<Record<string, string>>>;
   hidden: Set<string>;
   limit: number;
+  dataSourceId: string | null;
   search: string;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
   flashId: string | null;
+  openEntity: (entity: Entity) => void;
 };
 
 type SettingsPage =
@@ -103,8 +98,8 @@ type SettingsPage =
   | null;
 
 /**
- * Shared chrome for every view of a database: the global Search bar + Settings
- * sidebar + per-view config state, rendered once regardless of view type.
+ * Shared chrome for every layout of a database: toolbar, scoped settings panel,
+ * and per-layout config state, rendered once regardless of layout type.
  */
 export function ViewShell({
   databaseId,
@@ -118,8 +113,8 @@ export function ViewShell({
   flashId,
 }: {
   databaseId: string;
-  view: View;
-  views: View[];
+  view: Layout;
+  views: Layout[];
   activeId: string;
   setActiveId: (id: string) => void;
   search: string;
@@ -128,9 +123,9 @@ export function ViewShell({
   flashId: string | null;
 }) {
   const qc = useQueryClient();
-  const cfg = (view.config ?? {}) as ViewConfig;
+  const cfg = (view.config ?? {}) as LayoutConfig;
 
-  // Per-view config (hydrated from view.config; remounts on view switch via key).
+  // Per-layout config (hydrated from view.config; remounts on layout switch via key).
   const [filterRoot, setFilterRoot] = useState<FilterGroup>(cfg.filter ?? emptyGroup());
   const [sorts, setSorts] = useState<SortRule[]>(cfg.sorts ?? []);
   const [groupFieldId, setGroupFieldId] = useState<string | null>(cfg.group ?? null);
@@ -158,13 +153,12 @@ export function ViewShell({
   );
   const [calendarMode, setCalendarMode] = useState<string>(cfg.calendarMode ?? "month");
   const [limit, setLimit] = useState<number>(cfg.limit ?? 10);
+  const [dataSourceId, setDataSourceId] = useState<string | null>(cfg.dataSourceId ?? null);
 
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(null);
+  const [activeEntity, setActiveEntity] = useState<Entity | null>(null);
   const [ganttToolbar, setGanttToolbar] = useState<HTMLDivElement | null>(null);
-  const [presets, setPresets] = useState<Preset[]>(cfg.presets ?? []);
-  const [activePreset, setActivePreset] = useState<string | null>(
-    cfg.activePreset ?? null,
-  );
+  const [calendarToolbar, setCalendarToolbar] = useState<HTMLDivElement | null>(null);
   const [naming, setNaming] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [quick, setQuick] = useState<{
@@ -178,11 +172,16 @@ export function ViewShell({
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
   const fields = fieldsQ.data ?? [];
+  const dataSourcesQ = useQuery<DataSourceT[]>({
+    queryKey: ["data-sources", databaseId],
+    queryFn: () => apiFetch<DataSourceT[]>(`/databases/${databaseId}/data-sources`),
+  });
+  const dataSources = dataSourcesQ.data ?? [];
 
-  // Persist config (debounced). No views-query invalidation → no save→refetch loop.
+  // Persist config (debounced). No layouts-query invalidation → no save→refetch loop.
   const saveView = useMutation({
-    mutationFn: (config: ViewConfig) =>
-      apiFetch<View>(`/views/${view.id}`, {
+    mutationFn: (config: LayoutConfig) =>
+      apiFetch<Layout>(`/layouts/${view.id}`, {
         method: "PATCH",
         body: JSON.stringify({ config }),
       }),
@@ -193,7 +192,7 @@ export function ViewShell({
       firstSave.current = false;
       return;
     }
-    const config: ViewConfig = {
+    const config: LayoutConfig = {
       filter: filterRoot,
       sorts,
       group: groupFieldId,
@@ -211,8 +210,7 @@ export function ViewShell({
       calendarField,
       calendarMode,
       limit,
-      presets,
-      activePreset,
+      dataSourceId,
     };
     const t = setTimeout(() => saveView.mutate(config), 600);
     return () => clearTimeout(t);
@@ -235,8 +233,7 @@ export function ViewShell({
     calendarField,
     calendarMode,
     limit,
-    presets,
-    activePreset,
+    dataSourceId,
   ]);
 
   // Sub-items toggle (creates/deletes the two self-relation fields).
@@ -275,49 +272,103 @@ export function ViewShell({
     setCalc,
     hidden,
     limit,
+    dataSourceId,
     search,
     filterToMatches,
     matchedIds,
     flashId,
+    openEntity: setActiveEntity,
   };
 
-  // --- Quick View presets (named snapshots of filter/sort/group) ---
-  const baseline = activePreset ? presets.find((p) => p.id === activePreset) : null;
+  // --- View presets (named, server-persisted snapshots of filter/sort/group) ---
+  const presetsQ = useQuery<ViewPresetT[]>({
+    queryKey: ["view-presets", view.id],
+    queryFn: () => apiFetch<ViewPresetT[]>(`/layouts/${view.id}/view-presets`),
+  });
+  const presets = presetsQ.data ?? [];
+  const activePresetId = view.active_view_preset_id;
+  const invalidatePresets = () => qc.invalidateQueries({ queryKey: ["view-presets", view.id] });
+  const invalidateViews = () => qc.invalidateQueries({ queryKey: ["layouts", databaseId] });
+
+  const curCfg = { filter: filterRoot, sorts, group_field_id: groupFieldId, hide_empty: hideEmpty };
+  const baseline = activePresetId ? presets.find((p) => p.id === activePresetId) : null;
   const baseCfg = baseline
     ? {
         filter: baseline.filter,
         sorts: baseline.sorts,
-        group: baseline.group,
-        hideEmpty: baseline.hideEmpty,
+        group_field_id: baseline.group_field_id,
+        hide_empty: baseline.hide_empty,
       }
-    : { filter: emptyGroup(), sorts: [], group: null, hideEmpty: false };
-  const curCfg = { filter: filterRoot, sorts, group: groupFieldId, hideEmpty };
+    : { filter: emptyGroup(), sorts: [], group_field_id: null, hide_empty: false };
   const dirty = JSON.stringify(curCfg) !== JSON.stringify(baseCfg);
 
+  const applyPresetMut = useMutation({
+    mutationFn: (id: string | null) =>
+      apiFetch<Layout>(`/layouts/${view.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active_view_preset_id: id }),
+      }),
+    onSuccess: invalidateViews,
+  });
   function applyPreset(id: string | null) {
-    setActivePreset(id);
     const p = id ? presets.find((x) => x.id === id) : null;
-    setFilterRoot(p?.filter ?? emptyGroup());
-    setSorts(p?.sorts ?? []);
-    setGroupFieldId(p?.group ?? null);
-    setHideEmpty(p?.hideEmpty ?? false);
+    setFilterRoot((p?.filter as FilterGroup) ?? emptyGroup());
+    setSorts((p?.sorts as SortRule[]) ?? []);
+    setGroupFieldId(p?.group_field_id ?? null);
+    setHideEmpty(p?.hide_empty ?? false);
+    applyPresetMut.mutate(id);
   }
+
+  const createPresetMut = useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<ViewPresetT>(`/layouts/${view.id}/view-presets`, {
+        method: "POST",
+        body: JSON.stringify({ name, ...curCfg }),
+      }),
+    onSuccess: (created) => {
+      invalidatePresets();
+      applyPresetMut.mutate(created.id);
+      setNaming(false);
+    },
+  });
+  function createPreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    createPresetMut.mutate(name);
+  }
+
+  const updatePresetMut = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<ViewPresetT>(`/view-presets/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(curCfg),
+      }),
+    onSuccess: invalidatePresets,
+  });
   function savePreset() {
-    if (activePreset) {
-      setPresets(presets.map((p) => (p.id === activePreset ? { ...p, ...curCfg } : p)));
+    if (activePresetId) {
+      updatePresetMut.mutate(activePresetId);
     } else {
       setNaming(true);
       setPresetName("");
     }
   }
-  function createPreset() {
-    const name = presetName.trim();
-    if (!name) return;
-    const id = crypto.randomUUID();
-    setPresets([...presets, { id, name, ...curCfg }]);
-    setActivePreset(id);
-    setNaming(false);
-  }
+
+  const renamePresetMut = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiFetch<ViewPresetT>(`/view-presets/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: invalidatePresets,
+  });
+  const deletePresetMut = useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/view-presets/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidatePresets();
+      invalidateViews();
+    },
+  });
 
   // Group axis is the board-field on a Board (its columns), row-group elsewhere.
   const isBoard = view.type === "board";
@@ -330,23 +381,41 @@ export function ViewShell({
     setQuick((q) => (q?.kind === kind ? null : { kind, x: r.left, y: r.bottom + 4 }));
   };
   const quickCls = (active: boolean) =>
-    `flex items-center gap-1.5 rounded-md px-2 py-1 text-sm ${
-      active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"
+    `flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium transition-colors ${
+      active
+        ? "border-primary/30 bg-primary/10 text-primary"
+        : "border-transparent bg-background text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
     }`;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* Toolbar: Quick View preset (left) · gantt controls · search +
-          Filter/Sort/Group + Customize (right). */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <div className="w-40 shrink-0 sm:w-44">
+    <div className="relative flex h-full min-h-0 flex-col px-[18px] pb-2 pt-0">
+      {/* Toolbar: View preset (left) · gantt controls · Filter/Sort/Group +
+          Customize (right). Search lives beside the layout tabs. */}
+      <div className="-mx-[18px] my-1 flex h-7 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden px-[18px]">
+        <div className="w-32 shrink-0 sm:w-36">
           <Dropdown
-            value={activePreset}
-            placeholder="Default view"
-            options={presets.map((p) => ({ value: p.id, label: p.name }))}
-            onChange={applyPreset}
+            value={activePresetId ?? "__default__"}
+            placeholder="Default View"
+            options={[
+              { value: "__default__", label: "Default View" },
+              ...presets.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+            onChange={(value) => applyPreset(value === "__default__" ? null : value)}
+            allowClear={false}
+            compact
           />
         </div>
+        {dataSources.length > 1 && (
+          <div className="w-28 shrink-0 sm:w-32">
+            <Dropdown
+              value={dataSourceId}
+              placeholder="All sources"
+              options={dataSources.map((d) => ({ value: d.id, label: d.name }))}
+              onChange={setDataSourceId}
+              compact
+            />
+          </div>
+        )}
         {dirty &&
           (naming ? (
             <span className="flex items-center gap-1">
@@ -359,11 +428,11 @@ export function ViewShell({
                   if (e.key === "Escape") setNaming(false);
                 }}
                 placeholder="Preset name…"
-                className="w-32 rounded-md border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+                className="h-6 w-28 rounded border bg-background px-1.5 text-[11px] outline-none focus:ring-2 focus:ring-ring"
               />
               <button
                 onClick={createPreset}
-                className="rounded-md bg-primary px-2 py-1 text-sm font-medium text-primary-foreground hover:opacity-90"
+                className="h-6 rounded bg-primary px-1.5 text-[11px] font-medium text-primary-foreground hover:opacity-90"
               >
                 Save
               </button>
@@ -372,49 +441,55 @@ export function ViewShell({
             <button
               onClick={savePreset}
               title="Save current filters as a preset"
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-sm text-primary hover:bg-primary/10"
+              className="flex h-6 items-center gap-1 rounded border border-primary/30 bg-primary/10 px-1.5 text-[11px] font-medium text-primary hover:bg-primary/15"
             >
-              <Save className="size-4" /> {activePreset ? "Save" : "Save view"}
+              <Save className="size-3" /> {activePresetId ? "Save" : "Save preset"}
             </button>
           ))}
 
         {view.type === "gantt" && (
           <div
             ref={setGanttToolbar}
-            className="order-last flex w-full flex-wrap items-center gap-2 xl:order-none xl:w-auto"
+            className="flex shrink-0 items-center gap-1"
+          />
+        )}
+        {view.type === "calendar" && (
+          <div
+            ref={setCalendarToolbar}
+            className="flex shrink-0 items-center gap-1"
           />
         )}
 
-        <div className="flex w-full shrink-0 flex-wrap items-center gap-1 xl:ml-auto xl:w-auto xl:justify-end">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <button onClick={openQuick("filter")} className={quickCls(nRules > 0)}>
-            <ListFilter className="size-4" />
+            <ListFilter className="size-3.5" />
             Filter{nRules > 0 ? ` · ${nRules}` : ""}
           </button>
           <button onClick={openQuick("sort")} className={quickCls(sorts.length > 0)}>
-            <ArrowUpDown className="size-4" />
+            <ArrowUpDown className="size-3.5" />
             Sort{sorts.length > 0 ? ` · ${sorts.length}` : ""}
           </button>
           <button onClick={openQuick("group")} className={quickCls(!!grpId)}>
-            <GroupIcon className="size-4" />
+            <GroupIcon className="size-3.5" />
             {groupName ? `Group: ${groupName}` : "Group"}
           </button>
           {dirty && (
             <button
-              onClick={() => applyPreset(activePreset)}
-              title="Reset to saved view"
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
+              onClick={() => applyPreset(activePresetId)}
+              title="Reset to preset"
+              className="flex h-6 items-center gap-1 rounded border border-transparent bg-background px-1.5 text-[11px] text-muted-foreground hover:border-border hover:bg-muted"
             >
-              <RotateCcw className="size-4" /> Reset
+              <RotateCcw className="size-3" /> Reset
             </button>
           )}
           <button
             onClick={() => setSettingsPage((p) => (p ? null : "main"))}
             title="Customize"
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-sm ${
-              settingsPage ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"
+            className={`flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium ${
+              settingsPage ? "border-primary/30 bg-primary/10 text-primary" : "border-transparent bg-background text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
             }`}
           >
-            <SlidersHorizontal className="size-4" /> Customize
+            <SlidersHorizontal className="size-3" /> Customize
           </button>
         </div>
       </div>
@@ -488,7 +563,7 @@ export function ViewShell({
       <div
         className={
           view.type === "board"
-            ? "min-h-0 flex-1 overflow-auto"
+            ? "min-h-0 flex-1 overflow-hidden"
             : "flex min-h-0 flex-1 flex-col"
         }
       >
@@ -501,8 +576,10 @@ export function ViewShell({
           sorts={sorts}
           limit={limit}
           hidden={hidden}
+          dataSourceId={dataSourceId}
           filterToMatches={filterToMatches}
           matchedIds={matchedIds}
+          openEntity={setActiveEntity}
         />
       ) : view.type === "gantt" ? (
         <GanttView
@@ -520,8 +597,10 @@ export function ViewShell({
           filterRoot={filterRoot}
           sorts={sorts}
           limit={limit}
+          dataSourceId={dataSourceId}
           filterToMatches={filterToMatches}
           matchedIds={matchedIds}
+          openEntity={setActiveEntity}
         />
       ) : view.type === "calendar" ? (
         <CalendarView
@@ -530,9 +609,12 @@ export function ViewShell({
           setCalendarField={setCalendarField}
           calendarMode={calendarMode}
           setCalendarMode={setCalendarMode}
+          toolbarSlot={calendarToolbar}
           filterRoot={filterRoot}
+          dataSourceId={dataSourceId}
           filterToMatches={filterToMatches}
           matchedIds={matchedIds}
+          openEntity={setActiveEntity}
         />
       ) : view.type === "list" ? (
         <ListView databaseId={databaseId} {...shared} />
@@ -571,12 +653,25 @@ export function ViewShell({
           setGroupFieldId={setGroupFieldId}
           hideEmpty={hideEmpty}
           setHideEmpty={setHideEmpty}
+          frozenUpTo={frozenUpTo}
+          setFrozenUpTo={setFrozenUpTo}
+          calc={calc}
+          setCalc={setCalc}
           presets={presets}
-          setPresets={setPresets}
-          activePreset={activePreset}
-          setActivePreset={setActivePreset}
+          activePresetId={activePresetId}
+          onApplyPreset={applyPreset}
+          onRenamePreset={(id, name) => renamePresetMut.mutate({ id, name })}
+          onDeletePreset={(id) => deletePresetMut.mutate(id)}
           initialPage={settingsPage}
           onClose={() => setSettingsPage(null)}
+        />
+      )}
+      {activeEntity && (
+        <EntityDetailDialog
+          databaseId={databaseId}
+          entity={activeEntity}
+          fields={fields}
+          onClose={() => setActiveEntity(null)}
         />
       )}
     </div>

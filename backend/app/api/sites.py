@@ -3,13 +3,14 @@
 import uuid
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.engine import query_rows
+from app.api.engine import query_entities
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
@@ -29,7 +30,7 @@ from app.models.site import (
 )
 from app.models.user import User
 from app.models.workspace import Workspace
-from app.schemas.engine import RowPage, RowQuery
+from app.schemas.engine import EntityPage, EntityQuery
 from app.schemas.site import (
     PublicBindingDataOut,
     PublicBindingSummary,
@@ -60,6 +61,7 @@ from app.services.authorization import (
     require_resource_action,
     require_workspace_action,
 )
+from app.services.cache import CacheStore, get_cache_store
 from app.services.events import record_event
 from app.services.jobs import enqueue_job
 from app.services.site_build import next_site_deployment_version
@@ -67,6 +69,21 @@ from app.services.site_design import default_grapesjs_content, imported_grapesjs
 from app.services.storage import ObjectStorage, StoredObjectNotFoundError, get_object_storage
 
 router = APIRouter(tags=["sites"])
+settings = get_settings()
+
+
+async def enforce_public_rate_limit(
+    request: Request, cache: CacheStore = Depends(get_cache_store)
+) -> None:
+    """Per-IP limit for the unauthenticated public runtime (mirrors auth's)."""
+    client = request.client.host if request.client else "unknown"
+    count = await cache.increment(f"rate:public:{client}", 60)
+    if count > settings.public_rate_limit_per_minute:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many requests")
+
+
+# All /public/* routes hang off this router so the limit applies uniformly.
+public_router = APIRouter(tags=["sites"], dependencies=[Depends(enforce_public_rate_limit)])
 
 
 def _normalize_slug(slug: str) -> str:
@@ -993,25 +1010,27 @@ async def _public_site_out(site: Site, db: AsyncSession) -> PublicSiteOut:
     )
 
 
-def _prune_row_page(data: RowPage, field_ids: list[str]) -> RowPage:
+def _prune_entity_page(data: EntityPage, field_ids: list[str]) -> EntityPage:
     allowed = set(field_ids)
-    for row in data.items:
-        row.data = {field_id: value for field_id, value in row.data.items() if field_id in allowed}
+    for entity in data.items:
+        entity.data = {
+            field_id: value for field_id, value in entity.data.items() if field_id in allowed
+        }
     return data
 
 
-@router.get("/public/sites/{slug}", response_model=PublicSiteOut)
+@public_router.get("/public/sites/{slug}", response_model=PublicSiteOut)
 async def get_public_site(slug: str, db: AsyncSession = Depends(get_db)) -> PublicSiteOut:
     return await _public_site_out(await _public_site(slug, db), db)
 
 
-@router.get("/public/sites/{slug}/pages", response_model=PublicPageOut)
+@public_router.get("/public/sites/{slug}/pages", response_model=PublicPageOut)
 async def get_public_homepage(slug: str, db: AsyncSession = Depends(get_db)) -> PublicPageOut:
     site = await _public_site(slug, db)
     return await get_public_page(slug, site.homepage_path.strip("/"), db)
 
 
-@router.get("/public/sites/{slug}/pages/{page_path:path}", response_model=PublicPageOut)
+@public_router.get("/public/sites/{slug}/pages/{page_path:path}", response_model=PublicPageOut)
 async def get_public_page(
     slug: str,
     page_path: str,
@@ -1074,14 +1093,14 @@ async def get_public_binding_data(
     if workspace is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
     query_payload: dict[str, Any] = {**binding.query, "page": page, "page_size": page_size}
-    data = await query_rows(
-        binding.database_id, RowQuery.model_validate(query_payload), workspace, db
+    data = await query_entities(
+        binding.database_id, EntityQuery.model_validate(query_payload), workspace, db
     )
     return PublicBindingDataOut(
         key=binding.key,
         name=binding.name,
         field_ids=binding.field_ids,
-        data=_prune_row_page(data, binding.field_ids),
+        data=_prune_entity_page(data, binding.field_ids),
     )
 
 
@@ -1101,8 +1120,8 @@ async def get_public_latest_deployment(
     return deployment
 
 
-@router.get("/public/sites/{slug}/render", response_class=HTMLResponse)
-@router.get("/public/sites/{slug}/render/{page_path:path}", response_class=HTMLResponse)
+@public_router.get("/public/sites/{slug}/render", response_class=HTMLResponse)
+@public_router.get("/public/sites/{slug}/render/{page_path:path}", response_class=HTMLResponse)
 async def render_public_site(
     slug: str,
     page_path: str = "",
@@ -1125,6 +1144,10 @@ async def render_public_site(
         content=data.decode("utf-8"),
         headers={
             "Cache-Control": "public, max-age=60",
+            # ponytail: minimal CSP — designer output relies on inline CSS/JS,
+            # so only block plugin/object embedding and <base> hijacking.
+            "Content-Security-Policy": "object-src 'none'; base-uri 'self'",
+            "X-Content-Type-Options": "nosniff",
             "X-VHB-Deployment-ID": str(deployment.id),
             "X-VHB-Environment": deployment.environment.value,
             "X-VHB-Page-Path": "/" + page_path.strip("/") if page_path else site.homepage_path,
@@ -1132,7 +1155,7 @@ async def render_public_site(
     )
 
 
-@router.get("/public/domains/{hostname}/deployment", response_model=SiteDeploymentOut)
+@public_router.get("/public/domains/{hostname}/deployment", response_model=SiteDeploymentOut)
 async def get_public_domain_deployment(
     hostname: str,
     db: AsyncSession = Depends(get_db),
@@ -1154,8 +1177,10 @@ async def get_public_domain_deployment(
     return deployment
 
 
-@router.get("/public/domains/{hostname}/render", response_class=HTMLResponse)
-@router.get("/public/domains/{hostname}/render/{page_path:path}", response_class=HTMLResponse)
+@public_router.get("/public/domains/{hostname}/render", response_class=HTMLResponse)
+@public_router.get(
+    "/public/domains/{hostname}/render/{page_path:path}", response_class=HTMLResponse
+)
 async def render_public_domain(
     hostname: str,
     page_path: str = "",
@@ -1187,9 +1212,17 @@ async def render_public_domain(
         content=data.decode("utf-8"),
         headers={
             "Cache-Control": "public, max-age=60",
+            # ponytail: minimal CSP — designer output relies on inline CSS/JS,
+            # so only block plugin/object embedding and <base> hijacking.
+            "Content-Security-Policy": "object-src 'none'; base-uri 'self'",
+            "X-Content-Type-Options": "nosniff",
             "X-VHB-Deployment-ID": str(deployment.id),
             "X-VHB-Domain": domain.hostname,
             "X-VHB-Environment": deployment.environment.value,
             "X-VHB-Page-Path": "/" + page_path.strip("/") if page_path else site.homepage_path,
         },
     )
+
+
+# Register the rate-limited public runtime under the module router.
+router.include_router(public_router)

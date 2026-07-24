@@ -211,9 +211,9 @@ def render_site_artifact(
           const response = await fetch(`/public/sites/${{siteSlug}}/bindings/${{key}}`);
           if (!response.ok) throw new Error(`Binding ${{key}} failed`);
           const payload = await response.json();
-          const rows = payload?.data?.items || [];
-          node.innerHTML = '<div class="vhb-runtime-grid">' + rows.map((row) => {{
-            const data = row.data || {{}};
+          const entities = payload?.data?.items || [];
+          node.innerHTML = '<div class="vhb-runtime-grid">' + entities.map((entity) => {{
+            const data = entity.data || {{}};
             const fields = Object.entries(data).map(([fieldId, value]) => `<div><small>${{fieldId}}</small><strong>${{value ?? ""}}</strong></div>`).join("");
             return `<article class="vhb-runtime-card">${{fields || "<em>No public fields</em>"}}</article>`;
           }}).join("") + '</div>';

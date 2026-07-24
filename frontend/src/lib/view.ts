@@ -4,7 +4,7 @@ import { countryByCode } from "@/lib/countries";
 import type { components } from "@/lib/api/schema";
 
 type Field = components["schemas"]["FieldOut"];
-type Row = components["schemas"]["RowOut"];
+type Entity = components["schemas"]["EntityOut"];
 
 export type FilterCond = { fieldId: string; op: string; value: string };
 export type FilterGroup = { conj: "and" | "or"; rules: FilterNode[] };
@@ -34,8 +34,8 @@ function choiceLabel(field: Field, id: string): string {
   return choices(field).find((c) => c.id === id)?.label ?? id;
 }
 
-function raw(row: Row, field: Field): unknown {
-  return (row.data as Record<string, unknown>)[field.id] ?? null;
+function raw(entity: Entity, field: Field): unknown {
+  return (entity.data as Record<string, unknown>)[field.id] ?? null;
 }
 
 export function toText(field: Field, value: unknown): string {
@@ -195,7 +195,7 @@ function matchOne(field: Field, value: unknown, op: string, target: string): boo
 }
 
 function matchNode(
-  row: Row,
+  entity: Entity,
   byId: Record<string, Field>,
   node: FilterNode,
 ): boolean {
@@ -204,12 +204,12 @@ function matchNode(
       isGroup(r) ? r.rules.length > 0 : r.fieldId && byId[r.fieldId],
     );
     if (active.length === 0) return true;
-    const results = active.map((r) => matchNode(row, byId, r));
+    const results = active.map((r) => matchNode(entity, byId, r));
     return node.conj === "and" ? results.every(Boolean) : results.some(Boolean);
   }
   const f = byId[node.fieldId];
   if (!f) return true;
-  return matchOne(f, raw(row, f), node.op, node.value);
+  return matchOne(f, raw(entity, f), node.op, node.value);
 }
 
 export function countRules(group: FilterGroup): number {
@@ -220,22 +220,22 @@ export function countRules(group: FilterGroup): number {
 }
 
 export function applyFilterTree(
-  rows: Row[],
+  entities: Entity[],
   byId: Record<string, Field>,
   root: FilterGroup,
-): Row[] {
-  if (root.rules.length === 0) return rows;
-  return rows.filter((row) => matchNode(row, byId, root));
+): Entity[] {
+  if (root.rules.length === 0) return entities;
+  return entities.filter((entity) => matchNode(entity, byId, root));
 }
 
 export function applySorts(
-  rows: Row[],
+  entities: Entity[],
   byId: Record<string, Field>,
   sorts: SortRule[],
-): Row[] {
+): Entity[] {
   const active = sorts.filter((s) => s.fieldId && byId[s.fieldId]);
-  if (active.length === 0) return rows;
-  return [...rows].sort((a, b) => {
+  if (active.length === 0) return entities;
+  return [...entities].sort((a, b) => {
     for (const s of active) {
       const f = byId[s.fieldId];
       const va = raw(a, f);
@@ -261,16 +261,16 @@ export function applySorts(
   });
 }
 
-export function groupRows(
-  rows: Row[],
+export function groupEntities(
+  entities: Entity[],
   field: Field,
-): { key: string; label: string; value: unknown; rows: Row[] }[] {
-  const map = new Map<string, { label: string; value: unknown; rows: Row[] }>();
-  for (const row of rows) {
-    const v = raw(row, field);
+): { key: string; label: string; value: unknown; entities: Entity[] }[] {
+  const map = new Map<string, { label: string; value: unknown; entities: Entity[] }>();
+  for (const entity of entities) {
+    const v = raw(entity, field);
     const label = toText(field, v) || "Empty";
-    if (!map.has(label)) map.set(label, { label, value: v, rows: [] });
-    map.get(label)!.rows.push(row);
+    if (!map.has(label)) map.set(label, { label, value: v, entities: [] });
+    map.get(label)!.entities.push(entity);
   }
   return [...map.entries()].map(([key, v]) => ({ key, ...v }));
 }

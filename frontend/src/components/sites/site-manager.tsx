@@ -9,7 +9,7 @@ import {
   Plus,
   Rocket,
   Trash2,
-} from "lucide-react";
+} from "@/components/ui/fa-icon";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ResourceAccess } from "@/components/access/resource-access";

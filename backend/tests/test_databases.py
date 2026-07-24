@@ -73,3 +73,28 @@ async def test_database_isolated_per_workspace(client: httpx.AsyncClient) -> Non
 async def test_databases_require_auth(client: httpx.AsyncClient) -> None:
     r = await client.get("/databases")
     assert r.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_database_favorite_is_reflected_in_context_data(
+    client: httpx.AsyncClient,
+) -> None:
+    token = await _register(client, "favorite@example.com")
+    created = await client.post(
+        "/databases", json={"name": "Pinned CRM"}, headers=_auth(token)
+    )
+    database_id = created.json()["id"]
+
+    favorite = await client.put(
+        f"/databases/{database_id}/favorite", headers=_auth(token)
+    )
+    assert favorite.status_code == 204
+    listed = await client.get("/databases", headers=_auth(token))
+    assert listed.json()[0]["is_favorite"] is True
+
+    unfavorite = await client.delete(
+        f"/databases/{database_id}/favorite", headers=_auth(token)
+    )
+    assert unfavorite.status_code == 204
+    listed = await client.get("/databases", headers=_auth(token))
+    assert listed.json()[0]["is_favorite"] is False

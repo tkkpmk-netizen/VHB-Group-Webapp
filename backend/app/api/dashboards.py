@@ -3,16 +3,17 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.engine import query_rows
+from app.api.engine import query_entities
 from app.db.session import get_db
 from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
 from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.database import Database
 from app.models.permission import ResourceType
+from app.models.resource import Space, SpaceDatabasePlacement
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.dashboard import (
@@ -24,7 +25,7 @@ from app.schemas.dashboard import (
     WidgetOut,
     WidgetUpdate,
 )
-from app.schemas.engine import RowQuery
+from app.schemas.engine import EntityQuery
 from app.services.authorization import (
     Action,
     delete_resource_grants,
@@ -57,13 +58,18 @@ async def _scoped_widget(
 
 @router.get("/dashboards", response_model=list[DashboardOut])
 async def list_dashboards(
+    space_id: uuid.UUID | None = Query(default=None),
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> list[Dashboard]:
+    query = select(Dashboard).where(Dashboard.workspace_id == workspace.id)
+    if space_id is not None:
+        space = await db.get(Space, space_id)
+        if space is None or space.workspace_id != workspace.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Space not found")
+        query = query.where(Dashboard.space_id == space_id)
     result = await db.execute(
-        select(Dashboard)
-        .where(Dashboard.workspace_id == workspace.id)
-        .order_by(Dashboard.updated_at.desc())
+        query.order_by(Dashboard.is_default.desc(), Dashboard.updated_at.desc())
     )
     return list(result.scalars())
 
@@ -79,12 +85,27 @@ async def create_dashboard(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Dashboard:
+    space = await db.get(Space, payload.space_id)
+    if space is None or space.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Space not found")
+    has_dashboard = bool(
+        await db.scalar(
+            select(func.count(Dashboard.id)).where(Dashboard.space_id == space.id)
+        )
+    )
+    make_default = payload.is_default or not has_dashboard
+    if make_default:
+        await db.execute(
+            update(Dashboard).where(Dashboard.space_id == space.id).values(is_default=False)
+        )
     dashboard = Dashboard(
         workspace_id=workspace.id,
+        space_id=space.id,
         created_by_id=current_user.id,
         updated_by_id=current_user.id,
         name=payload.name,
         description=payload.description,
+        is_default=make_default,
     )
     db.add(dashboard)
     await db.flush()
@@ -98,6 +119,26 @@ async def create_dashboard(
     )
     await db.commit()
     await db.refresh(dashboard)
+    return dashboard
+
+
+@router.get("/spaces/{space_id}/dashboard", response_model=DashboardOut)
+async def get_space_default_dashboard(
+    space_id: uuid.UUID,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> Dashboard:
+    space = await db.get(Space, space_id)
+    if space is None or space.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Space not found")
+    dashboard = await db.scalar(
+        select(Dashboard).where(
+            Dashboard.space_id == space.id,
+            Dashboard.is_default.is_(True),
+        )
+    )
+    if dashboard is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Default dashboard not found")
     return dashboard
 
 
@@ -119,8 +160,22 @@ async def update_dashboard(
     db: AsyncSession = Depends(get_db),
 ) -> Dashboard:
     dashboard = await _scoped_dashboard(dashboard_id, workspace, db)
+    if payload.is_default is False and dashboard.is_default:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A Space must always have a default dashboard",
+        )
+    if payload.is_default is True and not dashboard.is_default:
+        await db.execute(
+            update(Dashboard)
+            .where(Dashboard.space_id == dashboard.space_id, Dashboard.id != dashboard.id)
+            .values(is_default=False)
+        )
     for key in payload.model_fields_set:
-        setattr(dashboard, key, getattr(payload, key))
+        value = getattr(payload, key)
+        if key == "is_default" and value is None:
+            continue
+        setattr(dashboard, key, value)
     dashboard.updated_by_id = current_user.id
     await db.commit()
     await db.refresh(dashboard)
@@ -143,6 +198,20 @@ async def delete_dashboard(
         user_id=current_user.id,
         action=Action.manage,
     )
+    if dashboard.is_default:
+        replacement = await db.scalar(
+            select(Dashboard)
+            .where(Dashboard.space_id == dashboard.space_id, Dashboard.id != dashboard.id)
+            .order_by(Dashboard.created_at)
+        )
+        if replacement is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The only dashboard in a Space cannot be deleted",
+            )
+        dashboard.is_default = False
+        await db.flush()
+        replacement.is_default = True
     await delete_resource_grants(
         db,
         workspace_id=workspace.id,
@@ -184,6 +253,17 @@ async def create_widget(
     database = await db.get(Database, payload.database_id)
     if database is None or database.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Database not found")
+    placement = await db.scalar(
+        select(SpaceDatabasePlacement.id).where(
+            SpaceDatabasePlacement.space_id == dashboard.space_id,
+            SpaceDatabasePlacement.database_id == database.id,
+        )
+    )
+    if placement is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Database must be placed in the Dashboard's Space",
+        )
     await require_database_action(
         db,
         database_id=database.id,
@@ -291,6 +371,6 @@ async def get_widget_data(
         user_id=current_user.id,
         action=Action.read,
     )
-    query = RowQuery.model_validate({**widget.query, "page_size": page_size})
-    data = await query_rows(widget.database_id, query, workspace, db)
+    query = EntityQuery.model_validate({**widget.query, "page_size": page_size})
+    data = await query_entities(widget.database_id, query, workspace, db)
     return WidgetDataOut(widget_id=widget.id, data=data)

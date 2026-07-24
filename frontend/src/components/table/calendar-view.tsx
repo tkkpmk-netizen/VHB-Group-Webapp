@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
 import { looksDate } from "@/components/table/gantt-scale";
@@ -12,7 +12,7 @@ import type { components } from "@/lib/api/schema";
 import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
-type Row = components["schemas"]["RowOut"];
+type Entity = components["schemas"]["EntityOut"];
 type CalMode = "day" | "4days" | "week" | "month" | "year";
 
 const MODES: { value: CalMode; label: string }[] = [
@@ -59,15 +59,56 @@ function parseLocal(s: string): { d: Date; dateOnly: boolean } | null {
 }
 
 type CalEvent = {
-  row: Row;
+  entity: Entity;
   start: Date;
   end: Date;
   allDay: boolean;
   hasEnd: boolean;
 };
 
-function parseEvent(row: Row, fieldId: string): CalEvent | null {
-  const v = (row.data as Record<string, unknown>)[fieldId];
+type PositionedCalEvent = {
+  event: CalEvent;
+  lane: number;
+  laneCount: number;
+};
+
+/** Pack overlapping timed events into side-by-side lanes without narrowing
+ * unrelated events later in the same day. */
+function positionTimedEvents(events: CalEvent[]): PositionedCalEvent[] {
+  const sorted = [...events].sort(
+    (a, b) => a.start.getTime() - b.start.getTime() || a.end.getTime() - b.end.getTime(),
+  );
+  const positioned: PositionedCalEvent[] = [];
+  let cluster: Array<{ event: CalEvent; lane: number }> = [];
+  let laneEnds: number[] = [];
+  let clusterEnd = -Infinity;
+
+  const flush = () => {
+    if (!cluster.length) return;
+    const laneCount = Math.max(1, ...cluster.map((item) => item.lane + 1));
+    positioned.push(
+      ...cluster.map((item) => ({ ...item, laneCount })),
+    );
+    cluster = [];
+    laneEnds = [];
+    clusterEnd = -Infinity;
+  };
+
+  for (const event of sorted) {
+    const start = event.start.getTime();
+    if (cluster.length && start >= clusterEnd) flush();
+    const lane = laneEnds.findIndex((end) => end <= start);
+    const nextLane = lane < 0 ? laneEnds.length : lane;
+    laneEnds[nextLane] = event.end.getTime();
+    clusterEnd = Math.max(clusterEnd, event.end.getTime());
+    cluster.push({ event, lane: nextLane });
+  }
+  flush();
+  return positioned;
+}
+
+function parseEvent(entity: Entity, fieldId: string): CalEvent | null {
+  const v = (entity.data as Record<string, unknown>)[fieldId];
   let sStr: string | undefined;
   let eStr: string | null | undefined;
   if (typeof v === "string") sStr = v;
@@ -89,7 +130,7 @@ function parseEvent(row: Row, fieldId: string): CalEvent | null {
     }
   }
   if (end.getTime() < sp.d.getTime()) end = sp.d;
-  return { row, start: sp.d, end, allDay: sp.dateOnly, hasEnd };
+  return { entity, start: sp.d, end, allDay: sp.dateOnly, hasEnd };
 }
 
 export function CalendarView({
@@ -98,18 +139,24 @@ export function CalendarView({
   setCalendarField,
   calendarMode,
   setCalendarMode,
+  toolbarSlot,
   filterRoot,
+  dataSourceId,
   filterToMatches,
   matchedIds,
+  openEntity,
 }: {
   databaseId: string;
   calendarField: string | null;
   setCalendarField: (id: string | null) => void;
   calendarMode: string;
   setCalendarMode: (m: string) => void;
+  toolbarSlot: HTMLElement | null;
   filterRoot: FilterGroup;
+  dataSourceId: string | null;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
+  openEntity: (entity: Entity) => void;
 }) {
   const qc = useQueryClient();
   const [now] = useState(() => new Date());
@@ -128,56 +175,59 @@ export function CalendarView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const rowsQ = useQuery<Row[]>({
-    queryKey: ["rows", databaseId],
-    queryFn: () => apiFetch<Row[]>(`/databases/${databaseId}/rows`),
+  const entitiesQ = useQuery<Entity[]>({
+    queryKey: ["entities", databaseId, dataSourceId],
+    queryFn: () =>
+      apiFetch<Entity[]>(
+        `/databases/${databaseId}/entities${dataSourceId ? `?data_source_id=${dataSourceId}` : ""}`,
+      ),
   });
   const fields = fieldsQ.data ?? [];
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
-  let rows = applyFilterTree(rowsQ.data ?? [], byId, filterRoot);
-  if (filterToMatches && matchedIds) rows = rows.filter((r) => matchedIds.has(r.id));
+  let entities = applyFilterTree(entitiesQ.data ?? [], byId, filterRoot);
+  if (filterToMatches && matchedIds) entities = entities.filter((r) => matchedIds.has(r.id));
 
   const dateFields = fields.filter(
     (f) =>
       DATE_TYPES.has(f.type) ||
       (f.type === "formula" &&
-        rows.some((r) => looksDate((r.data as Record<string, unknown>)[f.id]))),
+        entities.some((r) => looksDate((r.data as Record<string, unknown>)[f.id]))),
   );
   const picked = calendarField ? byId[calendarField] : undefined;
   const field =
     (picked && dateFields.includes(picked) ? picked : undefined) ?? dateFields[0];
   const titleField = fields.find((f) => ["text", "long_text"].includes(f.type));
-  const title = (r: Row) => {
+  const title = (r: Entity) => {
     const v = titleField ? (r.data as Record<string, unknown>)[titleField.id] : null;
-    return typeof v === "string" && v ? v : `#${r.seq}`;
+    return typeof v === "string" && v ? v : r.uid;
   };
   const editable = field?.type === "date";
 
   const mode = (calendarMode as CalMode) ?? "month";
   const events = field
-    ? rows.map((r) => parseEvent(r, field.id)).filter((e): e is CalEvent => !!e)
+    ? entities.map((r) => parseEvent(r, field.id)).filter((e): e is CalEvent => !!e)
     : [];
 
   const save = useMutation({
-    mutationFn: ({ rowId, value }: { rowId: string; value: unknown }) =>
-      apiFetch<Row>(`/rows/${rowId}`, {
+    mutationFn: ({ entityId, value }: { entityId: string; value: unknown }) =>
+      apiFetch<Entity>(`/entities/${entityId}`, {
         method: "PATCH",
         body: JSON.stringify({ data: { [field!.id]: value } }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", databaseId] }),
   });
   const createEvent = useMutation({
     mutationFn: (d: NonNullable<typeof draft>) => {
       const data: Record<string, unknown> = { [field!.id]: d.value };
       if (titleField) data[titleField.id] = d.title.trim() || null;
-      return apiFetch<Row>(`/databases/${databaseId}/rows`, {
+      return apiFetch<Entity>(`/databases/${databaseId}/entities`, {
         method: "POST",
-        body: JSON.stringify({ data }),
+        body: JSON.stringify({ name: d.title.trim(), data }),
       });
     },
     onSuccess: () => {
       setDraft(null);
-      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
     },
   });
 
@@ -223,7 +273,7 @@ export function CalendarView({
     const ne = new Date(newStart.getTime() + dur);
     const fmt = ev.allDay ? ymd : ymdhm;
     save.mutate({
-      rowId: ev.row.id,
+      entityId: ev.entity.id,
       value: { start: fmt(newStart), end: ev.hasEnd ? fmt(ne) : null },
     });
   }
@@ -247,7 +297,7 @@ export function CalendarView({
   if (!field)
     return (
       <div className="flex h-full flex-col">
-        {header()}
+        {toolbarSlot ? createPortal(header(), toolbarSlot) : header()}
         <div className="m-3 rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
           Calendar cần một field ngày (Date / Created time / Last edited time / Formula
           ngày).
@@ -257,43 +307,48 @@ export function CalendarView({
 
   function header() {
     return (
-      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-2">
+      <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
         <button
           onClick={() => step(-1)}
           title="Previous period"
-          className="rounded p-1 hover:bg-muted"
+          className="flex size-6 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
         >
           <ChevronLeft className="size-4" />
         </button>
         <button
           onClick={() => step(1)}
           title="Next period"
-          className="rounded p-1 hover:bg-muted"
+          className="flex size-6 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
         >
           <ChevronRight className="size-4" />
         </button>
-        <span className="min-w-28 text-base font-semibold">{headerTitle}</span>
+        <span className="flex h-6 min-w-24 items-center rounded-md border border-border/80 bg-background px-2 text-[11px] font-semibold">
+          {headerTitle}
+        </span>
         <button
           onClick={() => setAnchor(startOfDay(new Date()))}
-          className="rounded-md border px-2.5 py-1 text-sm hover:bg-muted"
+          className="flex h-6 items-center rounded-md border border-border/80 bg-background px-2 text-[11px] font-medium hover:bg-muted"
         >
           Today
         </button>
         {dateFields.length > 1 && (
-          <div className="min-w-36 flex-1 sm:flex-none">
+          <div className="w-32 shrink-0">
             <Dropdown
               value={field?.id ?? null}
               options={dateFields.map((f) => ({ value: f.id, label: f.name }))}
               onChange={(v) => setCalendarField(v)}
+              allowClear={false}
+              compact
             />
           </div>
         )}
-        <div className="ml-auto w-28">
+        <div className="w-20 shrink-0">
           <Dropdown
             value={mode}
             allowClear={false}
             options={MODES}
             onChange={(v) => v && setCalendarMode(v)}
+            compact
           />
         </div>
       </div>
@@ -318,14 +373,14 @@ export function CalendarView({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Day headers */}
-        <div className="flex shrink-0 border-b">
-          <div className="w-14 shrink-0 text-center text-[11px] text-muted-foreground">
+        <div className="flex min-h-7 shrink-0 border-b">
+          <div className="flex w-14 shrink-0 items-center justify-center text-[10px] text-muted-foreground">
             {tzLabel}
           </div>
           {days.map((d) => {
             const today = sameDay(d, now);
             return (
-              <div key={+d} className="min-w-0 flex-1 py-1 text-center text-sm">
+              <div key={+d} className="flex min-w-0 flex-1 items-center justify-center gap-1 py-0.5 text-xs">
                 <span className="text-muted-foreground">
                   {d.toLocaleDateString(undefined, { weekday: "short" })}{" "}
                 </span>
@@ -342,9 +397,9 @@ export function CalendarView({
             );
           })}
         </div>
-        {/* All-day row */}
-        <div className="flex shrink-0 border-b">
-          <div className="w-14 shrink-0 py-1 pr-1 text-right text-[11px] text-muted-foreground">
+        {/* All-day entity */}
+        <div className="flex min-h-7 shrink-0 border-b">
+          <div className="flex w-14 shrink-0 items-start justify-end py-1 pr-1.5 text-[10px] leading-4 text-muted-foreground">
             All day
           </div>
           {days.map((d) => (
@@ -352,20 +407,22 @@ export function CalendarView({
               key={+d}
               onDragOver={(e) => dragId && e.preventDefault()}
               onDrop={() => {
-                const ev = events.find((x) => x.row.id === dragId);
+                const ev = events.find((x) => x.entity.id === dragId);
                 if (ev) reschedule(ev, startOfDay(d));
                 setDragId(null);
               }}
-              className="min-h-[26px] min-w-0 flex-1 space-y-0.5 border-l px-1 py-0.5"
+              className="min-h-7 min-w-0 flex-1 space-y-0.5 border-l px-1 py-0.5"
             >
               {allDayForDay(d).map((ev) => (
                 <div
-                  key={ev.row.id}
+                  key={ev.entity.id}
                   draggable={editable}
-                  onDragStart={() => setDragId(ev.row.id)}
-                  className="truncate rounded bg-primary/15 px-1 text-xs text-primary"
+                  onDragStart={() => setDragId(ev.entity.id)}
+                  onDoubleClick={() => openEntity(ev.entity)}
+                  title={`${title(ev.entity)} · double-click to open`}
+                  className="h-4 truncate rounded bg-primary/15 px-1 text-[10px] leading-4 text-primary"
                 >
-                  {title(ev.row)}
+                  {title(ev.entity)}
                 </div>
               ))}
             </div>
@@ -415,7 +472,7 @@ export function CalendarView({
                   }}
                   onDragOver={(e) => dragId && e.preventDefault()}
                   onDrop={(e) => {
-                    const ev = events.find((x) => x.row.id === dragId);
+                    const ev = events.find((x) => x.entity.id === dragId);
                     if (ev) {
                       const rect = e.currentTarget.getBoundingClientRect();
                       const mins =
@@ -441,7 +498,7 @@ export function CalendarView({
                       <span className="absolute -left-1 -top-1.5 size-2 rounded-full bg-red-500" />
                     </div>
                   )}
-                  {eventsForDay(d).map((ev) => {
+                  {positionTimedEvents(eventsForDay(d)).map(({ event: ev, lane, laneCount }) => {
                     const top =
                       (ev.start.getHours() * 60 + ev.start.getMinutes()) *
                       (HOUR_PX / 60);
@@ -451,14 +508,20 @@ export function CalendarView({
                     );
                     return (
                       <div
-                        key={ev.row.id}
+                        key={ev.entity.id}
                         draggable={editable}
-                        onDragStart={() => setDragId(ev.row.id)}
-                        className="absolute inset-x-1 overflow-hidden rounded-md border border-primary/40 bg-primary/15 px-1 text-xs text-primary"
-                        style={{ top, height: dur * (HOUR_PX / 60) }}
-                        title={title(ev.row)}
+                        onDragStart={() => setDragId(ev.entity.id)}
+                        onDoubleClick={() => openEntity(ev.entity)}
+                        className="absolute overflow-hidden rounded-md border border-primary/40 bg-primary/15 px-1 text-[11px] leading-4 text-primary"
+                        style={{
+                          top,
+                          height: dur * (HOUR_PX / 60),
+                          left: `calc(${(lane / laneCount) * 100}% + 2px)`,
+                          width: `calc(${100 / laneCount}% - 4px)`,
+                        }}
+                        title={`${title(ev.entity)} · double-click to open`}
                       >
-                        <div className="truncate font-medium">{title(ev.row)}</div>
+                        <div className="truncate font-medium">{title(ev.entity)}</div>
                         <div className="truncate text-[10px] opacity-80">
                           {ev.start.toLocaleTimeString(undefined, {
                             hour: "numeric",
@@ -491,7 +554,7 @@ export function CalendarView({
             </div>
           ))}
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6">
+        <div className="grid min-h-0 flex-1 grid-cols-7 grid-entities-6">
           {days.map((d) => {
             const inMonth = d.getMonth() === anchor.getMonth();
             const today = sameDay(d, now);
@@ -503,7 +566,7 @@ export function CalendarView({
                 key={+d}
                 onDragOver={(e) => dragId && e.preventDefault()}
                 onDrop={() => {
-                  const ev = events.find((x) => x.row.id === dragId);
+                  const ev = events.find((x) => x.entity.id === dragId);
                   if (ev) {
                     // keep time-of-day, change date.
                     const ns = new Date(d);
@@ -541,17 +604,17 @@ export function CalendarView({
                 <div className="space-y-0.5">
                   {dayEvents.slice(0, 3).map((ev) => (
                     <div
-                      key={ev.row.id}
+                      key={ev.entity.id}
                       draggable={editable}
-                      onDragStart={() => setDragId(ev.row.id)}
+                      onDragStart={() => setDragId(ev.entity.id)}
                       className="truncate rounded bg-primary/15 px-1 text-[11px] text-primary"
-                      title={title(ev.row)}
+                      title={title(ev.entity)}
                     >
                       {!ev.allDay &&
                         ev.start.toLocaleTimeString(undefined, {
                           hour: "numeric",
                         }) + " "}
-                      {title(ev.row)}
+                      {title(ev.entity)}
                     </div>
                   ))}
                   {dayEvents.length > 3 && (
@@ -633,14 +696,14 @@ export function CalendarView({
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <ViewQueryState
-        loading={fieldsQ.isLoading || rowsQ.isLoading}
-        error={fieldsQ.isError || rowsQ.isError}
+        loading={fieldsQ.isLoading || entitiesQ.isLoading}
+        error={fieldsQ.isError || entitiesQ.isError}
         onRetry={() => {
           void fieldsQ.refetch();
-          void rowsQ.refetch();
+          void entitiesQ.refetch();
         }}
       />
-      {header()}
+      {toolbarSlot ? createPortal(header(), toolbarSlot) : header()}
       {body}
       {draft &&
         createPortal(
@@ -672,7 +735,7 @@ export function CalendarView({
                   )
                 }
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (e.key === "Enter" && draft.title.trim()) {
                     e.preventDefault();
                     createEvent.mutate(draft);
                   } else if (e.key === "Escape") {

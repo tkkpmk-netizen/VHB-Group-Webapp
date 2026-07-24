@@ -16,7 +16,7 @@ class DriveFileOut(BaseModel):
     id: uuid.UUID
     workspace_id: uuid.UUID
     database_id: uuid.UUID
-    row_id: uuid.UUID
+    entity_id: uuid.UUID
     field_id: uuid.UUID
     filename: str
     mime_type: str

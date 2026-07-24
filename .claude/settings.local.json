@@ -4,7 +4,9 @@
       "mcp__5abdc7cb-676a-433d-8107-3128ef7ef065__notion-search",
       "mcp__abd779e8-2bf0-4253-86cf-66b0b0d6d4d7__clickup_get_workspace_hierarchy",
       "mcp__abd779e8-2bf0-4253-86cf-66b0b0d6d4d7__clickup_search",
-      "mcp__visualize__read_me"
+      "mcp__visualize__read_me",
+      "Bash(uv run *)",
+      "Bash(uv sync *)"
     ]
   }
 }

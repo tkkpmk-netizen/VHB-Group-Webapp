@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, LoaderCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, LoaderCircle, RefreshCw } from "@/components/ui/fa-icon";
 
 export function ViewQueryState({
   loading,

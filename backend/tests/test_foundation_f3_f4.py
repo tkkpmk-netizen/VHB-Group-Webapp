@@ -74,13 +74,13 @@ async def test_database_grant_can_reduce_editor_access(
     assert grant.status_code == 200, grant.text
 
     response = await client.get(
-        f"/databases/{database_id}/rows",
+        f"/databases/{database_id}/entities",
         headers=_headers(editor_token, owner_workspace),
     )
     assert response.status_code == 200
     response = await client.post(
-        f"/databases/{database_id}/rows",
-        json={"data": {}},
+        f"/databases/{database_id}/entities",
+        json={"name": "Test entity", "data": {}},
         headers=_headers(editor_token, owner_workspace),
     )
     assert response.status_code == 403
@@ -102,14 +102,14 @@ async def test_row_query_paginates_filters_sorts_and_aggregates(
     amount_id = amount.json()["id"]
     for value in [10, 30, 20, 40]:
         response = await client.post(
-            f"/databases/{database_id}/rows",
-            json={"data": {amount_id: value}},
+            f"/databases/{database_id}/entities",
+            json={"name": "Test entity", "data": {amount_id: value}},
             headers=headers,
         )
         assert response.status_code == 201
 
     response = await client.post(
-        f"/databases/{database_id}/rows/query",
+        f"/databases/{database_id}/entities/query",
         json={
             "page": 1,
             "page_size": 2,
@@ -118,6 +118,9 @@ async def test_row_query_paginates_filters_sorts_and_aggregates(
             "aggregations": [
                 {"field_id": amount_id, "function": "sum"},
                 {"field_id": amount_id, "function": "avg"},
+                {"field_id": amount_id, "function": "count"},
+                {"field_id": amount_id, "function": "filled"},
+                {"field_id": amount_id, "function": "empty"},
             ],
         },
         headers=headers,
@@ -129,6 +132,26 @@ async def test_row_query_paginates_filters_sorts_and_aggregates(
     assert [row["data"][amount_id] for row in body["items"]] == [40, 30]
     assert body["aggregates"][f"sum:{amount_id}"] == 90
     assert body["aggregates"][f"avg:{amount_id}"] == 30
+    assert body["aggregates"][f"count:{amount_id}"] == 3
+    assert body["aggregates"][f"filled:{amount_id}"] == 3
+    assert body["aggregates"][f"empty:{amount_id}"] == 0
+
+    text_field = await client.post(
+        f"/databases/{database_id}/fields",
+        json={"name": "Label", "type": "text", "options": {}},
+        headers=headers,
+    )
+    invalid_calculation = await client.post(
+        f"/databases/{database_id}/entities/query",
+        json={
+            "aggregations": [
+                {"field_id": text_field.json()["id"], "function": "sum"}
+            ]
+        },
+        headers=headers,
+    )
+    assert invalid_calculation.status_code == 422
+    assert "requires a numeric field" in invalid_calculation.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -137,7 +160,7 @@ async def test_row_query_rejects_unbounded_page_size(client: httpx.AsyncClient) 
     headers = _headers(token, workspace_id)
     database = await client.post("/databases", json={"name": "DB"}, headers=headers)
     response = await client.post(
-        f"/databases/{database.json()['id']}/rows/query",
+        f"/databases/{database.json()['id']}/entities/query",
         json={"page_size": 201},
         headers=headers,
     )

@@ -1,13 +1,13 @@
 # VHB Platform — Production Roadmap
 
 Status: **Active — DP7 realtime collaboration MVP complete; Design & Publishing phase complete**
-Updated: 2026-07-07
+Updated: 2026-07-17
 
 Verified baseline:
 
-- Alembic: `5a7c9e1f3b2d (head)`, no schema drift.
-- Backend: ruff + mypy + 68/68 tests.
-- Frontend: typecheck + lint + 16/16 tests + production build.
+- Alembic: `d5a7c9e1f3b5 (head)`, no schema drift.
+- Backend: ruff + mypy + 85/85 tests.
+- Frontend: typecheck + lint + 20/20 tests + production build.
 
 ## Product Direction
 
@@ -21,7 +21,7 @@ Target modules:
 1. Database
 2. Workspace / Space / Folder
 3. Documents
-4. Dashboard Designer
+4. Space-owned Dashboard Designer
 5. Web Designer
 6. Sites / Deployments
 7. Identity / Administration
@@ -67,7 +67,7 @@ Foundation exit criteria:
 
 - Resources can be organized and authorized below workspace level.
 - No API relies on “first workspace” as the final tenancy model.
-- Row listing is paginated and bounded.
+- Entity listing is paginated and bounded.
 - Long-running work is never executed in request handlers.
 - Files are stored through an object-storage interface.
 - Security-sensitive changes emit an audit record.
@@ -114,9 +114,21 @@ start no sooner than after CM3.
 | DP6 | Domains, environments and rollback | DP5 | MVP completed |
 | DP7 | Realtime collaboration for Docs/Design | Documents, F7, F8 | MVP completed |
 
+## Database Layout Expansion (Planned)
+
+Two Layout types are planned but not yet built. Both are documentation/
+roadmap only for now — see
+[ADR 0017](docs/adr/0017-entity-layout-datasource-viewpreset.md) for the
+Entity/Layout/DataSource/ViewPreset model these will build on.
+
+| ID | Initiative | Depends on | Status |
+|---:|---|---|---|
+| LO1 | Form Layout — a data-entry form view of a Database (one Entity per submission), reusing Field validation from the engine | Database engine, F4 | Planned |
+| LO2 | Dashboard-as-a-Layout — surface an existing Dashboard as a selectable Layout type on a Database, alongside Table/Board/etc. | CM4, Layout API | Planned |
+
 ## Architecture Rules
 
-- Dynamic `Row.data` stores business data, not platform metadata.
+- Dynamic `Entity.data` stores business data, not platform metadata.
 - Platform resources use typed tables with migrations and auditability.
 - Published websites use a restricted Public Runtime API, never admin APIs.
 - Editor project JSON is the source of truth; generated HTML is a build artifact.
@@ -130,7 +142,9 @@ F2.1 introduced:
 
 - `Space` scoped to a workspace.
 - Nested `Folder` scoped through its space.
-- Optional `Database.folder_id`; existing databases remain at workspace root.
+- Workspace-level `Database` inventory independent of Space/Folder ownership.
+- `SpaceDatabasePlacement` as the many-to-many boundary between Space and
+  Database, with optional Folder/Layout, order, and per-Space display settings.
 - Workspace-isolated CRUD APIs and cross-workspace rejection tests.
 
 F3 introduced:
@@ -222,12 +236,14 @@ CM3 introduced:
 
 CM4 introduced:
 
-- Workspace-scoped Dashboards and query-bound Metric, Bar, and Table widgets.
+- Space-owned Dashboards, one required default Dashboard per Space, and
+  query-bound Metric, Bar, and Table widgets.
 - F4 `RowQuery` grouped aggregations, bounded to 100 groups for chart sources.
 - Dashboard CRUD, widget CRUD/data APIs, CM3 authorization, and automatic grant
   cleanup.
-- Dashboard list/designer UI with inline metadata editing, shared access,
-  database/field binding, and 30-second data refresh.
+- Dashboard designer rendered directly when its Space is opened, with inline
+  metadata editing, shared access, bindings restricted to Databases placed in
+  that Space, and 30-second data refresh.
 
 CM5 introduced:
 

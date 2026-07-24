@@ -13,17 +13,19 @@ from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.collaboration import router as collaboration_router
 from app.api.dashboards import router as dashboards_router
+from app.api.data_sources import router as data_sources_router
 from app.api.databases import router as databases_router
 from app.api.documents import router as documents_router
 from app.api.drive_files import router as drive_files_router
 from app.api.engine import router as engine_router
 from app.api.jobs import router as jobs_router
+from app.api.layouts import router as layouts_router
 from app.api.notifications import router as notifications_router
 from app.api.resource_grants import router as resource_grants_router
 from app.api.resources import router as resources_router
 from app.api.sites import router as sites_router
 from app.api.transfers import router as transfers_router
-from app.api.views import router as views_router
+from app.api.view_presets import router as view_presets_router
 from app.api.workspaces import router as workspaces_router
 
 
@@ -43,8 +45,22 @@ MODULES = (
     ),
     PlatformModule(
         "database",
-        (databases_router, engine_router, views_router),
-        ("databases", "fields", "rows", "views"),
+        (
+            databases_router,
+            engine_router,
+            layouts_router,
+            data_sources_router,
+            view_presets_router,
+        ),
+        (
+            "databases",
+            "database_favorites",
+            "fields",
+            "entities",
+            "layouts",
+            "data_sources",
+            "view_presets",
+        ),
     ),
     PlatformModule("documents", (documents_router,), ("documents",)),
     PlatformModule(

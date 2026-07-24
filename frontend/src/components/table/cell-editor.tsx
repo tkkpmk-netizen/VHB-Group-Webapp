@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,7 +15,8 @@ import {
   Star,
   Trash2,
   Upload,
-} from "lucide-react";
+  X,
+} from "@/components/ui/fa-icon";
 import { Dropdown, MultiDropdown } from "@/components/ui/dropdown";
 import { API_BASE_URL, apiFetch, getWorkspaceId } from "@/lib/api/client";
 import { getToken } from "@/lib/auth";
@@ -28,9 +29,10 @@ import {
   parsePhone,
 } from "@/lib/countries";
 import type { components } from "@/lib/api/schema";
+import { formatEntityId } from "@/lib/entity-id";
 
 type Field = components["schemas"]["FieldOut"];
-type RowT = components["schemas"]["RowOut"];
+type EntityT = components["schemas"]["EntityOut"];
 type Member = components["schemas"]["MemberOut"];
 
 /** Workspace members (deduped by React Query across all People/By cells). */
@@ -45,18 +47,17 @@ const memberLabel = (m: Member) => m.full_name || m.email;
 
 /** Relation option label: ID (dimmed) + name (bold). */
 function RelationLabel({
-  row,
+  entity,
   idField,
   titleField,
 }: {
-  row: RowT;
+  entity: EntityT;
   idField?: Field;
   titleField?: Field;
 }) {
-  const prefix = (idField?.options as { prefix?: string })?.prefix ?? "";
-  const id = idField ? `${prefix}${row.seq}` : `#${row.seq}`;
+  const id = formatEntityId(entity, idField);
   const nameVal = titleField
-    ? (row.data as Record<string, unknown>)[titleField.id]
+    ? (entity.data as Record<string, unknown>)[titleField.id]
     : "";
   const name = typeof nameVal === "string" && nameVal ? nameVal : "Untitled";
   return (
@@ -113,14 +114,23 @@ const SELECT_LIKE = new Set(["select", "status", "priority"]);
 const TEXT_TYPES = new Set(["text", "long_text", "email", "url"]);
 
 const inputCls =
-  "w-full select-text rounded bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-accent/40";
+  "vhb-cell-input w-full select-text rounded-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none ring-0 focus:bg-transparent focus:outline-none focus:ring-0";
 /** Cell display classes; wraps text instead of truncating when the field opts in. */
 const displayCls = (field?: Field) =>
-  `min-h-[34px] cursor-text px-2 py-1.5 text-sm ${
+  `vhb-cell-display flex min-h-[34px] cursor-text items-center px-2 py-1.5 text-sm ${
     (field?.options as { wrap?: boolean } | undefined)?.wrap
       ? "whitespace-pre-wrap break-words"
       : "truncate"
-  }`;
+  } ${cellAlignment(field)}`;
+const cellAlignment = (field?: Field) => {
+  const selected = (field?.options as { alignment?: string } | undefined)?.alignment;
+  if (selected === "center") return "justify-center text-center";
+  if (selected === "right") return "justify-end text-right";
+  if (selected === "left") return "justify-start text-left";
+  return ["number", "rating", "progress", "unique_id"].includes(field?.type ?? "")
+    ? "justify-end text-right"
+    : "justify-start text-left";
+};
 const isWrap = (field?: Field) =>
   !!(field?.options as { wrap?: boolean } | undefined)?.wrap;
 const dash = <span className="text-muted-foreground">—</span>;
@@ -129,9 +139,9 @@ type CellProps = {
   field: Field;
   value: unknown;
   onCommit: (value: unknown) => void;
-  /** Files & media need the owning database/row for upload/delete/preview routes. */
+  /** Files & media need the owning database/entity for upload/delete/preview routes. */
   databaseId?: string;
-  rowId?: string;
+  entityId?: string;
   /** When the cell is double-click-activated, text/number/phone open their input. */
   autoEdit?: boolean;
   /** Called after a keyboard/mouse editing session ends. */
@@ -454,7 +464,8 @@ const chipLabel = (s: string) => {
 function DateCell({ field, value, onCommit, autoEdit }: CellProps) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(autoEdit ?? false);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
   const init = parseDateValue(value);
   const [start, setStart] = useState(init.start);
   const [end, setEnd] = useState<string | null>(init.end);
@@ -484,7 +495,15 @@ function DateCell({ field, value, onCommit, autoEdit }: CellProps) {
     setOpen(true);
   }
 
-  /** Build the ISO value (date or date+time) and push to the row. */
+  // autoEdit opens the picker on first render. Wait for its trigger to exist
+  // before positioning it so the first open cannot flash at viewport (0, 0).
+  useLayoutEffect(() => {
+    if (!open || pos || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPos({ x: rect.left, y: rect.bottom + 4 });
+  }, [open, pos]);
+
+  /** Build the ISO value (date or date+time) and push to the entity. */
   function emit(ns: string, ne: string | null, t: boolean, hasEnd: boolean) {
     const fix = (s: string, time: string) =>
       !s ? "" : t ? `${datePart(s)}T${time || timePart(s) || "00:00"}` : datePart(s);
@@ -548,20 +567,20 @@ function DateCell({ field, value, onCommit, autoEdit }: CellProps) {
 
   return (
     <>
-      <div onClick={openEditor} className={`${displayCls(field)} cursor-pointer`}>
+      <div ref={triggerRef} onClick={openEditor} className={`${displayCls(field)} cursor-pointer`}>
         {norm.start
           ? formatOne(field, norm.start) +
             (norm.end ? ` → ${formatOne(field, norm.end)}` : "")
           : dash}
       </div>
-      {open &&
+      {open && pos &&
         createPortal(
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
             <div
               className="fixed z-50 w-[300px] rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg"
               style={{
-                top: pos.y,
+                top: Math.min(pos.y, typeof window !== "undefined" ? window.innerHeight - 520 : pos.y),
                 left:
                   typeof window !== "undefined"
                     ? Math.min(pos.x, window.innerWidth - 316)
@@ -845,18 +864,32 @@ function CountryCell({ field, value, onCommit, autoEdit }: CellProps) {
         options={COUNTRY_OPTIONS}
         onChange={onCommit}
         autoOpen={autoEdit}
+        searchable
+        searchPlaceholder="Search countries…"
         wrap={isWrap(field)}
       />
     </div>
   );
 }
 
-function RelationCell({ field, value, onCommit, autoEdit }: CellProps) {
-  const targetDb = (field.options as { target_database_id?: string })
-    ?.target_database_id;
-  const rowsQ = useQuery<RowT[]>({
-    queryKey: ["rows", targetDb],
-    queryFn: () => apiFetch<RowT[]>(`/databases/${targetDb}/rows`),
+function RelationCell({
+  field,
+  value,
+  onCommit,
+  autoEdit,
+  entityId,
+}: CellProps) {
+  const relationOptions = field.options as {
+    target_database_id?: string;
+    sub_item?: boolean;
+    mirror?: boolean;
+  };
+  const targetDb = relationOptions.target_database_id;
+  const isSingleParent =
+    relationOptions.sub_item === true && relationOptions.mirror === true;
+  const entitiesQ = useQuery<EntityT[]>({
+    queryKey: ["entities", targetDb],
+    queryFn: () => apiFetch<EntityT[]>(`/databases/${targetDb}/entities`),
     enabled: !!targetDb,
   });
   const fieldsQ = useQuery<Field[]>({
@@ -869,18 +902,42 @@ function RelationCell({ field, value, onCommit, autoEdit }: CellProps) {
   const titleField = tFields.find((f) =>
     ["text", "long_text"].includes(f.type),
   );
-  const options = (rowsQ.data ?? []).map((r) => ({
-    value: r.id,
-    label: <RelationLabel row={r} idField={idField} titleField={titleField} />,
-  }));
+  const options = (entitiesQ.data ?? [])
+    .filter((entity) => entity.id !== entityId)
+    .map((r) => ({
+      value: r.id,
+      label: <RelationLabel entity={r} idField={idField} titleField={titleField} />,
+      searchText: `${r.uid} ${r.seq} ${r.name} ${
+        titleField ? String((r.data as Record<string, unknown>)[titleField.id] ?? "") : ""
+      }`,
+    }));
+  if (isSingleParent) {
+    const selected = Array.isArray(value) ? value[0] : null;
+    return (
+      <div className="py-0.5">
+        <Dropdown
+          value={typeof selected === "string" ? selected : null}
+          options={options}
+          onChange={(next) => onCommit(next ? [next] : [])}
+          placeholder="Select parent"
+          autoOpen={autoEdit}
+          searchable
+          searchPlaceholder="Search parent entities…"
+          wrap={isWrap(field)}
+        />
+      </div>
+    );
+  }
   return (
     <div className="py-0.5">
       <MultiDropdown
         values={Array.isArray(value) ? (value as string[]) : []}
         options={options}
         onChange={onCommit}
-        placeholder="Link rows"
+        placeholder="Link entities"
         autoOpen={autoEdit}
+        searchable
+        searchPlaceholder="Search related entities…"
         wrap={isWrap(field)}
       />
     </div>
@@ -905,6 +962,8 @@ function SelectCell({ field, value, onCommit, autoEdit }: CellProps) {
         options={choiceOptions(field)}
         onChange={onCommit}
         autoOpen={autoEdit}
+        searchable
+        searchPlaceholder="Search options…"
         wrap={isWrap(field)}
       />
     </div>
@@ -919,6 +978,8 @@ function MultiCell({ field, value, onCommit, autoEdit }: CellProps) {
         options={choiceOptions(field)}
         onChange={onCommit}
         autoOpen={autoEdit}
+        searchable
+        searchPlaceholder="Search options…"
         wrap={isWrap(field)}
       />
     </div>
@@ -1029,7 +1090,7 @@ function ProgressCell({ value, onCommit, autoEdit, onFinish }: CellProps) {
   );
 }
 
-function FilesCell({ field, value, databaseId, rowId, onFinish }: CellProps) {
+function FilesCell({ field, value, databaseId, entityId, onFinish }: CellProps) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const files = fileRefs(value);
@@ -1039,7 +1100,7 @@ function FilesCell({ field, value, databaseId, rowId, onFinish }: CellProps) {
     loading: boolean;
     error?: string;
   } | null>(null);
-  const canWrite = !!databaseId && !!rowId;
+  const canWrite = !!databaseId && !!entityId;
 
   useEffect(
     () => () => {
@@ -1048,24 +1109,24 @@ function FilesCell({ field, value, databaseId, rowId, onFinish }: CellProps) {
     [preview?.url],
   );
 
-  const refreshRows = () => {
+  const refreshEntities = () => {
     if (!databaseId) return;
-    qc.invalidateQueries({ queryKey: ["rows", databaseId] });
-    qc.invalidateQueries({ queryKey: ["rows-search", databaseId] });
+    qc.invalidateQueries({ queryKey: ["entities", databaseId] });
+    qc.invalidateQueries({ queryKey: ["entities-search", databaseId] });
   };
 
   const upload = useMutation({
     mutationFn: (selected: FileList) => {
-      if (!databaseId || !rowId) throw new Error("Missing row context");
+      if (!databaseId || !entityId) throw new Error("Missing entity context");
       const body = new FormData();
       Array.from(selected).forEach((file) => body.append("files", file));
       return apiFetch<unknown[]>(
-        `/databases/${databaseId}/rows/${rowId}/fields/${field.id}/files`,
+        `/databases/${databaseId}/entities/${entityId}/fields/${field.id}/files`,
         { method: "POST", body },
       );
     },
     onSuccess: () => {
-      refreshRows();
+      refreshEntities();
       onFinish?.();
     },
   });
@@ -1078,7 +1139,7 @@ function FilesCell({ field, value, databaseId, rowId, onFinish }: CellProps) {
       });
     },
     onSuccess: () => {
-      refreshRows();
+      refreshEntities();
       onFinish?.();
     },
   });
@@ -1219,10 +1280,11 @@ function FilesCell({ field, value, databaseId, rowId, onFinish }: CellProps) {
                 )}
                 <button
                   type="button"
+                  aria-label="Close file preview"
                   onClick={closePreview}
-                  className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
-                  ✕
+                  <X className="size-4" />
                 </button>
               </div>
               <div className="min-h-[320px] flex-1 overflow-auto bg-muted/30 p-4">
@@ -1279,7 +1341,7 @@ export function CellEditor({
   value,
   onCommit,
   databaseId,
-  rowId,
+  entityId,
   autoEdit,
   onFinish,
 }: CellProps) {
@@ -1289,7 +1351,7 @@ export function CellEditor({
         type="checkbox"
         checked={value === true}
         onChange={(e) => onCommit(e.target.checked)}
-        className="ml-2 size-4 accent-[var(--color-primary)]"
+        className="vhb-cell-checkbox ml-1.5 size-4 accent-[var(--color-primary)]"
       />
     );
   }
@@ -1333,7 +1395,13 @@ export function CellEditor({
     );
   if (field.type === "relation")
     return (
-      <RelationCell field={field} value={value} onCommit={onCommit} autoEdit={autoEdit} />
+      <RelationCell
+        field={field}
+        value={value}
+        onCommit={onCommit}
+        autoEdit={autoEdit}
+        entityId={entityId}
+      />
     );
   if (field.type === "files")
     return (
@@ -1342,7 +1410,7 @@ export function CellEditor({
         value={value}
         onCommit={onCommit}
         databaseId={databaseId}
-        rowId={rowId}
+        entityId={entityId}
         onFinish={onFinish}
       />
     );

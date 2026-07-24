@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch } from "@/lib/api/client";
-import { setToken } from "@/lib/auth";
+import { apiFetch, clearWorkspaceSelection } from "@/lib/api/client";
+import { clearToken, setToken } from "@/lib/auth";
 import type { components } from "@/lib/api/schema";
 import { GoogleSignIn } from "@/components/auth/google-sign-in";
 
@@ -23,6 +23,10 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
+      // Do not carry an old JWT or a workspace from another session into a
+      // fresh sign-in. This is especially important after Redis is restarted.
+      clearToken();
+      clearWorkspaceSelection();
       const path = mode === "login" ? "/auth/login" : "/auth/signup";
       const body =
         mode === "login"
@@ -33,7 +37,7 @@ export default function LoginPage() {
         body: JSON.stringify(body),
       });
       setToken(res.access_token);
-      router.push("/");
+      router.replace("/");
     } catch {
       setError(
         mode === "login"
@@ -116,12 +120,14 @@ export default function LoginPage() {
           onCredential={async (credential) => {
             setError(null);
             try {
+              clearToken();
+              clearWorkspaceSelection();
               const result = await apiFetch<TokenResponse>("/auth/google", {
                 method: "POST",
                 body: JSON.stringify({ credential }),
               });
               setToken(result.access_token);
-              router.push("/");
+              router.replace("/");
             } catch {
               setError(
                 "Không thể đăng nhập Google. Nếu email đã tồn tại, hãy đăng nhập bằng mật khẩu rồi liên kết trong Settings.",

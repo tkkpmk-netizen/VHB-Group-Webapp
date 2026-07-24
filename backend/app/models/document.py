@@ -20,9 +20,13 @@ class Document(Base, TimestampMixin):
     folder_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    source_entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("entities.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_by_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     updated_by_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     title: Mapped[str] = mapped_column(String(255), default="Untitled")
-    icon: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    icon_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
     content: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)

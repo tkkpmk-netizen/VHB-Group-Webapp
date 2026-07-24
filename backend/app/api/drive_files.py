@@ -16,7 +16,7 @@ from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
 from app.models.database import Database
 from app.models.drive_file import DriveFile
-from app.models.field import Field, FieldType, Row
+from app.models.field import Entity, Field, FieldType
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.drive_file import DriveFileOut, DriveStatusOut
@@ -65,13 +65,13 @@ async def drive_status(
 
 
 @router.post(
-    "/databases/{database_id}/rows/{row_id}/fields/{field_id}/files",
+    "/databases/{database_id}/entities/{entity_id}/fields/{field_id}/files",
     response_model=list[DriveFileOut],
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_drive_files(
     database_id: uuid.UUID,
-    row_id: uuid.UUID,
+    entity_id: uuid.UUID,
     field_id: uuid.UUID,
     files: list[UploadFile] = File(...),
     workspace: Workspace = Depends(get_current_workspace),
@@ -87,18 +87,18 @@ async def upload_drive_files(
     if not files or len(files) > 20:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Upload 1 to 20 files")
     database = await db.get(Database, database_id)
-    row = await db.get(Row, row_id)
+    entity = await db.get(Entity, entity_id)
     field = await db.get(Field, field_id)
     if (
         database is None
         or database.workspace_id != workspace.id
-        or row is None
-        or row.database_id != database.id
+        or entity is None
+        or entity.database_id != database.id
         or field is None
         or field.database_id != database.id
         or field.type is not FieldType.files
     ):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Files field or row not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Files field or entity not found")
     await require_database_action(
         db,
         database_id=database.id,
@@ -135,7 +135,7 @@ async def upload_drive_files(
             item = DriveFile(
                 workspace_id=workspace.id,
                 database_id=database.id,
-                row_id=row.id,
+                entity_id=entity.id,
                 field_id=field.id,
                 created_by_id=current_user.id,
                 google_file_id=stored.external_id,
@@ -146,7 +146,7 @@ async def upload_drive_files(
             db.add(item)
             await db.flush()
             created.append(item)
-        existing = row.data.get(str(field.id))
+        existing = entity.data.get(str(field.id))
         refs = list(existing) if isinstance(existing, list) else []
         refs.extend(
             {
@@ -157,7 +157,7 @@ async def upload_drive_files(
             }
             for item in created
         )
-        row.data = {**row.data, str(field.id): refs}
+        entity.data = {**entity.data, str(field.id): refs}
         await db.commit()
         for item in created:
             await db.refresh(item)
@@ -230,12 +230,12 @@ async def delete_drive_file(
         action=Action.write,
     )
     await storage.delete(drive_file.google_file_id)
-    row = await db.get(Row, drive_file.row_id)
-    if row is not None:
-        current = row.data.get(str(drive_file.field_id))
+    entity = await db.get(Entity, drive_file.entity_id)
+    if entity is not None:
+        current = entity.data.get(str(drive_file.field_id))
         refs = list(current) if isinstance(current, list) else []
-        row.data = {
-            **row.data,
+        entity.data = {
+            **entity.data,
             str(drive_file.field_id): [
                 ref for ref in refs if str(ref.get("id")) != str(drive_file.id)
             ],

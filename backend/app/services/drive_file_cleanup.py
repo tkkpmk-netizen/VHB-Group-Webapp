@@ -13,14 +13,14 @@ async def cleanup_drive_files(
     db: AsyncSession,
     *,
     database_id: uuid.UUID | None = None,
-    row_id: uuid.UUID | None = None,
+    entity_id: uuid.UUID | None = None,
     field_id: uuid.UUID | None = None,
 ) -> None:
     query = select(DriveFile)
     if database_id is not None:
         query = query.where(DriveFile.database_id == database_id)
-    if row_id is not None:
-        query = query.where(DriveFile.row_id == row_id)
+    if entity_id is not None:
+        query = query.where(DriveFile.entity_id == entity_id)
     if field_id is not None:
         query = query.where(DriveFile.field_id == field_id)
     files = list((await db.execute(query)).scalars())

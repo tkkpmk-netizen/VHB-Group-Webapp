@@ -10,7 +10,7 @@ import {
   Save,
   Smartphone,
   Tablet,
-} from "lucide-react";
+} from "@/components/ui/fa-icon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultDesignerContent,

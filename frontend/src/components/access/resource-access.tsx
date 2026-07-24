@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, RotateCcw, Search, Share2, X } from "lucide-react";
+import { Check, ChevronDown, RotateCcw, Search, Share2, X } from "@/components/ui/fa-icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { apiFetch, getWorkspaceId } from "@/lib/api/client";
@@ -22,10 +22,12 @@ export function ResourceAccess({
   resourceType,
   resourceId,
   resourceLabel,
+  compact = false,
 }: {
   resourceType: ResourceType;
   resourceId: string;
   resourceLabel: string;
+  compact?: boolean;
 }) {
   const queryClient = useQueryClient();
   const workspaceId = getWorkspaceId();
@@ -92,10 +94,16 @@ export function ResourceAccess({
     <>
       <button
         type="button"
+        aria-label={`Share ${resourceLabel}`}
+        title={`Share ${resourceLabel}`}
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+        className={
+          compact
+            ? "flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            : "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+        }
       >
-        <Share2 className="size-3.5" /> Share
+        <Share2 className="size-3.5" /> {!compact && "Share"}
       </button>
       {open && (
         <div

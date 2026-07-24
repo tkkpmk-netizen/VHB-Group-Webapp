@@ -1,6 +1,6 @@
 "use client";
 
-import { Link2, Mail, Unlink } from "lucide-react";
+import { Link2, Mail, Unlink } from "@/components/ui/fa-icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/app-shell";
 import { GoogleSignIn } from "@/components/auth/google-sign-in";

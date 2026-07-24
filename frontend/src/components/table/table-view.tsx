@@ -1,6 +1,13 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   useInfiniteQuery,
@@ -16,20 +23,29 @@ import {
   GripVertical,
   Plus,
   Trash2,
-} from "lucide-react";
+} from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import { ColumnMenu } from "@/components/table/column-menu";
 import { Dropdown } from "@/components/ui/dropdown";
+import { FaIcon } from "@/components/ui/fa-icon";
+import { IconPicker } from "@/components/ui/icon-picker";
 import { countryByCode, parsePhone } from "@/lib/countries";
-import { applyFilterTree, applySorts, groupRows } from "@/lib/view";
+import { applyFilterTree, applySorts, groupEntities } from "@/lib/view";
 import type { SharedViewProps } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
+import { formatEntityId } from "@/lib/entity-id";
+import { mergeUniqueById } from "@/lib/entity-tree";
 import { ViewQueryState } from "@/components/table/view-query-state";
+import { defaultIconForFieldType, iconForField } from "@/lib/icon-system";
+import {
+  calculationForField,
+  calculationOptions,
+} from "@/lib/calculations";
 
 type Field = components["schemas"]["FieldOut"];
-type Row = components["schemas"]["RowOut"];
-type RowPage = components["schemas"]["RowPage"];
+type Entity = components["schemas"]["EntityOut"];
+type EntityPage = components["schemas"]["EntityPage"];
 type Db = components["schemas"]["DatabaseOut"];
 
 const FIELD_TYPES: { value: string; label: string; choices: boolean }[] = [
@@ -59,115 +75,19 @@ const FIELD_TYPES: { value: string; label: string; choices: boolean }[] = [
   { value: "rating", label: "Rating (1-5)", choices: false },
 ];
 
-const NUM_TYPES = new Set(["number", "rating"]);
-
-function calcOptions(type: string) {
-  const base = [
-    { value: "", label: "None" },
-    { value: "count", label: "Count all" },
-    { value: "filled", label: "Filled" },
-    { value: "empty", label: "Empty" },
-    { value: "unique", label: "Unique" },
-    { value: "percent_filled", label: "% Filled" },
-  ];
-  if (NUM_TYPES.has(type))
-    return [
-      ...base,
-      { value: "sum", label: "Sum" },
-      { value: "avg", label: "Average" },
-      { value: "min", label: "Min" },
-      { value: "max", label: "Max" },
-    ];
-  return base;
+function formatCalculation(value: unknown, operation: string): string {
+  if (value === null || value === undefined) return "—";
+  if (operation === "percent_filled") return `${Math.round(Number(value))}%`;
+  if (typeof value === "number")
+    return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return String(value);
 }
 
-function isEmptyVal(v: unknown): boolean {
-  return v == null || v === "" || (Array.isArray(v) && v.length === 0);
-}
-
-function computeCalc(field: Field, rows: Row[], op: string): string {
-  if (!op) return "";
-  const vals = rows.map((r) => (r.data as Record<string, unknown>)[field.id]);
-  const filled = vals.filter((v) => !isEmptyVal(v));
-  if (op === "count") return String(rows.length);
-  if (op === "filled") return String(filled.length);
-  if (op === "empty") return String(rows.length - filled.length);
-  if (op === "unique")
-    return String(new Set(filled.map((v) => JSON.stringify(v))).size);
-  if (op === "percent_filled")
-    return rows.length
-      ? `${Math.round((filled.length / rows.length) * 100)}%`
-      : "0%";
-  const nums = filled
-    .map((v) => Number(v))
-    .filter((n) => !Number.isNaN(n));
-  if (nums.length === 0) return "—";
-  if (op === "sum") return nums.reduce((a, b) => a + b, 0).toLocaleString("en-US");
-  if (op === "avg")
-    return (nums.reduce((a, b) => a + b, 0) / nums.length).toLocaleString("en-US", {
-      maximumFractionDigits: 2,
-    });
-  if (op === "min") return String(Math.min(...nums));
-  if (op === "max") return String(Math.max(...nums));
-  return "";
-}
-
-/** "Bulk" control next to New: enter a count (≤100) to add that many rows. */
-function BulkAddRows({
-  onAdd,
-  disabled,
-}: {
-  onAdd: (n: number) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [n, setN] = useState(10);
-  if (!open)
-    return (
-      <button
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-        title="Add multiple rows"
-        className="flex items-center gap-1 rounded-md border px-2 py-1 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
-      >
-        <ChevronDown className="size-3.5" /> Bulk
-      </button>
-    );
-  return (
-    <span className="flex items-center gap-1">
-      <input
-        type="number"
-        min={1}
-        max={100}
-        value={n}
-        autoFocus
-        onChange={(e) => setN(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            onAdd(n);
-            setOpen(false);
-          }
-          if (e.key === "Escape") setOpen(false);
-        }}
-        className="w-16 rounded-md border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
-      />
-      <button
-        onClick={() => {
-          onAdd(n);
-          setOpen(false);
-        }}
-        className="rounded-md bg-primary px-2 py-1 text-sm font-medium text-primary-foreground hover:opacity-90"
-      >
-        Add
-      </button>
-      <button
-        onClick={() => setOpen(false)}
-        className="rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-muted"
-      >
-        ✕
-      </button>
-    </span>
-  );
+function cellAlignClass(field: Field) {
+  const alignment = (field.options as { alignment?: string }).alignment;
+  if (alignment === "center") return "justify-center";
+  if (alignment === "right") return "justify-end";
+  return "justify-start";
 }
 
 function slug(label: string, i: number): string {
@@ -221,13 +141,19 @@ export function TableView({
   setCalc,
   hidden,
   limit,
+  dataSourceId,
   search,
   filterToMatches,
   matchedIds,
   flashId,
+  openEntity,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
+  const [insertAt, setInsertAt] = useState<{ side: "left" | "right"; targetId: string } | null>(null);
+  const [newEntityOpen, setNewEntityOpen] = useState(false);
+  const [newEntityName, setNewEntityName] = useState("");
+  const [newEntityData, setNewEntityData] = useState<Record<string, unknown>>({});
   const [addAnchor, setAddAnchor] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -238,11 +164,12 @@ export function TableView({
   const [anchor, setAnchor] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragColId, setDragColId] = useState<string | null>(null);
-  const [dragRowId, setDragRowId] = useState<string | null>(null);
+  const [dragEntityId, setDragEntityId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editCell, setEditCell] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childShown, setChildShown] = useState<Record<string, number>>({}); // per-parent sub-item window
+  const autoExpandedParents = useRef<Set<string>>(new Set());
   const [resizing, setResizing] = useState<{
     fieldId: string;
     startX: number;
@@ -251,6 +178,7 @@ export function TableView({
   } | null>(null);
   const [fName, setFName] = useState("");
   const [fType, setFType] = useState("text");
+  const [fIcon, setFIcon] = useState(defaultIconForFieldType("text"));
   const [fOptions, setFOptions] = useState("");
   const [fFormat, setFFormat] = useState("integer");
   const [fCurrency, setFCurrency] = useState("VND");
@@ -267,29 +195,90 @@ export function TableView({
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
   const pageSize = Math.min(Math.max(limit, 1), 200);
-  const rowsQueryKey = ["rows", databaseId, "infinite", pageSize] as const;
-  const rowsQ = useInfiniteQuery<RowPage>({
-    queryKey: rowsQueryKey,
+  const fieldsById = new Map((fieldsQ.data ?? []).map((field) => [field.id, field]));
+  const requestedAggregations = Object.entries(calc).flatMap(
+    ([field_id, operation]) => {
+      const field = fieldsById.get(field_id);
+      const normalized = field
+        ? calculationForField(field.type, operation)
+        : null;
+      return normalized ? [{ field_id, function: normalized }] : [];
+    },
+  );
+  const calcSignature = JSON.stringify(requestedAggregations);
+  const entitiesQueryKey = [
+    "entities",
+    databaseId,
+    "infinite",
+    pageSize,
+    dataSourceId,
+    calcSignature,
+  ] as const;
+  const entitiesQ = useInfiniteQuery<EntityPage>({
+    queryKey: entitiesQueryKey,
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
-      apiFetch<RowPage>(`/databases/${databaseId}/rows/query`, {
+      apiFetch<EntityPage>(`/databases/${databaseId}/entities/query`, {
         method: "POST",
-        body: JSON.stringify({ page: pageParam, page_size: pageSize }),
+        body: JSON.stringify({
+          page: pageParam,
+          page_size: pageSize,
+          filters: dataSourceId
+            ? [{ field_id: "data_source_id", operator: "eq", value: dataSourceId }]
+            : [],
+          aggregations: requestedAggregations,
+        }),
       }),
     getNextPageParam: (lastPage) =>
       lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined,
   });
-  const rowItems = useMemo(
-    () => rowsQ.data?.pages.flatMap((page) => page.items) ?? [],
-    [rowsQ.data?.pages],
+  const entityItems = useMemo(
+    () =>
+      mergeUniqueById(
+        ...(entitiesQ.data?.pages.map((page) => page.items) ?? []),
+      ),
+    [entitiesQ.data?.pages],
   );
-  const totalRows = rowsQ.data?.pages[0]?.total ?? 0;
+  const subOwnerField = (fieldsQ.data ?? []).find(
+    (field) =>
+      (field.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
+      !(field.options as { mirror?: boolean })?.mirror,
+  );
+  const subParentField = (fieldsQ.data ?? []).find(
+    (field) =>
+      (field.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
+      (field.options as { mirror?: boolean })?.mirror,
+  );
+  const loadedEntityIds = useMemo(
+    () => entityItems.map((entity) => entity.id),
+    [entityItems],
+  );
+  const subItemTreeQ = useQuery<Entity[]>({
+    queryKey: [
+      "entities",
+      databaseId,
+      "sub-item-tree",
+      subOwnerField?.id,
+      loadedEntityIds,
+    ],
+    queryFn: () =>
+      apiFetch<Entity[]>(
+        `/databases/${databaseId}/entities/sub-item-tree`,
+        {
+          method: "POST",
+          body: JSON.stringify({ entity_ids: loadedEntityIds }),
+        },
+      ),
+    enabled:
+      Boolean(subOwnerField && subParentField) && loadedEntityIds.length > 0,
+  });
+  const totalEntities = entitiesQ.data?.pages[0]?.total ?? 0;
 
-  function updateCachedRows(
-    transform: (rows: Row[]) => Row[],
+  function updateCachedEntities(
+    transform: (entities: Entity[]) => Entity[],
     totalDelta = 0,
   ) {
-    qc.setQueryData<InfiniteData<RowPage>>(rowsQueryKey, (current) => {
+    qc.setQueryData<InfiniteData<EntityPage>>(entitiesQueryKey, (current) => {
       if (!current) return current;
       return {
         ...current,
@@ -306,9 +295,18 @@ export function TableView({
     });
   }
 
+  function updateCachedSubItemTrees(
+    transform: (entities: Entity[]) => Entity[],
+  ) {
+    qc.setQueriesData<Entity[]>(
+      { queryKey: ["entities", databaseId, "sub-item-tree"] },
+      (current) => (current ? transform(current) : current),
+    );
+  }
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["fields", databaseId] });
-    qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+    qc.invalidateQueries({ queryKey: ["entities", databaseId] });
   };
 
   const addField = useMutation({
@@ -319,13 +317,24 @@ export function TableView({
           : buildOptions(fType, fOptions, fFormat, fCurrency);
       return apiFetch<Field>(`/databases/${databaseId}/fields`, {
         method: "POST",
-        body: JSON.stringify({ name: fName.trim(), type: fType, options }),
+        body: JSON.stringify({ name: fName.trim(), type: fType, icon: fIcon, options }),
       });
     },
-    onSuccess: () => {
+    onSuccess: async (created) => {
+      if (insertAt) {
+        const ids = (fieldsQ.data ?? []).map((field) => field.id).filter((id) => id !== created.id);
+        const targetIndex = ids.indexOf(insertAt.targetId);
+        ids.splice(insertAt.side === "left" ? targetIndex : targetIndex + 1, 0, created.id);
+        await apiFetch<void>(`/databases/${databaseId}/fields/reorder`, {
+          method: "POST",
+          body: JSON.stringify({ ids }),
+        });
+      }
       setAdding(false);
+      setInsertAt(null);
       setFName("");
       setFType("text");
+      setFIcon(defaultIconForFieldType("text"));
       setFOptions("");
       setFFormat("integer");
       setFCurrency("VND");
@@ -335,17 +344,20 @@ export function TableView({
     },
   });
 
-  const addRow = useMutation({
-    mutationFn: () =>
-      apiFetch<Row>(`/databases/${databaseId}/rows`, {
+  const addEntity = useMutation({
+    mutationFn: ({ name, data }: { name: string; data: Record<string, unknown> }) =>
+      apiFetch<Entity>(`/databases/${databaseId}/entities`, {
         method: "POST",
-        body: JSON.stringify({ data: {} }),
+        body: JSON.stringify({ name, data }),
       }),
     onSuccess: (created) => {
       const title = (fieldsQ.data ?? []).find((f) =>
         ["text", "long_text"].includes(f.type),
       );
       if (title) setEditCell(`${created.id}:${title.id}`);
+      setNewEntityName("");
+      setNewEntityData({});
+      setNewEntityOpen(false);
       invalidate();
     },
   });
@@ -363,80 +375,96 @@ export function TableView({
       )
         return;
       e.preventDefault();
-      addRow.mutate();
+      setNewEntityOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const bulkAdd = useMutation({
-    mutationFn: (count: number) =>
-      apiFetch<Row[]>(`/databases/${databaseId}/rows/bulk`, {
-        method: "POST",
-        body: JSON.stringify({ count }),
-      }),
-    onSuccess: invalidate,
+  useEffect(() => {
+    const onInsert = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetId?: string; side?: "left" | "right" }>).detail;
+      if (!detail?.targetId || !detail.side) return;
+      insertField(detail.side, detail.targetId);
+    };
+    window.addEventListener("vhb:insert-field", onInsert);
+    return () => window.removeEventListener("vhb:insert-field", onInsert);
   });
 
-  const deleteRow = useMutation({
+  const deleteEntity = useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/rows/${id}`, { method: "DELETE" }),
+      apiFetch<void>(`/entities/${id}`, { method: "DELETE" }),
     onSuccess: (_, id) => {
-      updateCachedRows((rows) => rows.filter((row) => row.id !== id), -1);
-      qc.invalidateQueries({ queryKey: ["rows-search", databaseId] });
+      updateCachedEntities((entities) => entities.filter((entity) => entity.id !== id), -1);
+      updateCachedSubItemTrees((entities) =>
+        entities.filter((entity) => entity.id !== id),
+      );
+      qc.invalidateQueries({
+        queryKey: ["entities", databaseId, "sub-item-tree"],
+      });
+      qc.invalidateQueries({ queryKey: ["entities-search", databaseId] });
     },
   });
 
   const updateCell = useMutation({
-    mutationFn: ({ rowId, data }: { rowId: string; data: Record<string, unknown> }) =>
-      apiFetch<Row>(`/rows/${rowId}`, {
+    mutationFn: ({
+      entityId,
+      data,
+    }: {
+      entityId: string;
+      data: Record<string, unknown>;
+      relation: boolean;
+    }) =>
+      apiFetch<Entity>(`/entities/${entityId}`, {
         method: "PATCH",
         body: JSON.stringify({ data }),
       }),
-    onSuccess: (updated) => {
-      updateCachedRows((rows) =>
-        rows.map((row) => (row.id === updated.id ? updated : row)),
+    onSuccess: (updated, variables) => {
+      updateCachedEntities((entities) =>
+        entities.map((entity) => (entity.id === updated.id ? updated : entity)),
       );
-      qc.invalidateQueries({ queryKey: ["rows-search", databaseId] });
+      updateCachedSubItemTrees((entities) =>
+        entities.map((entity) => (entity.id === updated.id ? updated : entity)),
+      );
+      if (variables.relation) {
+        qc.invalidateQueries({ queryKey: ["entities", databaseId] });
+      }
+      qc.invalidateQueries({ queryKey: ["entities-search", databaseId] });
     },
   });
 
   const bulkDelete = useMutation({
     mutationFn: async (ids: string[]) => {
       await Promise.all(
-        ids.map((id) => apiFetch<void>(`/rows/${id}`, { method: "DELETE" })),
+        ids.map((id) => apiFetch<void>(`/entities/${id}`, { method: "DELETE" })),
       );
     },
-    onSuccess: () => {
+    onSuccess: (_, ids) => {
       setSelected(new Set());
-      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+      const deletedIds = new Set(ids);
+      updateCachedSubItemTrees((entities) =>
+        entities.filter((entity) => !deletedIds.has(entity.id)),
+      );
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
     },
   });
 
-  const duplicateRows = useMutation({
+  const duplicateEntities = useMutation({
     mutationFn: async (ids: string[]) => {
-      const byId = new Map(rowItems.map((r) => [r.id, r.data]));
+      const byId = new Map(entityItems.map((r) => [r.id, r]));
       for (const id of ids) {
-        await apiFetch<Row>(`/databases/${databaseId}/rows`, {
+        const source = byId.get(id);
+        await apiFetch<Entity>(`/databases/${databaseId}/entities`, {
           method: "POST",
-          body: JSON.stringify({ data: byId.get(id) ?? {} }),
+          body: JSON.stringify({ name: source?.name ?? "Untitled", data: source?.data ?? {} }),
         });
       }
     },
     onSuccess: () => {
       setSelected(new Set());
-      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
     },
   });
-
-  function toggleRow(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   const updateWidth = useMutation({
     mutationFn: ({ field, width }: { field: Field; width: number }) =>
@@ -486,40 +514,78 @@ export function TableView({
   function frozenStyle(colIdx: number): React.CSSProperties | undefined {
     if (colIdx > frozenUpTo) return undefined;
     const list = (fieldsQ.data ?? []).filter((f) => !hidden.has(f.id));
-    let left = 40; // checkbox column width
+    let left = 54; // 22 px row-action gutter + 32 px checkbox column
     for (let i = 0; i < colIdx; i++) left += colWidth(list[i]);
     return {
       position: "sticky",
       left,
-      zIndex: 2,
-      background: "var(--color-card)",
+      // With border-separate each sticky cell is a reliable opaque layer.
+      // Keep it above ordinary cells and their local editor overlays.
+      zIndex: 10,
+      ...(colIdx === frozenUpTo
+        ? {
+            // An inset divider remains painted by the sticky cell while the
+            // scrollable content moves underneath it.
+            boxShadow:
+              "inset -2px 0 0 var(--control-border-strong), 5px 0 8px rgba(16, 36, 71, 0.08)",
+          }
+        : {}),
     };
   }
   const checkboxFrozen: React.CSSProperties | undefined =
     frozenUpTo >= 0
-      ? { position: "sticky", left: 0, zIndex: 3, background: "var(--color-card)" }
+      ? {
+          position: "sticky",
+          left: 22,
+          zIndex: 11,
+        }
       : undefined;
+  const rowGutterFrozen: React.CSSProperties = {
+    position: "sticky",
+    left: 0,
+    zIndex: 12,
+  };
 
-  function handleRowClick(idx: number, id: string, shift: boolean) {
-    const rs = rowItems;
-    if (shift && anchor !== null) {
+  function selectRowFromCheckbox(
+    idx: number,
+    id: string,
+    checked: boolean,
+    shift: boolean,
+    additive: boolean,
+  ) {
+    // Checkbox selection is a row-level mode: it clears the active cell/range
+    // and replaces an existing row selection unless the user explicitly uses
+    // Shift or Cmd/Ctrl.
+    setRange(null);
+    setEditCell(null);
+    const rs = entityItems;
+    if (checked && shift && anchor !== null) {
       const [lo, hi] = anchor <= idx ? [anchor, idx] : [idx, anchor];
       setSelected(new Set(rs.slice(lo, hi + 1).map((r) => r.id)));
       setCursor(idx);
+    } else if (additive) {
+      setSelected((current) => {
+        const next = new Set(current);
+        if (checked) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+      if (anchor === null) setAnchor(idx);
+      setCursor(idx);
     } else {
-      toggleRow(id);
+      setSelected(checked ? new Set([id]) : new Set());
       setAnchor(idx);
       setCursor(idx);
     }
   }
 
-  // Ctrl/Cmd+Shift+Down/Up extends row selection.
+  // Ctrl/Cmd+Shift+Down/Up extends entity selection.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.shiftKey)) return;
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       e.preventDefault();
-      const rs = rowItems;
+      const rs = entityItems;
       if (!rs.length) return;
       const a = anchor ?? 0;
       const cur = cursor ?? a;
@@ -534,7 +600,7 @@ export function TableView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [anchor, cursor, rowItems]);
+  }, [anchor, cursor, entityItems]);
 
   const reorderFields = useMutation({
     mutationFn: (ids: string[]) =>
@@ -545,30 +611,22 @@ export function TableView({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["fields", databaseId] }),
   });
 
-  const reorderRows = useMutation({
+  const reorderEntities = useMutation({
     mutationFn: (ids: string[]) =>
-      apiFetch<void>(`/databases/${databaseId}/rows/reorder`, {
+      apiFetch<void>(`/databases/${databaseId}/entities/reorder`, {
         method: "POST",
         body: JSON.stringify({ ids }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", databaseId] }),
   });
 
-  async function insertField(side: "left" | "right", targetId: string) {
-    const created = await apiFetch<Field>(`/databases/${databaseId}/fields`, {
-      method: "POST",
-      body: JSON.stringify({ name: "Untitled", type: "text", options: {} }),
-    });
-    const ids = (fieldsQ.data ?? [])
-      .map((f) => f.id)
-      .filter((id) => id !== created.id);
-    const tIdx = ids.indexOf(targetId);
-    ids.splice(side === "left" ? tIdx : tIdx + 1, 0, created.id);
-    await apiFetch<void>(`/databases/${databaseId}/fields/reorder`, {
-      method: "POST",
-      body: JSON.stringify({ ids }),
-    });
-    qc.invalidateQueries({ queryKey: ["fields", databaseId] });
+  function insertField(side: "left" | "right", targetId: string) {
+    setInsertAt({ side, targetId });
+    setFName("");
+    setFType("text");
+    setFIcon(defaultIconForFieldType("text"));
+    setAddAnchor({ x: menu?.x ?? 24, y: menu?.y ?? 96 });
+    setAdding(true);
   }
 
   function moveBefore(ids: string[], fromId: string, toId: string): string[] {
@@ -580,13 +638,16 @@ export function TableView({
   }
 
   const fields = fieldsQ.data ?? [];
-  const rows = rowItems;
+  const entities = useMemo(
+    () => mergeUniqueById(subItemTreeQ.data ?? [], entityItems),
+    [entityItems, subItemTreeQ.data],
+  );
   const choiceType = ["select", "multi_select"].includes(fType);
 
   // View tools: filter → sort → search → optional group.
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
   let visible = applySorts(
-    applyFilterTree(rows, byId, filterRoot),
+    applyFilterTree(entities, byId, filterRoot),
     byId,
     sorts,
   );
@@ -595,31 +656,58 @@ export function TableView({
     visible = visible.filter((r) => matchedIds.has(r.id));
   let groups =
     groupFieldId && byId[groupFieldId]
-      ? groupRows(visible, byId[groupFieldId])
+      ? groupEntities(visible, byId[groupFieldId])
       : null;
   if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
   const displayFields = fields.filter((f) => !hidden.has(f.id));
-  const calcFields = displayFields.filter((f) => calc[f.id]);
-  const subOwner = fields.find(
-    (f) =>
-      (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
-      !(f.options as { mirror?: boolean })?.mirror,
+  const requiredFields = displayFields.filter(
+    (field) =>
+      (field.options as { required?: boolean }).required === true &&
+      (field.options as { system_key?: string }).system_key !== "name" &&
+      !["unique_id", "rollup", "formula", "created_time", "created_by", "last_edited_time", "last_edited_by"].includes(field.type),
   );
-  const subParent = fields.find(
-    (f) =>
-      (f.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
-      (f.options as { mirror?: boolean })?.mirror,
+  const hasRequiredValues = requiredFields.every((field) => {
+    const value = newEntityData[field.id];
+    if (value === null || value === undefined || value === "") return false;
+    return !Array.isArray(value) || value.length > 0;
+  });
+  const nameFieldId = fields.find(
+    (field) => (field.options as { system_key?: string }).system_key === "name",
+  )?.id;
+  const calcFields = displayFields.filter((field) =>
+    calculationForField(field.type, calc[field.id]),
   );
+  const subOwner = subOwnerField;
+  const subParent = subParentField;
   // Hierarchy mode: when sub-items on and not grouping, show a parent→child tree.
   const treeMode = !!subOwner && !!subParent && !groups;
-  const rowById = new Map(visible.map((r) => [r.id, r]));
-  const childrenOf = (row: Row): Row[] => {
-    if (!subOwner) return [];
-    const ids = (row.data as Record<string, unknown>)[subOwner.id];
-    return Array.isArray(ids)
-      ? ids.map((id) => rowById.get(String(id))).filter((r): r is Row => !!r)
-      : [];
-  };
+  const entityById = useMemo(
+    () => new Map(visible.map((entity) => [entity.id, entity])),
+    [visible],
+  );
+  const childrenOf = useCallback(
+    (entity: Entity): Entity[] => {
+      if (!subOwner) return [];
+      const ids = (entity.data as Record<string, unknown>)[subOwner.id];
+      return Array.isArray(ids)
+        ? [...new Set(ids.map(String))]
+            .map((id) => entityById.get(id))
+            .filter((row): row is Entity => !!row)
+        : [];
+    },
+    [entityById, subOwner],
+  );
+  // Existing parent rows should reveal their hierarchy on first encounter.
+  // Remember them so an intentional user collapse remains respected.
+  useEffect(() => {
+    const newlyExpandable = visible
+      .filter((entity) => childrenOf(entity).length > 0)
+      .map((entity) => entity.id)
+      .filter((id) => !autoExpandedParents.current.has(id));
+    if (!newlyExpandable.length) return;
+    newlyExpandable.forEach((id) => autoExpandedParents.current.add(id));
+    setExpanded((current) => new Set([...current, ...newlyExpandable]));
+  }, [childrenOf, visible]);
   const topLevel = treeMode
     ? visible.filter((r) => {
         const p = (r.data as Record<string, unknown>)[subParent!.id];
@@ -627,37 +715,72 @@ export function TableView({
       })
     : visible;
 
-  async function addSubRow(parent: Row) {
+  async function addSubEntity(parent: Entity) {
     if (!subOwner) return;
-    const child = await apiFetch<Row>(`/databases/${databaseId}/rows`, {
+    const child = await apiFetch<Entity>(`/databases/${databaseId}/entities`, {
       method: "POST",
-      body: JSON.stringify({ data: {} }),
+      body: JSON.stringify({ name: "New sub-item", data: {} }),
     });
     const cur = ((parent.data as Record<string, unknown>)[subOwner.id] ??
       []) as string[];
-    await apiFetch<Row>(`/rows/${parent.id}`, {
+    const updatedParent = await apiFetch<Entity>(`/entities/${parent.id}`, {
       method: "PATCH",
       body: JSON.stringify({ data: { [subOwner.id]: [...cur, child.id] } }),
     });
     setExpanded((p) => new Set(p).add(parent.id));
-    qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+    // A newly-created child normally falls outside the current server page.
+    // Keep it in the active page immediately so hierarchy feedback is instant.
+    qc.setQueryData<InfiniteData<EntityPage>>(entitiesQueryKey, (current) => {
+      if (!current) return current;
+      const childWithParent: Entity = {
+        ...child,
+        data: {
+          ...child.data,
+          ...(subParent ? { [subParent.id]: [parent.id] } : {}),
+        },
+      };
+      return {
+        ...current,
+        pages: current.pages.map((page, pageIndex) => {
+          const total = page.total + 1;
+          return {
+            ...page,
+            total,
+            pages: Math.ceil(total / page.page_size),
+            items: [
+              ...page.items.map((item) =>
+                item.id === parent.id ? updatedParent : item,
+              ),
+              ...(pageIndex === 0 &&
+              !page.items.some((item) => item.id === child.id)
+                ? [childWithParent]
+                : []),
+            ],
+          };
+        }),
+      };
+    });
   }
 
-  // Commit a cell; setting a Country auto-fills phone dial codes in the row.
-  function commitCell(row: Row, field: Field, value: unknown) {
+  // Commit a cell; setting a Country auto-fills phone dial codes in the entity.
+  function commitCell(entity: Entity, field: Field, value: unknown) {
     const data: Record<string, unknown> = { [field.id]: value };
     if (field.type === "country" && typeof value === "string" && value) {
       const c = countryByCode(value);
       if (c) {
         for (const f of fields) {
           if (f.type !== "phone") continue;
-          const cur = (row.data as Record<string, unknown>)[f.id];
+          const cur = (entity.data as Record<string, unknown>)[f.id];
           const number = parsePhone(typeof cur === "string" ? cur : "").number;
           data[f.id] = `+${c.dial}${number ? " " + number : ""}`;
         }
       }
     }
-    updateCell.mutate({ rowId: row.id, data });
+    updateCell.mutate({
+      entityId: entity.id,
+      data,
+      relation: field.type === "relation",
+    });
   }
 
   // --- Excel-style cell range selection ---
@@ -685,12 +808,23 @@ export function TableView({
     return r >= r1 && r <= r2 && c >= c1 && c <= c2;
   }
 
-  function cellText(f: Field, row: Row): string {
+  function rangeEdges(r: number, c: number) {
+    if (!range || !inRange(r, c)) return null;
+    const [r1, r2] = [Math.min(range.r1, range.r2), Math.max(range.r1, range.r2)];
+    const [c1, c2] = [Math.min(range.c1, range.c2), Math.max(range.c1, range.c2)];
+    return {
+      top: r === r1,
+      right: c === c2,
+      bottom: r === r2,
+      left: c === c1,
+    };
+  }
+
+  function cellText(f: Field, entity: Entity): string {
     if (f.type === "unique_id") {
-      const prefix = (f.options as { prefix?: string })?.prefix ?? "";
-      return `${prefix}${row.seq}`;
+      return formatEntityId(entity, f);
     }
-    const v = (row.data as Record<string, unknown>)[f.id];
+    const v = (entity.data as Record<string, unknown>)[f.id];
     if (v === null || v === undefined) return "";
     if (f.type === "checkbox") return v === true ? "TRUE" : "";
     const choices =
@@ -725,7 +859,7 @@ export function TableView({
         return;
       }
       if (range) {
-        const row = range.r2;
+        const entity = range.r2;
         const col = range.c2;
         const move =
           e.key === "ArrowDown"
@@ -739,7 +873,7 @@ export function TableView({
                   : null;
         if (move) {
           e.preventDefault();
-          const nr = Math.max(0, Math.min(visible.length - 1, row + move[0]));
+          const nr = Math.max(0, Math.min(visible.length - 1, entity + move[0]));
           const nc = Math.max(
             0,
             Math.min(displayFields.length - 1, col + move[1]),
@@ -749,7 +883,7 @@ export function TableView({
           return;
         }
         if (e.key === "Enter") {
-          const r = visible[row];
+          const r = visible[entity];
           const f = displayFields[col];
           if (r && f && f.type !== "unique_id") {
             e.preventDefault();
@@ -762,7 +896,7 @@ export function TableView({
         const tag = document.activeElement?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
         e.preventDefault();
-        const rs = rowItems;
+        const rs = entityItems;
         const fs = fieldsQ.data ?? [];
         const [r1, r2] = [
           Math.min(range.r1, range.r2),
@@ -774,10 +908,10 @@ export function TableView({
         ];
         const tsv = rs
           .slice(r1, r2 + 1)
-          .map((row) =>
+          .map((entity) =>
             fs
               .slice(c1, c2 + 1)
-              .map((f) => cellText(f, row))
+              .map((f) => cellText(f, entity))
               .join("\t"),
           )
           .join("\n");
@@ -786,29 +920,29 @@ export function TableView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [range, rowItems, fieldsQ.data, visible, displayFields]);
+  }, [range, entityItems, fieldsQ.data, visible, displayFields]);
 
   function finishCell(
-    rowIdx: number,
+    entityIdx: number,
     colIdx: number,
     move?: "down" | "next" | "previous",
   ) {
     setEditCell(null);
     if (!move || visible.length === 0 || displayFields.length === 0) return;
-    let nr = rowIdx;
+    let nr = entityIdx;
     let nc = colIdx;
-    if (move === "down") nr = Math.min(visible.length - 1, rowIdx + 1);
+    if (move === "down") nr = Math.min(visible.length - 1, entityIdx + 1);
     else if (move === "next") {
       nc += 1;
       if (nc >= displayFields.length) {
         nc = 0;
-        nr = Math.min(visible.length - 1, rowIdx + 1);
+        nr = Math.min(visible.length - 1, entityIdx + 1);
       }
     } else {
       nc -= 1;
       if (nc < 0) {
         nc = displayFields.length - 1;
-        nr = Math.max(0, rowIdx - 1);
+        nr = Math.max(0, entityIdx - 1);
       }
     }
     setRange({ r1: nr, c1: nc, r2: nr, c2: nc });
@@ -823,60 +957,100 @@ export function TableView({
     });
   }
 
-  function renderRow(row: Row, idx: number, depth = 0) {
-    const kids = childrenOf(row);
-    const isOpen = expanded.has(row.id);
+  function renderEntity(entity: Entity, idx: number, depth = 0) {
+    const kids = childrenOf(entity);
+    const isOpen = expanded.has(entity.id);
+    const isRowSelected = selected.has(entity.id);
     return (
       <tr
-        key={row.id}
-        data-row-id={row.id}
-        onDragOver={(e) => dragRowId && e.preventDefault()}
+        key={entity.id}
+        data-entity-id={entity.id}
+        data-flash={flashId === entity.id || undefined}
+        data-search-match={
+          (searchActive && !filterToMatches && matchedIds?.has(entity.id)) ||
+          undefined
+        }
+        onDragOver={(event) => dragEntityId && event.preventDefault()}
         onDrop={() => {
-          if (dragRowId) {
-            reorderRows.mutate(
-              moveBefore(rows.map((r) => r.id), dragRowId, row.id),
-            );
-            setDragRowId(null);
-          }
+          if (!dragEntityId) return;
+          reorderEntities.mutate(
+            moveBefore(entities.map((row) => row.id), dragEntityId, entity.id),
+          );
+          setDragEntityId(null);
         }}
-        className={`group border-b last:border-0 transition-colors ${
-          flashId === row.id
+        className={`group h-[30px] ${
+          flashId === entity.id
             ? "bg-primary/20"
-            : searchActive && !filterToMatches && matchedIds?.has(row.id)
+            : searchActive && !filterToMatches && matchedIds?.has(entity.id)
               ? "bg-primary/5"
-              : selected.has(row.id)
-                ? "bg-accent/30"
+              : isRowSelected
+                ? "row-selected"
                 : ""
         }`}
       >
         <td
-          className="whitespace-nowrap bg-card px-2 text-center"
+          className="vhb-frozen-cell w-[22px] border-0 p-0 text-center align-middle"
+          style={rowGutterFrozen}
+        >
+          <button
+            type="button"
+            draggable
+            onDragStart={() => setDragEntityId(entity.id)}
+            onDragEnd={() => setDragEntityId(null)}
+            title="Drag to reorder row"
+            aria-label={`Reorder ${entity.name}`}
+            className="flex h-full w-full cursor-grab items-center justify-center text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing"
+          >
+            <GripVertical className="size-2.5" />
+          </button>
+        </td>
+        <td
+          className="vhb-frozen-cell whitespace-nowrap border-r border-border/70 p-0 text-center align-middle"
           style={checkboxFrozen}
         >
-          <span
-            draggable
-            onDragStart={() => setDragRowId(row.id)}
-            title="Drag to reorder row"
-            className="mr-1 inline-block cursor-grab text-muted-foreground opacity-0 group-hover:opacity-100 active:cursor-grabbing"
-          >
-            <GripVertical className="inline size-3.5" />
-          </span>
           <input
             type="checkbox"
-            checked={selected.has(row.id)}
+            checked={selected.has(entity.id)}
             onChange={() => {}}
-            onClick={(e) => handleRowClick(idx, row.id, e.shiftKey)}
-            className="size-4 align-middle accent-[var(--color-primary)]"
+            onClick={(event) =>
+              selectRowFromCheckbox(
+                idx,
+                entity.id,
+                event.currentTarget.checked,
+                event.shiftKey,
+                event.metaKey || event.ctrlKey,
+              )
+            }
+            className="mx-auto block size-3.5 accent-[var(--color-primary)]"
           />
         </td>
         {displayFields.map((f, colIdx) => {
-          const cellKey = `${row.id}:${f.id}`;
+          const cellKey = `${entity.id}:${f.id}`;
           const isEditing = editCell === cellKey;
+          const frozenCellStyle = frozenStyle(colIdx);
+          const isCellSelected = inRange(idx, colIdx);
+          const selectionEdges = rangeEdges(idx, colIdx);
+          const selectionBorder = selectionEdges
+            ? [
+                typeof frozenCellStyle?.boxShadow === "string"
+                  ? frozenCellStyle.boxShadow
+                  : "",
+                selectionEdges.top ? "inset 0 2px 0 var(--color-primary)" : "",
+                selectionEdges.right ? "inset -2px 0 0 var(--color-primary)" : "",
+                selectionEdges.bottom ? "inset 0 -2px 0 var(--color-primary)" : "",
+                selectionEdges.left ? "inset 2px 0 0 var(--color-primary)" : "",
+              ]
+                .filter(Boolean)
+                .join(", ")
+            : undefined;
           return (
             <td
               key={f.id}
               onMouseDown={() => {
                 if (isEditing) return; // editing this cell: let the input handle it
+                setSelected(new Set());
+                setAnchor(null);
+                setCursor(null);
                 setEditCell(null);
                 setRange({ r1: idx, c1: colIdx, r2: idx, c2: colIdx });
                 setDragging(true);
@@ -885,19 +1059,33 @@ export function TableView({
                 if (dragging)
                   setRange((r) => (r ? { ...r, r2: idx, c2: colIdx } : r));
               }}
-              style={frozenStyle(colIdx)}
-              className={`overflow-hidden border-r px-1 align-middle ${
-                inRange(idx, colIdx) ? "bg-primary/10" : "bg-card"
+              style={
+                isCellSelected
+                  ? {
+                      ...(frozenCellStyle ?? {}),
+                      // A normal scrolling cell must stay below the frozen pane.
+                      // Only a selected frozen cell needs a local stacking lift.
+                      ...(frozenCellStyle ? { zIndex: 13 } : {}),
+                      boxShadow: selectionBorder,
+                    }
+                  : frozenCellStyle
+              }
+              className={`overflow-hidden border-r border-border/70 px-1 align-middle ${
+                frozenCellStyle ? "vhb-frozen-cell" : ""
               }`}
             >
               <div
-                className="flex items-center"
-                style={treeMode && colIdx === 0 ? { paddingLeft: depth * 18 } : undefined}
+                className={`flex min-h-[29px] items-center ${cellAlignClass(f)}`}
+                style={
+                  treeMode && f.id === nameFieldId
+                    ? { paddingLeft: depth * 18 }
+                    : undefined
+                }
               >
-                {treeMode && colIdx === 0 && (
+                {treeMode && f.id === nameFieldId && (
                   <>
                     <button
-                      onClick={() => kids.length && toggleExpand(row.id)}
+                      onClick={() => kids.length && toggleExpand(entity.id)}
                       className={`mr-0.5 shrink-0 ${kids.length ? "text-muted-foreground hover:text-foreground" : "invisible"}`}
                     >
                       {isOpen ? (
@@ -907,9 +1095,9 @@ export function TableView({
                       )}
                     </button>
                     <button
-                      onClick={() => addSubRow(row)}
+                      onClick={() => addSubEntity(entity)}
                       title="Add sub-item"
-                      className="mr-1 shrink-0 text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100"
+                      className="mr-1 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:text-primary"
                     >
                       <Plus className="size-3.5" />
                     </button>
@@ -917,17 +1105,17 @@ export function TableView({
                 )}
                 <div className="relative min-w-0 flex-1">
                   {f.type === "unique_id" ? (
-                    <span className="px-2 text-sm text-muted-foreground">
-                      {((f.options as { prefix?: string })?.prefix ?? "") + row.seq}
+                    <span className="px-1.5 text-[11px] text-muted-foreground">
+                      {formatEntityId(entity, f)}
                     </span>
                   ) : (
                     <CellEditor
                       key={isEditing ? "edit" : "view"}
                       field={f}
                       databaseId={databaseId}
-                      rowId={row.id}
-                      value={(row.data as Record<string, unknown>)[f.id] ?? null}
-                      onCommit={(v) => commitCell(row, f, v)}
+                      entityId={entity.id}
+                      value={(entity.data as Record<string, unknown>)[f.id] ?? null}
+                      onCommit={(v) => commitCell(entity, f, v)}
                       autoEdit={isEditing}
                       onFinish={(move) => finishCell(idx, colIdx, move)}
                     />
@@ -946,15 +1134,29 @@ export function TableView({
                       onDoubleClick={() => setEditCell(cellKey)}
                     />
                   )}
+                  {f.id === nameFieldId ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openEntity(entity);
+                      }}
+                      title="Open entity"
+                      aria-label={`Open ${entity.name}`}
+                      className="absolute right-1 top-0.5 z-[3] flex size-5 items-center justify-center rounded bg-card/90 text-muted-foreground opacity-0 shadow-sm hover:bg-muted hover:text-primary group-hover:opacity-100 group-focus-within:opacity-100"
+                    >
+                      <FaIcon name="window-maximize.1" className="size-2.5" />
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </td>
           );
         })}
-        <td className="whitespace-nowrap px-2 text-center">
+        <td className="whitespace-nowrap border-l border-border/70 px-1 text-center">
           <button
-            onClick={() => deleteRow.mutate(row.id)}
-            title="Delete row"
+            onClick={() => deleteEntity.mutate(entity.id)}
+            title="Delete entity"
             className="opacity-0 transition-opacity group-hover:opacity-100"
           >
             <Trash2 className="inline size-3.5 text-muted-foreground hover:text-destructive" />
@@ -965,28 +1167,38 @@ export function TableView({
   }
 
   // Recursive render for tree (sub-item) mode. Each parent shows up to 5
-  // children at a time with a "Load more sub-items" row.
+  // children at a time with a "Load more sub-items" entity.
   const CHILD_PAGE = 5;
   function renderTree(
-    rowsToRender: Row[],
+    entitiesToRender: Entity[],
     depth: number,
     counter: { i: number },
+    visited: Set<string>,
   ): React.ReactNode[] {
     const out: React.ReactNode[] = [];
-    for (const row of rowsToRender) {
+    for (const entity of entitiesToRender) {
+      if (visited.has(entity.id)) continue;
+      visited.add(entity.id);
       counter.i += 1;
-      out.push(renderRow(row, counter.i, depth));
-      if (expanded.has(row.id)) {
-        const kids = childrenOf(row);
-        const cShown = childShown[row.id] ?? CHILD_PAGE;
-        out.push(...renderTree(kids.slice(0, cShown), depth + 1, counter));
+      out.push(renderEntity(entity, counter.i, depth));
+      if (expanded.has(entity.id)) {
+        const kids = childrenOf(entity);
+        const cShown = childShown[entity.id] ?? CHILD_PAGE;
+        out.push(
+          ...renderTree(
+            kids.slice(0, cShown),
+            depth + 1,
+            counter,
+            visited,
+          ),
+        );
         if (kids.length > cShown) {
           out.push(
-            <tr key={`submore-${row.id}`}>
-              <td colSpan={displayFields.length + 2} className="p-0">
+            <tr key={`submore-${entity.id}`}>
+              <td colSpan={displayFields.length + 3} className="p-0">
                 <button
                   onClick={() =>
-                    setChildShown((s) => ({ ...s, [row.id]: cShown + CHILD_PAGE }))
+                    setChildShown((s) => ({ ...s, [entity.id]: cShown + CHILD_PAGE }))
                   }
                   style={{ paddingLeft: (depth + 1) * 18 + 12 }}
                   className="flex items-center gap-1 py-1.5 text-xs font-medium text-primary hover:underline"
@@ -1004,13 +1216,13 @@ export function TableView({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col gap-3">
+    <div className="relative flex h-full min-h-0 flex-col gap-2">
       <ViewQueryState
-        loading={fieldsQ.isLoading || rowsQ.isLoading}
-        error={fieldsQ.isError || rowsQ.isError}
+        loading={fieldsQ.isLoading || entitiesQ.isLoading}
+        error={fieldsQ.isError || entitiesQ.isError}
         onRetry={() => {
           void fieldsQ.refetch();
-          void rowsQ.refetch();
+          void entitiesQ.refetch();
         }}
       />
       {/* Add field popover */}
@@ -1020,7 +1232,10 @@ export function TableView({
           <>
             <div
               className="fixed inset-0 z-40"
-              onClick={() => setAdding(false)}
+              onClick={() => {
+                setAdding(false);
+                setInsertAt(null);
+              }}
             />
             <div
               className="fixed z-50 w-72 space-y-2 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg"
@@ -1033,13 +1248,21 @@ export function TableView({
               }}
             >
               <p className="text-sm font-medium">New column</p>
-              <input
-                autoFocus
-                value={fName}
-                onChange={(e) => setFName(e.target.value)}
-                placeholder="Column name"
-                className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
+              <div className="flex items-center gap-2">
+                <IconPicker
+                  value={fIcon}
+                  onChange={setFIcon}
+                  label="Choose column icon"
+                  color="var(--icon-field-text)"
+                />
+                <input
+                  autoFocus
+                  value={fName}
+                  onChange={(e) => setFName(e.target.value)}
+                  placeholder="Column name"
+                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
               <Dropdown
                 value={fType}
                 allowClear={false}
@@ -1047,7 +1270,11 @@ export function TableView({
                   value: t.value,
                   label: t.label,
                 }))}
-                onChange={(v) => v && setFType(v)}
+                onChange={(v) => {
+                  if (!v) return;
+                  setFType(v);
+                  setFIcon(defaultIconForFieldType(v as Field["type"]));
+                }}
               />
               {choiceType && (
                 <input
@@ -1113,7 +1340,10 @@ export function TableView({
                   Add column
                 </button>
                 <button
-                  onClick={() => setAdding(false)}
+                  onClick={() => {
+                    setAdding(false);
+                    setInsertAt(null);
+                  }}
                   className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
                 >
                   Cancel
@@ -1129,7 +1359,7 @@ export function TableView({
         <div className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-xl border bg-card px-4 py-2.5 text-sm shadow-lg">
           <span className="font-medium">{selected.size} selected</span>
           <button
-            onClick={() => duplicateRows.mutate([...selected])}
+            onClick={() => duplicateEntities.mutate([...selected])}
             className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
           >
             <Copy className="size-4" /> Duplicate
@@ -1150,34 +1380,47 @@ export function TableView({
       )}
 
       {/* Table */}
-      <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-xl border bg-card [scrollbar-gutter:stable]">
+      <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-xl border bg-card [scrollbar-gutter:stable] [&_.vhb-cell-checkbox]:!size-3.5 [&_.vhb-cell-display]:!min-h-7 [&_.vhb-cell-display]:!px-1.5 [&_.vhb-cell-display]:!py-0 [&_.vhb-cell-display]:!text-[11px] [&_.vhb-cell-input]:!min-h-7 [&_.vhb-cell-input]:!px-1.5 [&_.vhb-cell-input]:!py-0 [&_.vhb-cell-input]:!text-[11px]">
         <table
-          className="table-fixed select-none border-collapse text-sm"
+          className="vhb-data-grid table-fixed select-none border-separate border-spacing-0 text-[11px]"
           style={{
-            width: 40 + displayFields.reduce((s, f) => s + colWidth(f), 0) + 48,
+            width: 22 + 32 + displayFields.reduce((s, f) => s + colWidth(f), 0) + 40,
           }}
         >
           <colgroup>
-            <col style={{ width: 40 }} />
+            <col style={{ width: 22 }} />
+            <col style={{ width: 32 }} />
             {displayFields.map((f) => (
               <col key={f.id} style={{ width: colWidth(f) }} />
             ))}
-            <col style={{ width: 48 }} />
+            <col style={{ width: 40 }} />
           </colgroup>
           <thead className="sticky top-0 z-20 bg-card">
-            <tr className="border-b bg-muted/40">
-              <th className="bg-muted/40 px-2 py-2" style={checkboxFrozen}>
+            <tr className="bg-muted/40">
+              <th
+                aria-hidden="true"
+                className="vhb-frozen-cell h-8 w-[22px] border-0 p-0"
+                style={{ ...rowGutterFrozen, zIndex: 12 }}
+              />
+              <th
+                className="vhb-frozen-cell h-8 border-r border-border p-0 align-middle"
+                style={checkboxFrozen}
+              >
                 <input
                   type="checkbox"
-                  checked={rows.length > 0 && selected.size === rows.length}
-                  onChange={(e) =>
+                  checked={entities.length > 0 && selected.size === entities.length}
+                  onChange={(e) => {
+                    setRange(null);
+                    setEditCell(null);
+                    setAnchor(null);
+                    setCursor(null);
                     setSelected(
                       e.target.checked
-                        ? new Set(rows.map((r) => r.id))
+                        ? new Set(entities.map((r) => r.id))
                         : new Set(),
-                    )
-                  }
-                  className="size-4 accent-[var(--color-primary)]"
+                    );
+                  }}
+                  className="mx-auto block size-3.5 accent-[var(--color-primary)]"
                 />
               </th>
               {displayFields.map((f, colIdx) => (
@@ -1193,7 +1436,15 @@ export function TableView({
                     }
                   }}
                   style={frozenStyle(colIdx)}
-                  className="relative bg-muted/40 px-3 py-2 text-left font-medium"
+                  className={`relative h-8 border-r border-border px-2 py-1 font-medium ${
+                    frozenStyle(colIdx) ? "vhb-frozen-cell" : ""
+                  } ${
+                    (f.options as { alignment?: string }).alignment === "center"
+                      ? "text-center"
+                      : (f.options as { alignment?: string }).alignment === "right"
+                        ? "text-right"
+                        : "text-left"
+                  }`}
                 >
                   <button
                     draggable
@@ -1211,12 +1462,13 @@ export function TableView({
                       setMenu({ field: f, x: e.clientX, y: e.clientY });
                     }}
                     title="Click to edit · drag to reorder"
-                    className="flex w-full cursor-grab items-center gap-1 truncate text-left hover:text-primary active:cursor-grabbing"
-                  >
+                  className={`flex w-full cursor-grab items-center gap-1 truncate hover:text-primary active:cursor-grabbing ${cellAlignClass(f)}`}
+                >
+                    <FaIcon
+                      name={iconForField(f)}
+                      className="size-3 shrink-0 text-[var(--icon-field-text)]"
+                    />
                     {f.name}
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      {f.type}
-                    </span>
                   </button>
                   <div
                     onMouseDown={(e) => {
@@ -1230,30 +1482,31 @@ export function TableView({
                       });
                     }}
                     title="Drag to resize"
-                    className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-primary/40"
+                      className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-primary/40"
                   />
                 </th>
               ))}
-              <th className="w-12 px-2 py-2">
+              <th className="h-8 w-10 border-l border-border px-1 py-1">
                 <button
                   onClick={(e) => {
                     const r = e.currentTarget.getBoundingClientRect();
                     setAddAnchor({ x: r.left - 240, y: r.bottom + 4 });
+                    setInsertAt(null);
                     setAdding(true);
                   }}
                   title="Add column"
-                  className="rounded-md p-1 text-muted-foreground hover:bg-muted"
+                  className="rounded p-1 text-muted-foreground hover:bg-muted"
                 >
-                  <Plus className="size-4" />
+                  <Plus className="size-3" />
                 </button>
               </th>
             </tr>
           </thead>
           <tbody>
-            {treeMode && renderTree(topLevel, 0, { i: -1 })}
+            {treeMode && renderTree(topLevel, 0, { i: -1 }, new Set())}
             {!treeMode &&
               !groups &&
-              visible.map((row, idx) => renderRow(row, idx))}
+              visible.map((entity, idx) => renderEntity(entity, idx))}
             {!treeMode &&
               groups &&
               groupFieldId &&
@@ -1264,7 +1517,7 @@ export function TableView({
                   return (
                     <Fragment key={g.key}>
                       <tr className="border-y bg-muted/40">
-                        <td colSpan={displayFields.length + 2} className="p-0">
+                          <td colSpan={displayFields.length + 3} className="p-0">
                           <button
                             onClick={() =>
                               setCollapsed((prev) => {
@@ -1283,15 +1536,15 @@ export function TableView({
                             )}
                             <ValueChip field={byId[groupFieldId]} value={g.value} />
                             <span className="text-xs font-normal text-muted-foreground">
-                              {g.rows.length}
+                              {g.entities.length}
                             </span>
                           </button>
                         </td>
                       </tr>
                       {!isCollapsed &&
-                        g.rows.map((row) => {
+                        g.entities.map((entity) => {
                           i += 1;
-                          return renderRow(row, i);
+                          return renderEntity(entity, i);
                         })}
                     </Fragment>
                   );
@@ -1307,53 +1560,127 @@ export function TableView({
         )}
       </div>
 
-      {/* Action bar — pinned below the table (always visible). */}
-      <div className="flex shrink-0 items-center gap-2">
-        {rowsQ.hasNextPage && (
+      {/* One compact footer keeps pagination, creation and calculations together. */}
+      <div className="flex h-[26px] shrink-0 items-center gap-1.5 bg-background px-2 text-[10px]">
+        {entitiesQ.hasNextPage && (
           <button
             type="button"
-            onClick={() => rowsQ.fetchNextPage()}
-            disabled={rowsQ.isFetchingNextPage}
-            className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
+            onClick={() => entitiesQ.fetchNextPage()}
+            disabled={entitiesQ.isFetchingNextPage}
+            className="flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
           >
             <ChevronDown
-              className={`size-4 ${rowsQ.isFetchingNextPage ? "animate-bounce" : ""}`}
+              className={`size-2.5 ${entitiesQ.isFetchingNextPage ? "animate-bounce" : ""}`}
             />
-            {rowsQ.isFetchingNextPage
+            {entitiesQ.isFetchingNextPage
               ? "Loading…"
-              : `Load more (${Math.max(totalRows - rowItems.length, 0)} left)`}
+              : `Load more (${Math.max(totalEntities - entityItems.length, 0)} left)`}
           </button>
         )}
         <button
-          onClick={() => addRow.mutate()}
-          disabled={fields.length === 0 || addRow.isPending}
-          title="Create a new row (N)"
-          className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
+          onClick={() => setNewEntityOpen(true)}
+          disabled={fields.length === 0 || addEntity.isPending}
+          title="Create a new entity (N)"
+          className="flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] text-muted-foreground hover:bg-muted disabled:opacity-50"
         >
-          <Plus className="size-4" /> New <kbd className="text-[10px] opacity-60">N</kbd>
+          <Plus className="size-2.5" /> New <kbd className="text-[8px] opacity-60">N</kbd>
         </button>
-        <BulkAddRows
-          disabled={fields.length === 0 || bulkAdd.isPending}
-          onAdd={(n) => bulkAdd.mutate(n)}
-        />
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-          <span>
-            Showing {rowItems.length} of {totalRows} records
+        <div className="ml-1 flex h-5 min-w-0 flex-1 items-center gap-x-5 overflow-x-auto rounded border bg-muted/20 px-2">
+          {calcFields.map((f) => {
+            const operation = calculationForField(f.type, calc[f.id]);
+            if (!operation) return null;
+            return (
+              <span key={f.id} className="flex shrink-0 items-center gap-1">
+                <span className="text-[10px] text-muted-foreground">{f.name}</span>
+                <span className="text-[10px] font-bold">
+                  {formatCalculation(
+                    entitiesQ.data?.pages[0]?.aggregates?.[
+                      `${operation}:${f.id}`
+                    ],
+                    operation,
+                  )}
+                </span>
+              </span>
+            );
+          })}
+          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+            Showing {entityItems.length} of {totalEntities} records
           </span>
         </div>
       </div>
 
-      {/* Calculate summary — below the action bar; bold results for calc'd columns. */}
-      {calcFields.length > 0 && (
-        <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-          {calcFields.map((f) => (
-            <span key={f.id} className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">{f.name}</span>
-              <span className="font-bold">{computeCalc(f, visible, calc[f.id])}</span>
-            </span>
-          ))}
-        </div>
-      )}
+      {newEntityOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/25 p-4 pt-[18vh]">
+            <button
+              type="button"
+              aria-label="Close new entity dialog"
+              className="absolute inset-0"
+              onClick={() => setNewEntityOpen(false)}
+            />
+            <form
+              className="relative z-10 w-full max-w-sm rounded-xl border bg-card p-5 shadow-2xl"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const name = newEntityName.trim();
+                if (name && hasRequiredValues) addEntity.mutate({ name, data: newEntityData });
+              }}
+            >
+              <h2 className="text-base font-semibold">New entity</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Name is required. UID will be generated automatically.
+              </p>
+              <input
+                autoFocus
+                required
+                value={newEntityName}
+                onChange={(event) => setNewEntityName(event.target.value)}
+                placeholder="Entity name"
+                className="mt-4 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              {requiredFields.length ? (
+                <div className="mt-4 space-y-3 border-t pt-4">
+                  <p className="text-xs font-semibold text-muted-foreground">Required properties</p>
+                  {requiredFields.map((field) => (
+                    <label key={field.id} className="block space-y-1.5">
+                      <span className="text-xs font-medium">{field.name}</span>
+                      <div className="rounded-md border bg-background">
+                        <CellEditor
+                          field={field}
+                          databaseId={databaseId}
+                          value={newEntityData[field.id] ?? null}
+                          onCommit={(value) =>
+                            setNewEntityData((current) => ({ ...current, [field.id]: value }))
+                          }
+                        />
+                      </div>
+                    </label>
+                  ))}
+                  <p className="text-xs text-muted-foreground">
+                    Complete all required properties to create this entity.
+                  </p>
+                </div>
+              ) : null}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewEntityOpen(false)}
+                  className="rounded-md px-3 py-2 text-sm hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newEntityName.trim() || !hasRequiredValues || addEntity.isPending}
+                  className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {addEntity.isPending ? "Creating…" : "Create entity"}
+                </button>
+              </div>
+            </form>
+          </div>,
+          document.body,
+        )}
 
       {menu && (
         <ColumnMenu
@@ -1374,9 +1701,11 @@ export function TableView({
           setGroupFieldId={setGroupFieldId}
           filterRoot={filterRoot}
           setFilterRoot={setFilterRoot}
-          calcValue={calc[menu.field.id] ?? ""}
+          calcValue={
+            calculationForField(menu.field.type, calc[menu.field.id]) ?? ""
+          }
           setCalc={(v) => setCalc((c) => ({ ...c, [menu.field.id]: v }))}
-          calcOptions={calcOptions(menu.field.type)}
+          calcOptions={calculationOptions(menu.field.type)}
         />
       )}
 

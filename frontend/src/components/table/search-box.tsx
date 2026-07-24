@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, X } from "lucide-react";
+import { Search, X } from "@/components/ui/fa-icon";
 import { Dropdown } from "@/components/ui/dropdown";
 import type { SearchHit } from "@/lib/search";
 import type { components } from "@/lib/api/schema";
@@ -126,9 +126,9 @@ export function SearchBar({
           ) : (
             hits.map((h) => (
               <button
-                key={h.row.id}
+                key={h.entity.id}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onJump(h.row.id)}
+                onClick={() => onJump(h.entity.id)}
                 className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-accent"
               >
                 <span className="text-xs text-muted-foreground">{h.fieldName}</span>

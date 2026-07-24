@@ -1,6 +1,6 @@
 "use client";
 
-import { FileCode2, LoaderCircle, Upload } from "lucide-react";
+import { FileCode2, LoaderCircle, Upload } from "@/components/ui/fa-icon";
 import { useMemo, useState } from "react";
 import { Dropdown } from "@/components/ui/dropdown";
 

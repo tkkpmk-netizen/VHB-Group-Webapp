@@ -66,8 +66,9 @@ async def test_public_runtime_serves_only_published_site_and_selected_fields(
         headers=headers,
     )
     await client.post(
-        f"/databases/{database_id}/rows",
+        f"/databases/{database_id}/entities",
         json={
+            "name": "Coconut water",
             "data": {
                 public_field.json()["id"]: "Coconut water",
                 hidden_field.json()["id"]: 42,
@@ -308,6 +309,8 @@ async def test_site_build_domain_and_rollback_flow(
     rendered = await client.get("/public/sites/buildable/render")
     assert rendered.status_code == 200, rendered.text
     assert rendered.headers["x-vhb-deployment-id"] == deployment_v1_id
+    assert rendered.headers["content-security-policy"] == "object-src 'none'; base-uri 'self'"
+    assert rendered.headers["x-content-type-options"] == "nosniff"
     assert "Built v1" in rendered.text
     completed = await client.get(f"/jobs/{job_v1_id}", headers=headers)
     assert completed.json()["status"] == JobStatus.succeeded
@@ -358,3 +361,16 @@ async def test_site_build_domain_and_rollback_flow(
     rendered_rollback = await client.get("/public/sites/buildable/render")
     assert rendered_rollback.headers["x-vhb-deployment-id"] == deployment_v1_id
     assert "Built v1" in rendered_rollback.text
+
+
+@pytest.mark.asyncio
+async def test_public_endpoints_are_rate_limited(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.api import sites as sites_module
+
+    monkeypatch.setattr(sites_module.settings, "public_rate_limit_per_minute", 3)
+    for _ in range(3):
+        assert (await client.get("/public/sites/nope")).status_code == 404
+    throttled = await client.get("/public/sites/nope")
+    assert throttled.status_code == 429

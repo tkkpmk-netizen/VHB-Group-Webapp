@@ -2,22 +2,24 @@
 
 import { Fragment, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FaIcon, Plus, Trash2 } from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { CellEditor, ValueChip } from "@/components/table/cell-editor";
+import { EntityNameDialog } from "@/components/table/entity-name-dialog";
 import type { SharedViewProps } from "@/components/table/view-shell";
 import {
   applyFilterTree,
   applySorts,
   displayText,
-  groupRows,
+  groupEntities,
   type FilterGroup,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
+import { formatEntityId } from "@/lib/entity-id";
 import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
-type Row = components["schemas"]["RowOut"];
+type Entity = components["schemas"]["EntityOut"];
 
 const CHIP_TYPES = new Set([
   "select",
@@ -28,7 +30,7 @@ const CHIP_TYPES = new Set([
   "multi_select",
 ]);
 
-/** Notion-style List: compact rows, editable title + inline property chips. */
+/** Notion-style List: compact entities, editable title + inline property chips. */
 export function ListView({
   databaseId,
   filterRoot,
@@ -37,44 +39,53 @@ export function ListView({
   hideEmpty,
   hidden,
   limit,
+  dataSourceId,
   filterToMatches,
   matchedIds,
+  openEntity,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
   const [pages, setPages] = useState(0);
-  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [newEntityOpen, setNewEntityOpen] = useState(false);
+  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
 
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const rowsQ = useQuery<Row[]>({
-    queryKey: ["rows", databaseId],
-    queryFn: () => apiFetch<Row[]>(`/databases/${databaseId}/rows`),
+  const entitiesQ = useQuery<Entity[]>({
+    queryKey: ["entities", databaseId, dataSourceId],
+    queryFn: () =>
+      apiFetch<Entity[]>(
+        `/databases/${databaseId}/entities${dataSourceId ? `?data_source_id=${dataSourceId}` : ""}`,
+      ),
   });
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["entities", databaseId] });
   const updateCell = useMutation({
-    mutationFn: ({ rowId, data }: { rowId: string; data: Record<string, unknown> }) =>
-      apiFetch<Row>(`/rows/${rowId}`, {
+    mutationFn: ({ entityId, data }: { entityId: string; data: Record<string, unknown> }) =>
+      apiFetch<Entity>(`/entities/${entityId}`, {
         method: "PATCH",
         body: JSON.stringify({ data }),
       }),
     onSuccess: (created) => {
-      setEditingRowId(created.id);
-      setPages(Math.floor((rowsQ.data?.length ?? 0) / limit));
+      setEditingEntityId(created.id);
+      setPages(Math.floor((entitiesQ.data?.length ?? 0) / limit));
       invalidate();
     },
   });
-  const addRow = useMutation({
-    mutationFn: () =>
-      apiFetch<Row>(`/databases/${databaseId}/rows`, {
+  const addEntity = useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<Entity>(`/databases/${databaseId}/entities`, {
         method: "POST",
-        body: JSON.stringify({ data: {} }),
+        body: JSON.stringify({ name, data: {} }),
       }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setNewEntityOpen(false);
+      invalidate();
+    },
   });
-  const deleteRow = useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/rows/${id}`, { method: "DELETE" }),
+  const deleteEntity = useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/entities/${id}`, { method: "DELETE" }),
     onSuccess: invalidate,
   });
 
@@ -91,7 +102,7 @@ export function ListView({
       )
         return;
       e.preventDefault();
-      addRow.mutate();
+      setNewEntityOpen(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -100,7 +111,7 @@ export function ListView({
   const fields = fieldsQ.data ?? [];
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
   let visible = applySorts(
-    applyFilterTree(rowsQ.data ?? [], byId, filterRoot as FilterGroup),
+    applyFilterTree(entitiesQ.data ?? [], byId, filterRoot as FilterGroup),
     byId,
     sorts,
   );
@@ -118,22 +129,22 @@ export function ListView({
 
   let groups =
     groupFieldId && byId[groupFieldId]
-      ? groupRows(visible, byId[groupFieldId])
+      ? groupEntities(visible, byId[groupFieldId])
       : null;
   if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
 
   const shown = limit * (pages + 1);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  const propCell = (f: Field, row: Row) => {
-    const v = (row.data as Record<string, unknown>)[f.id];
+  const propCell = (f: Field, entity: Entity) => {
+    const v = (entity.data as Record<string, unknown>)[f.id];
     if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) return null;
     if (CHIP_TYPES.has(f.type))
       return <ValueChip key={f.id} field={f} value={Array.isArray(v) ? v[0] : v} />;
     return (
       <span
         key={f.id}
-        className="flex min-w-0 max-w-56 items-center gap-1 truncate text-xs"
+        className="flex min-w-0 max-w-40 items-center gap-1 truncate text-[11px] leading-4"
         title={`${f.name}: ${displayText(f, v)}`}
       >
         <span className="shrink-0 text-muted-foreground">{f.name}</span>
@@ -142,41 +153,50 @@ export function ListView({
     );
   };
 
-  const renderRow = (row: Row) => (
+  const renderEntity = (entity: Entity) => (
     <div
-      key={row.id}
-      data-row-id={row.id}
-      className="group flex min-h-11 items-center gap-3 border-b px-3 py-2 transition-colors hover:bg-muted/40"
+      key={entity.id}
+      data-entity-id={entity.id}
+      className="group flex h-[30px] items-center gap-2 border-b px-2 text-[11px] leading-4 transition-colors hover:bg-muted/40"
     >
       {idField && (
-        <span className="w-12 shrink-0 text-xs text-muted-foreground">
-          {((idField.options as { prefix?: string })?.prefix ?? "") + row.seq}
+        <span className="w-10 shrink-0 text-[10px] text-muted-foreground">
+          {formatEntityId(entity, idField)}
         </span>
       )}
-      <div className="min-w-0 flex-1 text-sm font-medium">
+      <div className="min-w-0 flex-1 text-[11px] font-medium">
         {titleField ? (
           <CellEditor
-            key={editingRowId === row.id ? "edit" : "view"}
+            key={editingEntityId === entity.id ? "edit" : "view"}
             field={titleField}
-            value={(row.data as Record<string, unknown>)[titleField.id] ?? null}
+            value={(entity.data as Record<string, unknown>)[titleField.id] ?? null}
             onCommit={(v) =>
-              updateCell.mutate({ rowId: row.id, data: { [titleField.id]: v } })
+              updateCell.mutate({ entityId: entity.id, data: { [titleField.id]: v } })
             }
-            autoEdit={editingRowId === row.id}
-            onFinish={() => setEditingRowId(null)}
+            autoEdit={editingEntityId === entity.id}
+            onFinish={() => setEditingEntityId(null)}
           />
         ) : (
-          <span>#{row.seq}</span>
+          <span>{formatEntityId(entity, idField)}</span>
         )}
       </div>
-      <div className="hidden min-w-0 shrink items-center justify-end gap-3 md:flex">
-        {propFields.map((f) => propCell(f, row))}
+      <div className="hidden min-w-0 shrink items-center justify-end gap-2 md:flex">
+        {propFields.map((f) => propCell(f, entity))}
       </div>
       <button
-        onClick={() => deleteRow.mutate(row.id)}
+        type="button"
+        onClick={() => openEntity(entity)}
+        title="Open entity"
+        aria-label={`Open ${entity.name}`}
+        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-primary group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        <FaIcon name="window-maximize.1" className="size-3.5" />
+      </button>
+      <button
+        onClick={() => deleteEntity.mutate(entity.id)}
         title="Delete"
-        aria-label="Delete row"
-        className="shrink-0 rounded p-1 text-muted-foreground opacity-60 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+        aria-label="Delete entity"
+        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-60 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
       >
         <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
       </button>
@@ -184,13 +204,13 @@ export function ListView({
   );
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col gap-3">
+    <div className="relative flex h-full min-h-0 flex-col gap-1.5">
       <ViewQueryState
-        loading={fieldsQ.isLoading || rowsQ.isLoading}
-        error={fieldsQ.isError || rowsQ.isError}
+        loading={fieldsQ.isLoading || entitiesQ.isLoading}
+        error={fieldsQ.isError || entitiesQ.isError}
         onRetry={() => {
           void fieldsQ.refetch();
-          void rowsQ.refetch();
+          void entitiesQ.refetch();
         }}
       />
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border">
@@ -200,7 +220,7 @@ export function ListView({
           </div>
         ) : visible.length === 0 ? (
           <div className="flex h-full min-h-48 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-            No rows match this view.
+            No entities match this layout.
           </div>
         ) : groups ? (
           groups.map((g) => {
@@ -216,24 +236,24 @@ export function ListView({
                       return next;
                     })
                   }
-                  className="sticky top-0 z-10 flex w-full items-center gap-2 border-b bg-muted/40 px-3 py-2 text-sm font-semibold"
+                  className="sticky top-0 z-10 flex h-7 w-full items-center gap-1.5 border-b bg-muted/40 px-2 text-[11px] font-semibold"
                 >
                   {open ? (
-                    <ChevronDown className="size-4 text-muted-foreground" />
+                    <ChevronDown className="size-3.5 text-muted-foreground" />
                   ) : (
-                    <ChevronRight className="size-4 text-muted-foreground" />
+                    <ChevronRight className="size-3.5 text-muted-foreground" />
                   )}
                   <ValueChip field={byId[groupFieldId!]} value={g.value} />
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {g.rows.length}
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    {g.entities.length}
                   </span>
                 </button>
-                {open && g.rows.map(renderRow)}
+                {open && g.entities.map(renderEntity)}
               </Fragment>
             );
           })
         ) : (
-          visible.slice(0, shown).map(renderRow)
+          visible.slice(0, shown).map(renderEntity)
         )}
       </div>
 
@@ -241,20 +261,26 @@ export function ListView({
         {!groups && shown < visible.length && (
           <button
             onClick={() => setPages((p) => p + 1)}
-            className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10"
+            className="flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium text-primary hover:bg-primary/10"
           >
             <ChevronDown className="size-4" /> Load more ({visible.length - shown} left)
           </button>
         )}
         <button
-          onClick={() => addRow.mutate()}
-          disabled={fields.length === 0 || addRow.isPending}
-          title="Create a new row (N)"
-          className="flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
+          onClick={() => setNewEntityOpen(true)}
+          disabled={fields.length === 0 || addEntity.isPending}
+          title="Create a new entity (N)"
+          className="flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50"
         >
           <Plus className="size-4" /> New <kbd className="text-[10px] opacity-60">N</kbd>
         </button>
       </div>
+      <EntityNameDialog
+        open={newEntityOpen}
+        pending={addEntity.isPending}
+        onClose={() => setNewEntityOpen(false)}
+        onCreate={(name) => addEntity.mutate(name)}
+      />
     </div>
   );
 }

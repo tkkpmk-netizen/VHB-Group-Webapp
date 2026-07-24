@@ -16,12 +16,12 @@ Introduce a typed Design & Publishing domain:
 - `Site` is a workspace-scoped resource with a global slug, publish state,
   homepage path, and CM3 `ResourceGrant` support.
 - `SitePage` stores page source content as JSON and a per-site public path.
-- `SiteDataBinding` stores a bounded F4 `RowQuery`, target database, runtime
+- `SiteDataBinding` stores a bounded F4 `EntityQuery`, target database, runtime
   key, optional page scope, and explicit public `field_ids`.
 - Public runtime APIs live under `/public/sites` and require no user token, but
   only serve published sites/pages/bindings.
 - Public binding responses execute the saved server query and then prune each
-  row to the binding's `field_ids`.
+  entity to the binding's `field_ids`.
 
 ## Rationale
 

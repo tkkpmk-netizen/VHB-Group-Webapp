@@ -4,46 +4,101 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* VHB product system — dense, workspace-first UI inspired by ClickUp patterns. */
+/* VHB product system: compact, workspace-first UI aligned with ClickUp 4.0. */
 :root {
-  --radius: 0.5rem;
+  color-scheme: light;
 
-  --background: #f7f8fa;
-  --foreground: #292d34;
+  --radius: 0.375rem;
+
+  --app-rail-width: 3.25rem;
+  --app-topbar-height: 2rem;
+  --context-sidebar-width: 14.5rem;
+
+  --app-rail-start: #0d63bd;
+  --app-rail-end: #084d9f;
+  --app-rail-hover: rgb(255 255 255 / 0.12);
+  --app-rail-active: #ffffff;
+  --app-rail-active-foreground: #0b5caf;
+
+  --surface-canvas: #f9f9f9;
+  --surface-subtle: #f9f9f9;
+  --surface-hover: #eef0f2;
+  --surface-selected: #e9f3ff;
+  --surface-selected-strong: #dcecff;
+  --text-primary: #202020;
+  --text-secondary: #646464;
+  --text-tertiary: #838383;
+  --control-border: #dfe2e6;
+  --control-border-strong: #c9cdd3;
+  --shadow-popover: 0 6px 20px rgb(35 39 47 / 0.14), 0 1px 3px rgb(35 39 47 / 0.08);
+
+  /* One predictable overlay scale prevents nested pickers from falling behind dialogs. */
+  --layer-menu-backdrop: 80;
+  --layer-menu: 90;
+  --layer-dialog: 100;
+  --layer-dropdown-backdrop: 130;
+  --layer-dropdown: 140;
+  --layer-icon-picker: 160;
+  --layer-drag-preview: 200;
+
+  --motion-duration-fast: 160ms;
+  --motion-duration-medium: 220ms;
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* ClickUp-inspired semantic icon palette. Color supports recognition; shape remains primary. */
+  --icon-space: #7b68ee;
+  --icon-folder: #c84dd4;
+  --icon-database: #0c8ce9;
+  --icon-layout-table: #64748b;
+  --icon-layout-board: #7b68ee;
+  --icon-layout-list: #4285f4;
+  --icon-layout-calendar: #f97316;
+  --icon-layout-gallery: #c84dd4;
+  --icon-layout-gantt: #00a98f;
+  --icon-field-text: #64748b;
+  --icon-field-number: #0c8ce9;
+  --icon-field-date: #f97316;
+  --icon-field-people: #7b68ee;
+  --icon-field-relation: #00a98f;
+  --icon-field-computed: #c84dd4;
+
+  --background: var(--surface-canvas);
+  --foreground: var(--text-primary);
 
   --card: #ffffff;
-  --card-foreground: #292d34;
+  --card-foreground: var(--text-primary);
 
-  --popover: #ffffff;
-  --popover-foreground: #292d34;
+  --popover: var(--surface-canvas);
+  --popover-foreground: var(--text-primary);
 
-  --primary: #0b8ff3;
+  --primary: #0c8ce9;
   --primary-foreground: #ffffff;
 
-  --secondary: #edf4ff;
-  --secondary-foreground: #292d34;
+  --secondary: #eef0f2;
+  --secondary-foreground: var(--text-primary);
 
-  --muted: #f2f3f5;
-  --muted-foreground: #6b7078;
+  --muted: var(--surface-hover);
+  --muted-foreground: var(--text-secondary);
 
-  --accent: #e8f1ff;
-  --accent-foreground: #1264d7;
+  --accent: var(--surface-selected);
+  --accent-foreground: #0b69be;
 
   --destructive: #ef3826;
   --destructive-foreground: #ffffff;
 
-  --border: #e3e5e8;
-  --input: #d8dadd;
-  --ring: #0b8ff3;
+  --border: #e8eaed;
+  --input: var(--control-border);
+  --ring: #168ad8;
 
-  --sidebar: #ffffff;
-  --sidebar-foreground: #292d34;
-  --sidebar-primary: #0b8ff3;
+  --sidebar: var(--surface-subtle);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: #0c8ce9;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e8f1ff;
-  --sidebar-accent-foreground: #1264d7;
+  --sidebar-accent: var(--surface-selected);
+  --sidebar-accent-foreground: #0b69be;
   --sidebar-border: #e3e5e8;
-  --sidebar-ring: #0b8ff3;
+  --sidebar-ring: #168ad8;
 }
 
 .dark {
@@ -131,18 +186,215 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   text-rendering: optimizeLegibility;
+}
+
+/* Data-grid painting model.
+   Sticky table cells are unreliable inside border-collapse in Chromium: their
+   borders and backgrounds can be composited below horizontally scrolling
+   cells. The grid therefore uses border-separate and lets each cell paint one
+   fully opaque surface. */
+.vhb-data-grid {
+  isolation: isolate;
+}
+
+.vhb-data-grid thead th {
+  border-bottom: 1px solid var(--color-border);
+  background-color: color-mix(
+    in srgb,
+    var(--color-muted) 40%,
+    var(--color-card)
+  );
+  background-clip: border-box;
+}
+
+.vhb-data-grid tbody tr[data-entity-id] > td {
+  position: relative;
+  height: 30px;
+  padding-block: 0;
+  vertical-align: middle;
+  border-bottom: 1px solid color-mix(
+    in srgb,
+    var(--color-border) 70%,
+    transparent
+  );
+  background-color: var(--color-card);
+  background-clip: border-box;
+  transition: background-color 150ms ease;
+}
+
+.vhb-data-grid
+  tbody
+  tr[data-entity-id]:not(.row-selected):hover
+  > td {
+  background-color: color-mix(
+    in srgb,
+    var(--color-muted) 45%,
+    var(--color-card)
+  );
+}
+
+.vhb-data-grid tbody tr[data-entity-id][data-search-match="true"] > td {
+  background-color: color-mix(
+    in srgb,
+    var(--color-primary) 5%,
+    var(--color-card)
+  );
+}
+
+.vhb-data-grid tbody tr[data-entity-id][data-flash="true"] > td {
+  background-color: color-mix(
+    in srgb,
+    var(--color-primary) 20%,
+    var(--color-card)
+  );
+}
+
+.vhb-data-grid .vhb-frozen-cell {
+  isolation: isolate;
+}
+
+.vhb-data-grid input.vhb-cell-input {
+  height: 28px;
+  line-height: 28px;
+}
+
+.vhb-data-grid .vhb-cell-input:focus {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+/* Table selection is an outline state, never a second background state.
+   Table rows do not paint a reliable outline across sticky cells, so each
+   cell contributes its shared top/bottom edge while the first/last cells
+   close the outline at either side. */
+[data-entity-id].row-selected > td {
+  --row-selection-top: var(--color-primary);
+  --row-selection-right: transparent;
+  --row-selection-bottom: var(--color-primary);
+  --row-selection-left: transparent;
+}
+
+[data-entity-id].row-selected > td::after {
+  /* Paint the shared outline without participating in table row sizing. */
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  border-top: 1px solid var(--row-selection-top);
+  border-right: 1px solid var(--row-selection-right);
+  border-bottom: 1px solid var(--row-selection-bottom);
+  border-left: 1px solid var(--row-selection-left);
+  content: "";
+  pointer-events: none;
+}
+
+[data-entity-id].row-selected > td:first-child {
+  --row-selection-left: var(--color-primary);
+}
+
+[data-entity-id].row-selected > td:last-child {
+  --row-selection-right: var(--color-primary);
+}
+
+/* Consecutive checkbox-selected rows form one contiguous outlined region.
+   Ctrl/Cmd can create separate regions, which deliberately retain their own
+   complete outline. */
+[data-entity-id].row-selected:has(+ [data-entity-id].row-selected) > td {
+  --row-selection-bottom: transparent;
+}
+
+[data-entity-id].row-selected + [data-entity-id].row-selected > td {
+  --row-selection-top: transparent;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--text-primary);
+  letter-spacing: -0.012em;
+}
+
+h1 { font-weight: 650; }
+h2 { font-weight: 620; }
+h3 { font-weight: 600; }
+
+/* The hierarchy stays quieter than the active data canvas. */
+[data-context-tree="true"] .vhb-tree-icon {
+  width: 0.78rem;
+  height: 0.78rem;
+}
+
+[data-context-tree="true"] .vhb-tree-chevron {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
+.field-action {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  transition: background-color 160ms ease-in-out, color 160ms ease-in-out;
+}
+
+.field-action:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.field-action-active {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
 }
 
 button,
 a,
 input {
   transition:
-    color 120ms ease,
-    background-color 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+    opacity var(--motion-duration-fast) var(--motion-ease-out),
+    transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+[data-live-drag-source="true"] {
+  opacity: 1 !important;
+  color: var(--accent-foreground) !important;
+  background: var(--surface-selected) !important;
+  box-shadow:
+    inset 3px 0 0 var(--primary),
+    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent) !important;
+}
+
+button:not(:disabled),
+a[href] {
+  cursor: pointer;
+}
+
+button:active:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 button:focus-visible,
@@ -154,8 +406,12 @@ input:focus-visible,
 }
 
 ::selection {
-  background: #cfe5ff;
-  color: #163c6b;
+  background: var(--surface-selected-strong);
+  color: var(--text-primary);
+}
+
+.vhb-popover-shadow {
+  box-shadow: var(--shadow-popover);
 }
 
 /* DP3 Web Designer: keep GrapesJS controls inside the ClickUp-style shell. */

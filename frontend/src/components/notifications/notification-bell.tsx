@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CheckCheck } from "lucide-react";
+import { Bell, CheckCheck } from "@/components/ui/fa-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getWorkspaceId } from "@/lib/api/client";
@@ -52,7 +52,7 @@ export function NotificationBell() {
         title="Notifications"
         aria-label={`${unread.count} unread notifications`}
         onClick={() => setOpen((value) => !value)}
-        className="relative rounded p-1.5 hover:bg-muted"
+        className="relative rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <Bell className="size-4" />
         {unread.count > 0 && (
@@ -66,11 +66,11 @@ export function NotificationBell() {
           <button
             type="button"
             aria-label="Close notifications"
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-[80]"
             onClick={() => setOpen(false)}
           />
-          <section className="absolute right-0 top-9 z-50 w-96 overflow-hidden rounded-xl border bg-popover shadow-xl">
-            <header className="flex items-center justify-between border-b px-4 py-3">
+          <section className="vhb-popover-shadow absolute right-0 top-9 z-[90] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover">
+            <header className="flex items-center justify-between border-b px-3 py-2.5">
               <h2 className="text-sm font-semibold">Notifications</h2>
               <button
                 type="button"
@@ -89,8 +89,8 @@ export function NotificationBell() {
                   onClick={() => {
                     if (!notification.read_at) markRead.mutate(notification.id);
                   }}
-                  className={`block w-full border-b px-4 py-3 text-left last:border-0 hover:bg-muted/50 ${
-                    notification.read_at ? "" : "bg-blue-50/60"
+                  className={`block w-full border-b px-3 py-2.5 text-left last:border-0 hover:bg-muted/50 ${
+                    notification.read_at ? "" : "bg-accent/70"
                   }`}
                 >
                   <p className="text-sm font-medium">{notification.title}</p>

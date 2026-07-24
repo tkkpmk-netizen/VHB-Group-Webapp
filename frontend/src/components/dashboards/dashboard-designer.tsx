@@ -9,19 +9,24 @@ import {
   Table2,
   Trash2,
   X,
-} from "lucide-react";
+  FaIcon,
+  SlidersHorizontal,
+} from "@/components/ui/fa-icon";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ResourceAccess } from "@/components/access/resource-access";
 import { Dropdown } from "@/components/ui/dropdown";
 import { apiFetch } from "@/lib/api/client";
+import { DEFAULT_ICONS } from "@/lib/icon-system";
 
 type Dashboard = {
   id: string;
+  space_id: string;
   name: string;
   description: string | null;
 };
 type Database = { id: string; name: string };
+type SpaceDatabase = { database: Database };
 type Field = { id: string; name: string; type: string };
 type WidgetType = "metric" | "bar" | "table";
 type Widget = {
@@ -36,7 +41,7 @@ type Widget = {
   };
   order: number;
 };
-type RowPage = {
+type EntityPage = {
   items: { id: string; data: Record<string, unknown> }[];
   total: number;
   aggregates: Record<string, number | null>;
@@ -53,10 +58,10 @@ function WidgetCard({
   widget: Widget;
   onDelete: () => void;
 }) {
-  const { data, isLoading, isError } = useQuery<{ data: RowPage }>({
+  const { data, isLoading, isError } = useQuery<{ data: EntityPage }>({
     queryKey: ["widget-data", widget.id],
     queryFn: () =>
-      apiFetch<{ data: RowPage }>(`/dashboard-widgets/${widget.id}/data`),
+      apiFetch<{ data: EntityPage }>(`/dashboard-widgets/${widget.id}/data`),
     refetchInterval: 30_000,
   });
   const { data: fields = [] } = useQuery<Field[]>({
@@ -174,10 +179,12 @@ function WidgetCard({
 
 function AddWidgetDialog({
   dashboardId,
+  spaceId,
   onClose,
   onCreated,
 }: {
   dashboardId: string;
+  spaceId: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -187,10 +194,11 @@ function AddWidgetDialog({
   const [groupBy, setGroupBy] = useState<string | null>(null);
   const [valueField, setValueField] = useState<string>("seq");
   const [aggregation, setAggregation] = useState("count");
-  const { data: databases = [] } = useQuery<Database[]>({
-    queryKey: ["databases"],
-    queryFn: () => apiFetch<Database[]>("/databases"),
+  const { data: placements = [] } = useQuery<SpaceDatabase[]>({
+    queryKey: ["space-databases", spaceId],
+    queryFn: () => apiFetch<SpaceDatabase[]>(`/spaces/${spaceId}/databases`),
   });
+  const databases = placements.map((placement) => placement.database);
   const { data: fields = [] } = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
@@ -364,7 +372,21 @@ function AddWidgetDialog({
   );
 }
 
-export function DashboardDesigner({ dashboardId }: { dashboardId: string }) {
+export function DashboardDesigner({
+  dashboardId,
+  spaceId,
+  spaceName,
+  spaceIcon,
+  spaceColor,
+  hideContextHeader = false,
+}: {
+  dashboardId: string;
+  spaceId?: string;
+  spaceName?: string;
+  spaceIcon?: string | null;
+  spaceColor?: string | null;
+  hideContextHeader?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const { data: dashboard, isLoading } = useQuery<Dashboard>({
@@ -394,8 +416,22 @@ export function DashboardDesigner({ dashboardId }: { dashboardId: string }) {
   }
   return (
     <div className="min-h-full bg-[#fafbfc]">
-      <header className="flex min-h-14 items-center gap-3 border-b bg-background px-5 py-2">
+      {!hideContextHeader && <header className="flex min-h-16 items-center gap-3 border-b bg-background px-5 py-2">
+        {spaceName ? (
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-selected)]">
+            <FaIcon
+              name={spaceIcon || DEFAULT_ICONS.space}
+              className="size-4"
+              style={{ color: spaceColor || "var(--icon-space)" }}
+            />
+          </span>
+        ) : null}
         <div className="min-w-0">
+          {spaceName && (
+            <p className="mb-0.5 text-sm font-semibold text-[#102447]">
+              {spaceName}
+            </p>
+          )}
           <input
             defaultValue={dashboard.name}
             aria-label="Dashboard name"
@@ -412,7 +448,7 @@ export function DashboardDesigner({ dashboardId }: { dashboardId: string }) {
                 );
               }
             }}
-            className="block w-full truncate bg-transparent text-base font-semibold outline-none"
+            className="block w-full truncate bg-transparent text-xs font-medium text-muted-foreground outline-none"
           />
           <input
             defaultValue={dashboard.description ?? ""}
@@ -440,15 +476,33 @@ export function DashboardDesigner({ dashboardId }: { dashboardId: string }) {
             resourceId={dashboardId}
             resourceLabel="Dashboard"
           />
+        </div>
+      </header>}
+      <div className="flex h-10 items-end gap-1 border-b bg-white px-5">
+        <button
+          type="button"
+          aria-current="page"
+          className="flex h-10 items-center gap-1.5 border-b-2 border-primary px-2 text-xs font-semibold text-foreground"
+        >
+          <LayoutGrid className="size-3.5 text-[#7b68ee]" /> Overview
+        </button>
+        <span className="ml-auto flex h-10 items-center gap-1.5">
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-white"
+            className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <Plus className="size-3.5" /> Add widget
+            <SlidersHorizontal className="size-3.5" /> Customize
           </button>
-        </div>
-      </header>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-white"
+          >
+            <Plus className="size-3.5" /> Add card
+          </button>
+        </span>
+      </div>
       <main className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
         {ordered.map((widget) => (
           <WidgetCard
@@ -471,6 +525,7 @@ export function DashboardDesigner({ dashboardId }: { dashboardId: string }) {
       {adding && (
         <AddWidgetDialog
           dashboardId={dashboardId}
+          spaceId={spaceId ?? dashboard.space_id}
           onClose={() => setAdding(false)}
           onCreated={() => {
             setAdding(false);

@@ -2,12 +2,31 @@
 
 import math
 import re
+import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from asteval import Interpreter  # type: ignore[import-untyped]
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.field import Field, FieldType
+from app.models.field import Entity, Field, FieldType
+
+
+async def next_entity_seq(db: AsyncSession, database_id: uuid.UUID) -> int:
+    """Allocate the next per-database Entity.seq.
+
+    Takes a transaction-scoped advisory lock keyed on the database id so two
+    concurrent creates can't read the same max(seq); uq_entity_database_seq is
+    the backstop. The lock releases on commit/rollback.
+    """
+    await db.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(str(database_id), 0)))
+    )
+    current = await db.scalar(
+        select(func.coalesce(func.max(Entity.seq), 0)).where(Entity.database_id == database_id)
+    )
+    return int(current or 0) + 1
 
 # --- Notion-like formula function library -----------------------------------
 
@@ -300,7 +319,7 @@ def validate_cell(field: Field, value: Any) -> Any:
     raise CellValidationError(f"{field.name}: field type not supported yet")
 
 
-def validate_row_data(fields: list[Field], data: dict[str, Any]) -> dict[str, Any]:
+def validate_entity_data(fields: list[Field], data: dict[str, Any]) -> dict[str, Any]:
     """Validate a partial cell map (keyed by field id) against known fields."""
     by_id = {str(f.id): f for f in fields}
     cleaned: dict[str, Any] = {}
@@ -310,3 +329,43 @@ def validate_row_data(fields: list[Field], data: dict[str, Any]) -> dict[str, An
             raise CellValidationError(f"Unknown field: {field_id}")
         cleaned[field_id] = validate_cell(field, value)
     return cleaned
+
+
+def is_empty_cell_value(value: Any) -> bool:
+    """Return whether a value is absent for the purpose of a required Field.
+
+    ``False`` and ``0`` are deliberate values, while blank strings, empty
+    collections and an empty date range are not.  Keeping this in the engine
+    gives manual creation, bulk creation and imports the same definition.
+    """
+    if value is None or value == "":
+        return True
+    if isinstance(value, (list, tuple, set, dict)):
+        if isinstance(value, dict) and value.get("start"):
+            return False
+        return len(value) == 0
+    return False
+
+
+def validate_required_fields(fields: list[Field], data: dict[str, Any]) -> None:
+    """Reject an Entity whose required editable Fields are empty."""
+    auto_types = {
+        FieldType.unique_id,
+        FieldType.rollup,
+        FieldType.formula,
+        FieldType.created_time,
+        FieldType.created_by,
+        FieldType.last_edited_time,
+        FieldType.last_edited_by,
+    }
+    missing = [
+        field.name
+        for field in fields
+        if field.type not in auto_types
+        and (field.options or {}).get("required") is True
+        and is_empty_cell_value(data.get(str(field.id)))
+    ]
+    if missing:
+        names = ", ".join(missing)
+        suffix = "s" if len(missing) > 1 else ""
+        raise CellValidationError(f"Required field{suffix}: {names}")

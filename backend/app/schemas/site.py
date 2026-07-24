@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.site import SiteDeploymentStatus, SiteEnvironment
-from app.schemas.engine import RowPage, RowQuery
+from app.schemas.engine import EntityPage, EntityQuery
 from app.schemas.job import JobOut
 from app.services.site_design import default_grapesjs_content
 
@@ -87,7 +87,7 @@ class SiteDataBindingCreate(BaseModel):
     key: str = Field(min_length=2, max_length=80, pattern=r"^[a-zA-Z][a-zA-Z0-9_]*$")
     name: str = Field(min_length=1, max_length=200)
     page_id: uuid.UUID | None = None
-    query: RowQuery = Field(default_factory=RowQuery)
+    query: EntityQuery = Field(default_factory=EntityQuery)
     field_ids: list[str] = Field(min_length=1, max_length=50)
     expose_public: bool = True
 
@@ -98,7 +98,7 @@ class SiteDataBindingUpdate(BaseModel):
     )
     name: str | None = Field(default=None, min_length=1, max_length=200)
     page_id: uuid.UUID | None = None
-    query: RowQuery | None = None
+    query: EntityQuery | None = None
     field_ids: list[str] | None = Field(default=None, min_length=1, max_length=50)
     expose_public: bool | None = None
     order: int | None = Field(default=None, ge=0)
@@ -203,4 +203,4 @@ class PublicBindingDataOut(BaseModel):
     key: str
     name: str
     field_ids: list[str]
-    data: RowPage
+    data: EntityPage

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Database, FolderTree, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Database, FolderTree, ShieldCheck, Users } from "@/components/ui/fa-icon";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, getWorkspaceId } from "@/lib/api/client";

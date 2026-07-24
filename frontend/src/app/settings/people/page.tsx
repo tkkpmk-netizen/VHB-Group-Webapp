@@ -12,7 +12,7 @@ import {
   UserPlus,
   Users,
   Workflow,
-} from "lucide-react";
+} from "@/components/ui/fa-icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";

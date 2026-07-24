@@ -19,7 +19,9 @@ class DriveFile(Base, TimestampMixin):
     database_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("databases.id", ondelete="CASCADE"), index=True
     )
-    row_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("rows.id", ondelete="CASCADE"), index=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("entities.id", ondelete="CASCADE"), index=True
+    )
     field_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("fields.id", ondelete="CASCADE"), index=True
     )

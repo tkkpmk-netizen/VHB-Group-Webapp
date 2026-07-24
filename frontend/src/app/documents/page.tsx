@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Plus, Search } from "lucide-react";
+import { FaIcon, Plus, Search } from "@/components/ui/fa-icon";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,7 +26,7 @@ export default function DocumentsPage() {
     mutationFn: () =>
       apiFetch<DocumentItem>("/documents", {
         method: "POST",
-        body: JSON.stringify({ title: "Untitled" }),
+        body: JSON.stringify({ title: "Untitled", icon: "file-alt" }),
       }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["documents"] }),
@@ -77,7 +77,7 @@ export default function DocumentsPage() {
                 className="flex items-center gap-3 border-b px-4 py-3 last:border-0 hover:bg-[#f7faff]"
               >
                 <span className="flex size-8 items-center justify-center rounded-md bg-violet-50 text-violet-600">
-                  {document.icon ?? <FileText className="size-4" />}
+                  <FaIcon name={document.icon || "file-alt"} className="size-4" />
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">
                   {document.title}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe2, Plus } from "lucide-react";
+import { Globe2, Plus } from "@/components/ui/fa-icon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";

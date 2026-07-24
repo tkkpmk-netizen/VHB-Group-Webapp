@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     # CORS — frontend origin(s), comma-separated
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # Database (Postgres via Docker). asyncpg driver for SQLAlchemy async.
     database_url: str = "postgresql+asyncpg://vhb:vhb@localhost:5432/vhb"
@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Redis-backed sessions, rate limits and short-lived cache values.
     redis_url: str = "redis://localhost:6379/0"
     auth_rate_limit_per_minute: int = 20
+    public_rate_limit_per_minute: int = 120
 
     # Google Identity Services.
     google_client_id: str | None = None

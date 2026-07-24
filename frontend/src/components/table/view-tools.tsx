@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X } from "@/components/ui/fa-icon";
 import { Dropdown } from "@/components/ui/dropdown";
 import {
   emptyGroup,
@@ -57,7 +57,7 @@ function FilterValue({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder="Value"
-      className="w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+      className="w-full rounded-md border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-ring"
     />
   );
 }
@@ -174,14 +174,14 @@ export function FilterGroupEditor({
       <div className="mt-2 flex gap-3">
         <button
           onClick={addRule}
-          className="flex items-center gap-1 text-sm text-primary hover:underline"
+          className="flex items-center gap-1 text-xs text-primary hover:underline"
         >
           <Plus className="size-3.5" /> Add filter rule
         </button>
         {depth === 0 && (
           <button
             onClick={() => onChange({ ...group, rules: [...group.rules, emptyGroup()] })}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:underline"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:underline"
           >
             <Plus className="size-3.5" /> Add filter group
           </button>
@@ -239,7 +239,7 @@ export function SortEditor({
       </div>
       <button
         onClick={() => setSorts([...sorts, { fieldId: fields[0]?.id ?? "", dir: "asc" }])}
-        className="mt-2 flex items-center gap-1 text-sm text-primary hover:underline"
+        className="mt-2 flex items-center gap-1 text-xs text-primary hover:underline"
       >
         <Plus className="size-3.5" /> Add sort
       </button>
@@ -263,7 +263,7 @@ export function GroupEditor({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm">Group by</span>
+        <span className="text-xs">Group by</span>
         <div className="w-40">
           <Dropdown
             value={groupFieldId}
@@ -275,7 +275,7 @@ export function GroupEditor({
       </div>
       {groupFieldId && (
         <>
-          <label className="flex items-center justify-between text-sm">
+          <label className="flex items-center justify-between text-xs">
             Hide empty groups
             <input
               type="checkbox"
@@ -286,7 +286,7 @@ export function GroupEditor({
           </label>
           <button
             onClick={() => setGroupFieldId(null)}
-            className="flex items-center gap-1 border-t pt-2 text-sm text-muted-foreground hover:text-destructive"
+            className="flex items-center gap-1 border-t pt-2 text-xs text-muted-foreground hover:text-destructive"
           >
             <Trash2 className="size-3.5" /> Remove grouping
           </button>

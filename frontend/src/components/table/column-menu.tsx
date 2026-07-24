@@ -13,7 +13,7 @@ import {
   Sigma,
   Trash2,
   WrapText,
-} from "lucide-react";
+} from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
 import { FieldConfig } from "@/components/table/field-config";
@@ -99,13 +99,13 @@ export function ColumnMenu({
   const left =
     typeof window !== "undefined" ? Math.min(x, window.innerWidth - 300) : x;
   const item =
-    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted";
+    "flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-xs leading-4 hover:bg-muted";
   const activeItem = "bg-primary/10 text-primary";
   return createPortal(
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} />
       <div
-        className="fixed z-40 max-h-[80vh] w-72 overflow-y-auto rounded-xl border bg-popover p-2 text-popover-foreground shadow-lg"
+        className="fixed z-40 max-h-[80vh] w-72 overflow-y-auto rounded-xl border bg-popover p-2 text-xs leading-4 text-popover-foreground shadow-lg"
         style={{ top: y, left: Math.max(8, left) }}
       >
         {/* Quick actions */}
@@ -143,7 +143,7 @@ export function ColumnMenu({
               <WrapText className="size-4" /> Wrap text
             </button>
           )}
-          <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
+          <div className="flex min-h-8 items-center justify-between gap-2 px-2 py-1 text-xs">
             <span className="flex items-center gap-2">
               <Sigma className="size-4" /> Calculate
             </span>
@@ -158,7 +158,11 @@ export function ColumnMenu({
           </div>
         </div>
 
-        <FieldConfig field={field} databaseId={databaseId} />
+        <FieldConfig
+          field={field}
+          databaseId={databaseId}
+          onTypeChanged={onClose}
+        />
 
         <div className="mt-1 border-t pt-1">
           <button

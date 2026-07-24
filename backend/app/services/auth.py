@@ -4,10 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
-from app.models.resource import Space
 from app.models.user import User
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
 from app.schemas.auth import SignupRequest
+from app.services.spaces import create_space_with_dashboard
 
 
 class EmailAlreadyExistsError(Exception):
@@ -37,7 +37,13 @@ async def create_user(db: AsyncSession, payload: SignupRequest) -> User:
     db.add(workspace)
     await db.flush()
     db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role=MemberRole.owner))
-    db.add(Space(workspace_id=workspace.id, name="General", order=0))
+    await create_space_with_dashboard(
+        db,
+        workspace_id=workspace.id,
+        user_id=user.id,
+        name="General",
+        order=0,
+    )
 
     await db.commit()
     await db.refresh(user)
@@ -59,7 +65,13 @@ async def create_oauth_user(db: AsyncSession, *, email: str, full_name: str | No
             role=MemberRole.owner,
         )
     )
-    db.add(Space(workspace_id=workspace.id, name="General", order=0))
+    await create_space_with_dashboard(
+        db,
+        workspace_id=workspace.id,
+        user_id=user.id,
+        name="General",
+        order=0,
+    )
     return user
 
 

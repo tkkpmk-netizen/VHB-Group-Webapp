@@ -3,6 +3,8 @@
  * Base URL comes from NEXT_PUBLIC_API_URL (defaults to local dev backend).
  */
 
+import { clearToken, getToken } from "../auth";
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -31,11 +33,31 @@ export class ApiError extends Error {
   }
 }
 
+/** Surface FastAPI's `detail` (string or validation-error list) to the UI. */
+export async function extractErrorMessage(
+  res: Response,
+  path: string,
+): Promise<string> {
+  const fallback = `Request to ${path} failed (${res.status})`;
+  try {
+    const detail = (await res.json())?.detail;
+    if (typeof detail === "string" && detail) return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((d) => (typeof d?.msg === "string" ? d.msg : null))
+        .filter(Boolean);
+      if (msgs.length) return msgs.join("; ");
+    }
+  } catch {
+    // Non-JSON body — keep the generic message.
+  }
+  return fallback;
+}
+
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const { getToken } = await import("@/lib/auth");
   const token = getToken();
   const workspaceId = getWorkspaceId();
   const isFormData =
@@ -52,7 +74,13 @@ export async function apiFetch<T>(
   });
 
   if (!res.ok) {
-    throw new ApiError(res.status, `Request to ${path} failed (${res.status})`);
+    if (res.status === 401) {
+      // Sessions are Redis-backed. A Redis restart invalidates existing JWTs,
+      // so remove the whole client-side session instead of retrying stale state.
+      clearToken();
+      clearWorkspaceSelection();
+    }
+    throw new ApiError(res.status, await extractErrorMessage(res, path));
   }
 
   // 204 No Content (e.g. DELETE) or empty body → nothing to parse.

@@ -20,8 +20,15 @@ async def test_dashboard_widget_executes_grouped_f4_query(
     client: httpx.AsyncClient,
 ) -> None:
     headers = await _register(client, "cm4-dashboard@example.com")
+    space_id = (await client.get("/spaces", headers=headers)).json()[0]["id"]
     database = await client.post("/databases", json={"name": "Revenue"}, headers=headers)
     database_id = database.json()["id"]
+    placement = await client.post(
+        f"/spaces/{space_id}/databases",
+        json={"database_id": database_id},
+        headers=headers,
+    )
+    assert placement.status_code == 201, placement.text
     segment = await client.post(
         f"/databases/{database_id}/fields",
         json={"name": "Segment", "type": "text", "options": {}},
@@ -36,14 +43,14 @@ async def test_dashboard_widget_executes_grouped_f4_query(
     amount_id = amount.json()["id"]
     for name, value in [("SMB", 10), ("SMB", 20), ("Enterprise", 50)]:
         await client.post(
-            f"/databases/{database_id}/rows",
-            json={"data": {segment_id: name, amount_id: value}},
+            f"/databases/{database_id}/entities",
+            json={"name": "Test entity", "data": {segment_id: name, amount_id: value}},
             headers=headers,
         )
 
     dashboard = await client.post(
         "/dashboards",
-        json={"name": "Revenue overview"},
+        json={"space_id": space_id, "name": "Revenue overview"},
         headers=headers,
     )
     assert dashboard.status_code == 201, dashboard.text
@@ -77,6 +84,7 @@ async def test_dashboard_widget_executes_grouped_f4_query(
 @pytest.mark.asyncio
 async def test_dashboard_uses_generic_resource_grants(client: httpx.AsyncClient) -> None:
     owner_headers = await _register(client, "cm4-owner@example.com")
+    space_id = (await client.get("/spaces", headers=owner_headers)).json()[0]["id"]
     viewer_headers = await _register(client, "cm4-viewer@example.com")
     viewer_token = viewer_headers["Authorization"]
     workspace_id = owner_headers["X-Workspace-ID"]
@@ -86,7 +94,9 @@ async def test_dashboard_uses_generic_resource_grants(client: httpx.AsyncClient)
         headers=owner_headers,
     )
     dashboard = await client.post(
-        "/dashboards", json={"name": "Shared dashboard"}, headers=owner_headers
+        "/dashboards",
+        json={"space_id": space_id, "name": "Shared dashboard"},
+        headers=owner_headers,
     )
     dashboard_id = dashboard.json()["id"]
     grant = await client.put(

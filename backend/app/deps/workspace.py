@@ -68,11 +68,11 @@ async def get_current_workspace(
 
         field = await db.get(Field, uuid.UUID(str(raw_field_id)))
         database_id = field.database_id if field else None
-    elif raw_row_id := request.path_params.get("row_id"):
-        from app.models.field import Row
+    elif raw_entity_id := request.path_params.get("entity_id"):
+        from app.models.field import Entity
 
-        row = await db.get(Row, uuid.UUID(str(raw_row_id)))
-        database_id = row.database_id if row else None
+        entity = await db.get(Entity, uuid.UUID(str(raw_entity_id)))
+        database_id = entity.database_id if entity else None
     if database_id is not None:
         resource_type = ResourceType.database
         resource_id = database_id

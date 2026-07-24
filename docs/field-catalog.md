@@ -16,6 +16,24 @@
 
 3. **Computed fields (rollup, formula) phụ thuộc relation + engine tính toán** → bắt buộc làm SAU khi có relation.
 
+4. **Đổi loại field là thao tác preview trước, apply sau.** Các field nhập liệu
+   persisted (`text`, `long_text`, `number`, `checkbox`, `date`, `url`, `email`,
+   `phone`, `country`, `select`, `multi_select`, `status`, `priority`, `rating`,
+   `people`, `progress`) có thể đổi qua lại:
+   - giá trị tương thích được chuẩn hóa sang storage contract của loại mới;
+   - giá trị không tương thích bị xóa khỏi `Entity.data` khi người dùng xác nhận;
+   - chuyển sang choice type tự tạo tối đa 200 choice ổn định từ các giá trị khác
+     nhau hiện có;
+   - `required`, field permission, alignment, wrap và metadata visibility được
+     giữ lại; option đặc thù của loại cũ không bị rò sang loại mới;
+   - identity, relation, files, rollup, formula và system/auto fields không cho
+     đổi loại vì dữ liệu của chúng nằm ngoài cell JSONB hoặc do server tính.
+
+5. **Calculate phải theo loại field.** Mọi field hỗ trợ Count/Filled/Empty/
+   Unique/% Filled; chỉ `number`, `rating`, `progress` hỗ trợ Sum/Average/Min/
+   Max. Mã phép tính Average trên API là `avg`; client chuẩn hóa state cũ
+   `average` thành `avg`.
+
 ## Danh mục đầy đủ (25 loại, gom nhóm)
 
 ### A. Text-like (lưu string)
@@ -69,7 +87,7 @@
 ### H. System / Auto (không nhập tay)
 | key | mô tả |
 |---|---|
-| `created_time` | thời điểm tạo (Row đã có `created_at`) |
+| `created_time` | thời điểm tạo (Entity đã có `created_at`) |
 | `created_by` | người tạo |
 | `last_edited_time` | sửa lần cuối (đã có `updated_at`) |
 | `last_edited_by` | người sửa cuối |

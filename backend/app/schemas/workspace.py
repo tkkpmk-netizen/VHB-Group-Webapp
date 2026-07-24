@@ -42,8 +42,26 @@ class MemberAdd(BaseModel):
 
 class DatabaseCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    icon: str | None = Field(default=None, max_length=16)
-    folder_id: uuid.UUID | None = None
+    icon: str | None = Field(default=None, max_length=64)
+    icon_color: str | None = Field(default=None, max_length=32)
+    description: str | None = Field(default=None, max_length=2_000)
+
+
+class DatabaseUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    icon: str | None = Field(default=None, max_length=64)
+    icon_color: str | None = Field(default=None, max_length=32)
+    description: str | None = Field(default=None, max_length=2_000)
+    order: int | None = Field(default=None, ge=0)
+
+
+class DatabasePlacement(BaseModel):
+    id: uuid.UUID
+    order: int = Field(ge=0)
+
+
+class DatabaseReorder(BaseModel):
+    items: list[DatabasePlacement] = Field(min_length=1, max_length=500)
 
 
 class DatabaseOut(BaseModel):
@@ -51,6 +69,9 @@ class DatabaseOut(BaseModel):
 
     id: uuid.UUID
     workspace_id: uuid.UUID
-    folder_id: uuid.UUID | None
     name: str
     icon: str | None
+    icon_color: str | None
+    description: str | None
+    order: int
+    is_favorite: bool = False

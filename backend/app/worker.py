@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.asset import Asset, AssetStatus
 from app.models.database import Database
-from app.models.field import Field, Row
+from app.models.field import Entity, Field
 from app.models.job import Job
 from app.models.notification import Notification
 from app.models.site import SiteDeployment, SiteDeploymentStatus
@@ -25,7 +25,7 @@ from app.services.email import send_email
 from app.services.events import publish_next_outbox_event
 from app.services.jobs import claim_next_job, complete_job, fail_job
 from app.services.site_build import build_site_deployment
-from app.services.spreadsheets import export_rows, import_rows, read_tabular
+from app.services.spreadsheets import export_entities, import_entities, read_tabular
 from app.services.storage import ObjectStorage, get_object_storage
 
 settings = get_settings()
@@ -66,13 +66,19 @@ async def execute_job(db: AsyncSession, job: Job, storage: ObjectStorage) -> dic
         )
         if not headers:
             raise ValueError("Spreadsheet has no header row")
-        return await import_rows(
+        return await import_entities(
             db,
             database=database,
             headers=headers,
             records=records,
             mapping=dict(job.payload.get("mapping") or {}),
+            field_types=dict(job.payload.get("field_types") or {}),
             create_missing_fields=bool(job.payload.get("create_missing_fields", True)),
+            data_source_id=uuid.UUID(str(job.payload["data_source_id"])),
+            name_column=str(job.payload["name_column"]),
+            include_rows=job.payload.get("include_rows"),
+            incoming_duplicate_policy=str(job.payload.get("incoming_duplicate_policy", "suffix")),
+            existing_name_policy=str(job.payload.get("existing_name_policy", "suffix")),
         )
     if job.type == "database.export":
         database = await db.get(Database, uuid.UUID(str(job.payload["database_id"])))
@@ -85,15 +91,17 @@ async def execute_job(db: AsyncSession, job: Job, storage: ObjectStorage) -> dic
                 )
             ).scalars()
         )
-        rows = list(
+        entities = list(
             (
                 await db.execute(
-                    select(Row).where(Row.database_id == database.id).order_by(Row.order, Row.seq)
+                    select(Entity)
+                    .where(Entity.database_id == database.id)
+                    .order_by(Entity.order, Entity.seq)
                 )
             ).scalars()
         )
         file_format = str(job.payload["format"])
-        data, content_type = export_rows(fields, rows, file_format)
+        data, content_type = export_entities(fields, entities, file_format)
         asset_id = uuid.uuid4()
         filename = f"{database.name}.{file_format}"
         object_key = f"workspaces/{job.workspace_id}/exports/{asset_id}/{filename}"
@@ -110,7 +118,7 @@ async def execute_job(db: AsyncSession, job: Job, storage: ObjectStorage) -> dic
         )
         db.add(asset)
         await db.commit()
-        return {"asset_id": str(asset.id), "rows_exported": len(rows)}
+        return {"asset_id": str(asset.id), "entities_exported": len(entities)}
     if job.type == "notification.email":
         notification = await db.get(Notification, uuid.UUID(str(job.payload["notification_id"])))
         if notification is None or notification.workspace_id != job.workspace_id:

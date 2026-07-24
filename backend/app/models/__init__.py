@@ -2,15 +2,18 @@
 
 from app.models.asset import Asset, AssetStatus
 from app.models.dashboard import Dashboard, DashboardWidget, WidgetType
+from app.models.data_source import DataSource, DataSourceKind
 from app.models.database import Database
 from app.models.document import Document
 from app.models.drive_file import DriveFile
 from app.models.event import AuditEvent, OutboxEvent
-from app.models.field import Field, FieldType, Row, RowLink
+from app.models.favorite import DatabaseFavorite
+from app.models.field import Entity, EntityLink, Field, FieldType
 from app.models.job import Job, JobStatus
+from app.models.layout import Layout, LayoutType
 from app.models.notification import Notification, NotificationPreference
 from app.models.permission import ResourceGrant, ResourceRole, ResourceType
-from app.models.resource import Folder, Space
+from app.models.resource import Folder, Space, SpaceDatabasePlacement
 from app.models.site import (
     Site,
     SiteDataBinding,
@@ -21,7 +24,7 @@ from app.models.site import (
     SitePage,
 )
 from app.models.user import IdentityAccount, User
-from app.models.view import View, ViewType
+from app.models.view_preset import ViewPreset
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
 
 __all__ = [
@@ -29,10 +32,15 @@ __all__ = [
     "AssetStatus",
     "AuditEvent",
     "Database",
+    "DatabaseFavorite",
     "Dashboard",
     "DashboardWidget",
+    "DataSource",
+    "DataSourceKind",
     "Document",
     "DriveFile",
+    "Entity",
+    "EntityLink",
     "ResourceGrant",
     "ResourceRole",
     "ResourceType",
@@ -41,14 +49,15 @@ __all__ = [
     "Folder",
     "Job",
     "JobStatus",
+    "Layout",
+    "LayoutType",
     "IdentityAccount",
     "MemberRole",
     "OutboxEvent",
     "Notification",
     "NotificationPreference",
-    "Row",
-    "RowLink",
     "Space",
+    "SpaceDatabasePlacement",
     "Site",
     "SiteDataBinding",
     "SiteDeployment",
@@ -57,8 +66,7 @@ __all__ = [
     "SiteEnvironment",
     "SitePage",
     "User",
-    "View",
-    "ViewType",
+    "ViewPreset",
     "Workspace",
     "WorkspaceMember",
     "WidgetType",

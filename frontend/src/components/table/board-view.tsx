@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, FaIcon, Plus } from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { CellEditor, ValueChip } from "@/components/table/cell-editor";
+import { EntityNameDialog } from "@/components/table/entity-name-dialog";
 import {
   applyFilterTree,
   applySorts,
@@ -17,7 +18,7 @@ import type { components } from "@/lib/api/schema";
 import { ViewQueryState } from "@/components/table/view-query-state";
 
 type Field = components["schemas"]["FieldOut"];
-type Row = components["schemas"]["RowOut"];
+type Entity = components["schemas"]["EntityOut"];
 type Choice = { id: string; label: string };
 type Col = { key: string; label: string; value: unknown; chip: boolean };
 
@@ -39,7 +40,7 @@ const NON_SETTABLE = new Set([
 const isEmpty = (v: unknown) =>
   v == null || v === "" || (Array.isArray(v) && v.length === 0);
 
-function columnsFor(f: Field, rows: Row[]): Col[] {
+function columnsFor(f: Field, entities: Entity[]): Col[] {
   const none: Col = { key: "__none__", label: `No ${f.name}`, value: null, chip: false };
   if (["select", "status", "priority"].includes(f.type)) {
     const choices = (f.options as { choices?: Choice[] })?.choices ?? [];
@@ -52,7 +53,7 @@ function columnsFor(f: Field, rows: Row[]): Col[] {
     ];
   // Generic: one column per distinct displayed value present in the data.
   const seen = new Map<string, Col>();
-  for (const r of rows) {
+  for (const r of entities) {
     const v = (r.data as Record<string, unknown>)[f.id];
     if (isEmpty(v)) continue;
     const label = toText(f, v);
@@ -61,8 +62,8 @@ function columnsFor(f: Field, rows: Row[]): Col[] {
   return [none, ...seen.values()];
 }
 
-function matches(f: Field, row: Row, col: Col): boolean {
-  const v = (row.data as Record<string, unknown>)[f.id];
+function matches(f: Field, entity: Entity, col: Col): boolean {
+  const v = (entity.data as Record<string, unknown>)[f.id];
   if (f.type === "checkbox") return (v === true) === (col.value === true);
   if (col.value === null) return isEmpty(v);
   return v === col.value || toText(f, v) === toText(f, col.value);
@@ -76,8 +77,10 @@ export function BoardView({
   sorts,
   limit,
   hidden,
+  dataSourceId,
   filterToMatches,
   matchedIds,
+  openEntity,
 }: {
   databaseId: string;
   boardField: string | null;
@@ -86,29 +89,35 @@ export function BoardView({
   sorts: SortRule[];
   limit: number;
   hidden: Set<string>;
+  dataSourceId: string | null;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
+  openEntity: (entity: Entity) => void;
 }) {
   const qc = useQueryClient();
-  const [dragRow, setDragRow] = useState<string | null>(null);
-  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [dragEntity, setDragEntity] = useState<string | null>(null);
+  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
   // Per-column "load more" clicks, keyed by swimlane:column.
   const [colPages, setColPages] = useState<Record<string, number>>({});
+  const [newCard, setNewCard] = useState<{ data: Record<string, unknown>; pageKey: string } | null>(null);
 
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const rowsQ = useQuery<Row[]>({
-    queryKey: ["rows", databaseId],
-    queryFn: () => apiFetch<Row[]>(`/databases/${databaseId}/rows`),
+  const entitiesQ = useQuery<Entity[]>({
+    queryKey: ["entities", databaseId, dataSourceId],
+    queryFn: () =>
+      apiFetch<Entity[]>(
+        `/databases/${databaseId}/entities${dataSourceId ? `?data_source_id=${dataSourceId}` : ""}`,
+      ),
   });
 
   const fields = fieldsQ.data ?? [];
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
-  let rows = applyFilterTree(rowsQ.data ?? [], byId, filterRoot);
-  if (filterToMatches && matchedIds) rows = rows.filter((r) => matchedIds.has(r.id));
-  rows = applySorts(rows, byId, sorts);
+  let entities = applyFilterTree(entitiesQ.data ?? [], byId, filterRoot);
+  if (filterToMatches && matchedIds) entities = entities.filter((r) => matchedIds.has(r.id));
+  entities = applySorts(entities, byId, sorts);
 
   const groupable = fields.filter((f) =>
     ["select", "status", "priority"].includes(f.type),
@@ -128,31 +137,34 @@ export function BoardView({
     .slice(0, 3);
 
   const save = useMutation({
-    mutationFn: ({ rowId, data }: { rowId: string; data: Record<string, unknown> }) =>
-      apiFetch<Row>(`/rows/${rowId}`, {
+    mutationFn: ({ entityId, data }: { entityId: string; data: Record<string, unknown> }) =>
+      apiFetch<Entity>(`/entities/${entityId}`, {
         method: "PATCH",
         body: JSON.stringify({ data }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rows", databaseId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", databaseId] }),
   });
   const addCard = useMutation({
     mutationFn: ({
       data,
+      name,
     }: {
       data: Record<string, unknown>;
       pageKey: string;
+      name: string;
     }) =>
-      apiFetch<Row>(`/databases/${databaseId}/rows`, {
+      apiFetch<Entity>(`/databases/${databaseId}/entities`, {
         method: "POST",
-        body: JSON.stringify({ data }),
+        body: JSON.stringify({ name, data }),
       }),
     onSuccess: (created, variables) => {
-      setEditingRowId(created.id);
+      setEditingEntityId(created.id);
+      setNewCard(null);
       setColPages((pages) => ({
         ...pages,
-        [variables.pageKey]: Math.ceil(((rowsQ.data?.length ?? 0) + 1) / limit),
+        [variables.pageKey]: Math.ceil(((entitiesQ.data?.length ?? 0) + 1) / limit),
       }));
-      qc.invalidateQueries({ queryKey: ["rows", databaseId] });
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
     },
   });
 
@@ -170,10 +182,10 @@ export function BoardView({
       )
         return;
       e.preventDefault();
-      const col = columnsFor(field, rows)[0];
+      const col = columnsFor(field, entities)[0];
       const data: Record<string, unknown> = {};
       if (!NON_SETTABLE.has(field.type)) data[field.id] = col.value;
-      addCard.mutate({ data, pageKey: `:${col.key}` });
+      setNewCard({ data, pageKey: `:${col.key}` });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -195,50 +207,62 @@ export function BoardView({
     return data;
   }
   function dropOn(col: Col, sub?: Col) {
-    if (!dragRow) return;
+    if (!dragEntity) return;
     const data = placement(col, sub);
-    if (Object.keys(data).length) save.mutate({ rowId: dragRow, data });
-    setDragRow(null);
+    if (Object.keys(data).length) save.mutate({ entityId: dragEntity, data });
+    setDragEntity(null);
   }
 
-  const columns = columnsFor(field, rows);
-  const swimlanes: (Col | null)[] = subField ? columnsFor(subField, rows) : [null];
+  const columns = columnsFor(field, entities);
+  const swimlanes: (Col | null)[] = subField ? columnsFor(subField, entities) : [null];
 
-  const cardTitle = (r: Row) => {
+  const cardTitle = (r: Entity) => {
     const v = titleField ? (r.data as Record<string, unknown>)[titleField.id] : null;
-    return typeof v === "string" && v ? v : `#${r.seq}`;
+    return typeof v === "string" && v ? v : r.uid;
   };
 
   // Plain render fns (NOT components) so columns don't remount on every parent
   // re-render — which would reset each column's scroll to the top.
-  const renderCard = (r: Row) => (
+  const renderCard = (r: Entity) => (
       <div
         key={r.id}
-        draggable={editingRowId !== r.id}
-        onDragStart={() => setDragRow(r.id)}
-        className="cursor-grab space-y-2 rounded-lg border bg-card p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md active:cursor-grabbing"
+        draggable={editingEntityId !== r.id}
+        onDragStart={() => setDragEntity(r.id)}
+        className="group cursor-grab space-y-1.5 rounded-lg border bg-card p-2.5 text-[11px] leading-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md active:cursor-grabbing"
       >
-        <div className="text-sm font-medium">
+        <div className="flex items-start gap-1 text-[11px] font-medium">
+          <div className="min-w-0 flex-1">
           {titleField ? (
             <CellEditor
-              key={editingRowId === r.id ? "edit" : "view"}
+              key={editingEntityId === r.id ? "edit" : "view"}
               field={titleField}
               value={(r.data as Record<string, unknown>)[titleField.id] ?? null}
               onCommit={(value) =>
-                save.mutate({ rowId: r.id, data: { [titleField.id]: value } })
+                save.mutate({ entityId: r.id, data: { [titleField.id]: value } })
               }
-              autoEdit={editingRowId === r.id}
-              onFinish={() => setEditingRowId(null)}
+              autoEdit={editingEntityId === r.id}
+              onFinish={() => setEditingEntityId(null)}
             />
           ) : (
             cardTitle(r)
           )}
+          </div>
+          <button
+            type="button"
+            draggable={false}
+            onClick={() => openEntity(r)}
+            title="Open entity"
+            aria-label={`Open ${r.name}`}
+            className="rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-primary group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            <FaIcon name="window-maximize.1" className="size-3.5" />
+          </button>
         </div>
         {cardFields.map((f) => {
           const v = (r.data as Record<string, unknown>)[f.id];
           if (isEmpty(v)) return null;
           return (
-            <div key={f.id} className="flex items-center gap-1 text-xs">
+            <div key={f.id} className="flex items-center gap-1 text-[10px] leading-4">
               <span className="text-muted-foreground">{f.name}:</span>
               {CHIP_TYPES.has(f.type) ? (
                 <ValueChip field={f} value={Array.isArray(v) ? v[0] : v} />
@@ -252,7 +276,7 @@ export function BoardView({
     );
 
   const renderColumn = (col: Col, sub?: Col) => {
-    const cards = rows.filter(
+    const cards = entities.filter(
       (r) => matches(field!, r, col) && (!sub || matches(subField!, r, sub)),
     );
     const pgKey = `${sub?.key ?? ""}:${col.key}`;
@@ -262,20 +286,20 @@ export function BoardView({
     return (
       <div
         key={`${sub?.key ?? ""}:${col.key}`}
-        onDragOver={(e) => dragRow && e.preventDefault()}
+        onDragOver={(e) => dragEntity && e.preventDefault()}
         onDrop={() => dropOn(col, sub)}
-        className="flex max-h-[calc(100vh-17rem)] min-h-56 w-72 shrink-0 flex-col rounded-xl border bg-muted/30"
+        className="flex h-full min-h-56 w-64 shrink-0 flex-col rounded-xl border bg-muted/30"
       >
-        <div className="flex items-center gap-2 px-3 py-2">
+        <div className="flex h-7 items-center gap-1.5 px-2">
           {col.chip ? (
             <ValueChip field={field!} value={col.value} />
           ) : (
-            <span className="text-sm text-muted-foreground">{col.label}</span>
+            <span className="text-[11px] font-medium text-muted-foreground">{col.label}</span>
           )}
-          <span className="text-xs text-muted-foreground">{cards.length}</span>
+          <span className="text-[10px] text-muted-foreground">{cards.length}</span>
           <button
             onClick={() =>
-              addCard.mutate({ data: placement(col, sub), pageKey: pgKey })
+              setNewCard({ data: placement(col, sub), pageKey: pgKey })
             }
             title={`Create in ${col.label}`}
             className="ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -283,7 +307,7 @@ export function BoardView({
             <Plus className="size-3.5" />
           </button>
         </div>
-        <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2 [scrollbar-gutter:stable]">
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-1.5 pb-1.5 [scrollbar-gutter:stable]">
           {visible.length === 0 && (
             <div className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
               Drop a card here or create a new one.
@@ -302,7 +326,7 @@ export function BoardView({
           )}
           <button
             onClick={() =>
-              addCard.mutate({ data: placement(col, sub), pageKey: pgKey })
+              setNewCard({ data: placement(col, sub), pageKey: pgKey })
             }
             className="flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
           >
@@ -314,19 +338,22 @@ export function BoardView({
   };
 
   return (
-    <div className="relative min-h-40 space-y-4">
+    <div className="relative flex h-full min-h-40 flex-col gap-3 overflow-y-auto">
       <ViewQueryState
-        loading={fieldsQ.isLoading || rowsQ.isLoading}
-        error={fieldsQ.isError || rowsQ.isError}
+        loading={fieldsQ.isLoading || entitiesQ.isLoading}
+        error={fieldsQ.isError || entitiesQ.isError}
         onRetry={() => {
           void fieldsQ.refetch();
-          void rowsQ.refetch();
+          void entitiesQ.refetch();
         }}
       />
       {swimlanes.map((sub) => (
-        <div key={sub?.key ?? "all"} className="space-y-2">
+        <div
+          key={sub?.key ?? "all"}
+          className={`flex min-h-0 flex-col gap-1.5 ${subField ? "min-h-72" : "flex-1"}`}
+        >
           {sub && (
-            <div className="flex items-center gap-2 border-b pb-1 text-sm font-medium">
+            <div className="flex h-6 items-center gap-2 border-b text-[11px] font-medium">
               {sub.chip ? (
                 <ValueChip field={subField!} value={sub.value} />
               ) : (
@@ -334,11 +361,18 @@ export function BoardView({
               )}
             </div>
           )}
-          <div className="flex gap-3 overflow-x-auto pb-2">
+          <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto pb-1">
             {columns.map((col) => renderColumn(col, sub ?? undefined))}
           </div>
         </div>
       ))}
+      <EntityNameDialog
+        open={Boolean(newCard)}
+        pending={addCard.isPending}
+        onClose={() => setNewCard(null)}
+        onCreate={(name) => newCard && addCard.mutate({ ...newCard, name })}
+        label="New card"
+      />
     </div>
   );
 }

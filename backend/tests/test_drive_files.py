@@ -59,16 +59,21 @@ async def test_upload_preview_and_delete_drive_file(client: httpx.AsyncClient) -
         json={"name": "Files", "type": "files", "options": {}},
         headers=headers,
     )
-    row = await client.post(f"/databases/{database_id}/rows", json={"data": {}}, headers=headers)
+    entity = await client.post(
+        f"/databases/{database_id}/entities",
+        json={"name": "Test entity", "data": {}},
+        headers=headers,
+    )
     upload = await client.post(
-        (f"/databases/{database_id}/rows/{row.json()['id']}/fields/{field.json()['id']}/files"),
+        f"/databases/{database_id}/entities/{entity.json()['id']}"
+        f"/fields/{field.json()['id']}/files",
         files={"files": ("photo.png", b"fake-png", "image/png")},
         headers=headers,
     )
     assert upload.status_code == 201, upload.text
     drive_file = upload.json()[0]
-    rows = await client.get(f"/databases/{database_id}/rows", headers=headers)
-    cell = rows.json()[0]["data"][field.json()["id"]]
+    entities = await client.get(f"/databases/{database_id}/entities", headers=headers)
+    cell = entities.json()[0]["data"][field.json()["id"]]
     assert cell[0]["id"] == drive_file["id"]
 
     content = await client.get(
@@ -85,12 +90,12 @@ async def test_upload_preview_and_delete_drive_file(client: httpx.AsyncClient) -
     )
     assert deleted.status_code == 204
     assert drive.deleted == ["drive-1"]
-    rows = await client.get(f"/databases/{database_id}/rows", headers=headers)
-    assert rows.json()[0]["data"][field.json()["id"]] == []
+    entities = await client.get(f"/databases/{database_id}/entities", headers=headers)
+    assert entities.json()[0]["data"][field.json()["id"]] == []
 
 
 @pytest.mark.asyncio
-async def test_delete_row_cleans_drive_file(
+async def test_delete_entity_cleans_drive_file(
     client: httpx.AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -105,15 +110,20 @@ async def test_delete_row_cleans_drive_file(
         json={"name": "Files", "type": "files", "options": {}},
         headers=headers,
     )
-    row = await client.post(f"/databases/{database_id}/rows", json={"data": {}}, headers=headers)
+    entity = await client.post(
+        f"/databases/{database_id}/entities",
+        json={"name": "Test entity", "data": {}},
+        headers=headers,
+    )
     upload = await client.post(
-        (f"/databases/{database_id}/rows/{row.json()['id']}/fields/{field.json()['id']}/files"),
+        f"/databases/{database_id}/entities/{entity.json()['id']}"
+        f"/fields/{field.json()['id']}/files",
         files={"files": ("contract.pdf", b"fake-pdf", "application/pdf")},
         headers=headers,
     )
     assert upload.status_code == 201, upload.text
 
-    deleted = await client.delete(f"/rows/{row.json()['id']}", headers=headers)
+    deleted = await client.delete(f"/entities/{entity.json()['id']}", headers=headers)
     assert deleted.status_code == 204
     assert drive.deleted == ["drive-1"]
     assert drive.objects == {}

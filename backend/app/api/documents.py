@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
+from app.models.database import Database
 from app.models.document import Document
+from app.models.field import Entity
 from app.models.permission import ResourceType
 from app.models.resource import Folder, Space
 from app.models.user import User
@@ -53,16 +55,35 @@ async def _validate_folder(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found")
 
 
+async def _validate_source_entity(
+    entity_id: uuid.UUID | None, workspace: Workspace, db: AsyncSession
+) -> Entity | None:
+    if entity_id is None:
+        return None
+    entity = await db.scalar(
+        select(Entity)
+        .join(Database, Database.id == Entity.database_id)
+        .where(Entity.id == entity_id, Database.workspace_id == workspace.id)
+    )
+    if entity is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Entity not found")
+    return entity
+
+
 @router.get("", response_model=list[DocumentOut])
 async def list_documents(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
+    source_entity_id: uuid.UUID | None = Query(default=None),
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db),
 ) -> list[Document]:
+    query = select(Document).where(Document.workspace_id == workspace.id)
+    if source_entity_id is not None:
+        await _validate_source_entity(source_entity_id, workspace, db)
+        query = query.where(Document.source_entity_id == source_entity_id)
     result = await db.execute(
-        select(Document)
-        .where(Document.workspace_id == workspace.id)
+        query
         .order_by(Document.updated_at.desc())
         .offset(offset)
         .limit(limit)
@@ -78,14 +99,22 @@ async def create_document(
     db: AsyncSession = Depends(get_db),
 ) -> Document:
     await _validate_folder(payload.folder_id, workspace, db)
+    source_entity = await _validate_source_entity(payload.source_entity_id, workspace, db)
+    content: list[dict[str, object]] = [{"type": "paragraph", "content": ""}]
+    if source_entity is not None:
+        # The linked entity is rendered as Notion-style page metadata by the
+        # client; keep the body clean for the author's actual document.
+        content = [{"type": "paragraph", "content": ""}]
     document = Document(
         workspace_id=workspace.id,
         folder_id=payload.folder_id,
+        source_entity_id=payload.source_entity_id,
         created_by_id=current_user.id,
         updated_by_id=current_user.id,
         title=payload.title,
         icon=payload.icon,
-        content=[{"type": "paragraph", "content": ""}],
+        icon_color=payload.icon_color,
+        content=content,
     )
     db.add(document)
     await db.flush()

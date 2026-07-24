@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { AlertCircle, X } from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
 
@@ -114,7 +114,10 @@ export function FormulaEditor({
             <span className="truncate text-sm">
               {preview?.error ? (
                 debug ? (
-                  <span className="text-destructive">⚠ {preview.error}</span>
+                  <span className="inline-flex items-center gap-1 text-destructive" role="alert">
+                    <AlertCircle className="size-3.5" />
+                    {preview.error}
+                  </span>
                 ) : (
                   <span className="text-muted-foreground">No output</span>
                 )
