@@ -13,7 +13,11 @@ type Notification = {
   created_at: string;
 };
 
-export function NotificationBell() {
+export function NotificationBell({
+  placement = "default",
+}: {
+  placement?: "default" | "account";
+}) {
   const queryClient = useQueryClient();
   const workspaceId = getWorkspaceId();
   const [open, setOpen] = useState(false);
@@ -69,7 +73,13 @@ export function NotificationBell() {
             className="fixed inset-0 z-[80]"
             onClick={() => setOpen(false)}
           />
-          <section className="vhb-popover-shadow absolute right-0 top-9 z-[90] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover">
+          <section
+            className={`vhb-popover-shadow z-[100] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover ${
+              placement === "account"
+                ? "fixed bottom-2 left-2 sm:left-[calc(var(--app-rail-width)+18rem)]"
+                : "absolute right-0 top-9"
+            }`}
+          >
             <header className="flex items-center justify-between border-b px-3 py-2.5">
               <h2 className="text-sm font-semibold">Notifications</h2>
               <button

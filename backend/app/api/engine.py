@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import Float, String, case, cast, delete, func, or_, select
+from sqlalchemy import Boolean, Float, String, and_, case, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -18,8 +18,12 @@ from app.models.user import User
 from app.models.workspace import MemberRole, Workspace, WorkspaceMember
 from app.schemas.engine import (
     BulkEntityCreate,
+    BulkEntityUpdate,
     EntityCreate,
+    EntityFilter,
+    EntityFilterGroup,
     EntityGroup,
+    EntityIdsQuery,
     EntityOut,
     EntityPage,
     EntityQuery,
@@ -33,6 +37,12 @@ from app.schemas.engine import (
     FormulaPreviewResult,
     ReorderRequest,
     SubItemTreeQuery,
+)
+from app.services.database_history import (
+    record_database_change,
+    snapshot_entity,
+    snapshot_field,
+    snapshot_link,
 )
 from app.services.drive_file_cleanup import cleanup_drive_files
 from app.services.engine import (
@@ -78,6 +88,31 @@ async def _list_fields(db: AsyncSession, database_id: uuid.UUID) -> list[Field]:
     return list(result.scalars().all())
 
 
+async def _unique_field_name(
+    db: AsyncSession,
+    database_id: uuid.UUID,
+    requested: str,
+    *,
+    exclude_id: uuid.UUID | None = None,
+) -> str:
+    """Return a trimmed field name or reject a case-insensitive duplicate."""
+    name = requested.strip()
+    if not name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Field name is required")
+    stmt = select(Field.id).where(
+        Field.database_id == database_id,
+        func.lower(Field.name) == name.casefold(),
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Field.id != exclude_id)
+    if await db.scalar(stmt):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f'A field named "{name}" already exists in this database',
+        )
+    return name
+
+
 async def _assert_field_write_permissions(
     db: AsyncSession,
     *,
@@ -91,8 +126,7 @@ async def _assert_field_write_permissions(
     protected = [
         by_id[field_id].name
         for field_id in data
-        if field_id in by_id
-        and (by_id[field_id].options or {}).get("edit_permission") == "admins"
+        if field_id in by_id and (by_id[field_id].options or {}).get("edit_permission") == "admins"
     ]
     if not protected:
         return
@@ -415,11 +449,18 @@ async def create_field(
     database_id: uuid.UUID,
     payload: FieldCreate,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Field:
     source_db = await _scoped_database(database_id, workspace, db)
     existing = await _list_fields(db, database_id)
     order = (max((f.order for f in existing), default=0)) + 1
+    if payload.type == FieldType.name:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Use Change field type to promote an existing field to Name",
+        )
+    field_name = await _unique_field_name(db, database_id, payload.name)
 
     if payload.type == FieldType.relation:
         target_id = payload.options.get("target_database_id")
@@ -433,7 +474,7 @@ async def create_field(
         two_way = bool(payload.options.get("two_way"))
         field = Field(
             database_id=database_id,
-            name=payload.name,
+            name=field_name,
             type=FieldType.relation,
             icon=payload.icon,
             icon_color=payload.icon_color,
@@ -444,9 +485,10 @@ async def create_field(
         await db.flush()
         if two_way:
             t_existing = await _list_fields(db, target_uuid)
+            mirror_name = await _unique_field_name(db, target_uuid, source_db.name)
             mirror = Field(
                 database_id=target_uuid,
-                name=source_db.name,
+                name=mirror_name,
                 type=FieldType.relation,
                 icon=payload.icon,
                 icon_color=payload.icon_color,
@@ -460,13 +502,31 @@ async def create_field(
             db.add(mirror)
             await db.flush()
             field.options = {**field.options, "paired_field_id": str(mirror.id)}
+        record_database_change(
+            db,
+            workspace_id=workspace.id,
+            database_id=database_id,
+            actor_id=current_user.id,
+            action="field.created",
+            summary=f'Created field "{field.name}"',
+            created={
+                "fields": [
+                    field.id,
+                    *(
+                        [uuid.UUID(str(field.options["paired_field_id"]))]
+                        if field.options.get("paired_field_id")
+                        else []
+                    ),
+                ]
+            },
+        )
         await db.commit()
         await db.refresh(field)
         return field
 
     field = Field(
         database_id=database_id,
-        name=payload.name,
+        name=field_name,
         type=payload.type,
         icon=payload.icon,
         icon_color=payload.icon_color,
@@ -474,6 +534,16 @@ async def create_field(
         order=order,
     )
     db.add(field)
+    await db.flush()
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="field.created",
+        summary=f'Created field "{field.name}"',
+        created={"fields": [field.id]},
+    )
     await db.commit()
     await db.refresh(field)
     return field
@@ -486,6 +556,7 @@ async def create_field(
 async def enable_sub_items(
     database_id: uuid.UUID,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Create a two-way self-relation: 'Sub-item' (owner) + 'Parent item' (mirror)."""
@@ -494,6 +565,8 @@ async def enable_sub_items(
     if any(f.type == FieldType.relation and (f.options or {}).get("sub_item") for f in existing):
         raise HTTPException(status.HTTP_409_CONFLICT, "Sub-items already enabled")
     order = (max((f.order for f in existing), default=0)) + 1
+    await _unique_field_name(db, database_id, "Sub-item")
+    await _unique_field_name(db, database_id, "Parent item")
     owner = Field(
         database_id=database_id,
         name="Sub-item",
@@ -522,6 +595,15 @@ async def enable_sub_items(
     db.add(mirror)
     await db.flush()
     owner.options = {**owner.options, "paired_field_id": str(mirror.id)}
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="field.sub_items_enabled",
+        summary="Enabled sub-items",
+        created={"fields": [owner.id, mirror.id]},
+    )
     await db.commit()
     return {"sub_item_field": str(owner.id), "parent_field": str(mirror.id)}
 
@@ -538,13 +620,15 @@ async def update_field(
     if field is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Field not found")
     await _scoped_database(field.database_id, workspace, db)
-    if (field.options or {}).get("system_key") in {"uid", "name"}:
+    before_field = snapshot_field(field)
+    system_key = (field.options or {}).get("system_key")
+    if system_key == "uid":
         if payload.name is not None and payload.name != field.name:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, "Built-in UID and Name fields cannot be renamed"
-            )
+            raise HTTPException(status.HTTP_409_CONFLICT, "The built-in ID field cannot be renamed")
     if payload.name is not None:
-        field.name = payload.name
+        field.name = await _unique_field_name(
+            db, field.database_id, payload.name, exclude_id=field.id
+        )
     if "icon" in payload.model_fields_set:
         field.icon = payload.icon
     if "icon_color" in payload.model_fields_set:
@@ -583,7 +667,22 @@ async def update_field(
             }
             preserved = {k: v for k, v in (field.options or {}).items() if k in structural}
             options = {**{k: v for k, v in options.items() if k not in structural}, **preserved}
+        if system_key in {"uid", "name"}:
+            options = {
+                **options,
+                "system_key": system_key,
+                **({"required": True} if system_key == "name" else {}),
+            }
         field.options = options
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=field.database_id,
+        actor_id=current_user.id,
+        action="field.updated",
+        summary=f'Updated field "{field.name}"',
+        before={"fields": [before_field]},
+    )
     await db.commit()
     await db.refresh(field)
     return field
@@ -597,6 +696,7 @@ async def convert_field_type(
     field_id: uuid.UUID,
     payload: FieldTypeConversionRequest,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FieldTypeConversionResult:
     """Preview or apply a lossy conversion of every persisted cell in a field."""
@@ -605,10 +705,143 @@ async def convert_field_type(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Field not found")
     await _scoped_database(field.database_id, workspace, db)
     source_type = field.type
-    if (field.options or {}).get("system_key") in {"uid", "name"}:
+    system_key = (field.options or {}).get("system_key")
+    if system_key == "uid":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Built-in identity fields cannot change type",
+        )
+    if system_key == "name":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Promote another field to Name to change the current Name field to text",
+        )
+    if payload.target_type == FieldType.name:
+        entities = list(
+            (
+                await db.scalars(
+                    select(Entity)
+                    .where(Entity.database_id == field.database_id)
+                    .order_by(Entity.seq)
+                )
+            ).all()
+        )
+        field_key = str(field.id)
+        promoted_names: dict[uuid.UUID, str] = {}
+        seen: set[str] = set()
+        invalid: list[str] = []
+        invalid_reason_counts: dict[str, int] = {}
+        invalid_samples: list[dict[str, Any]] = []
+        for entity in entities:
+            raw = entity.data.get(field_key)
+            candidate = str(raw).strip() if raw is not None else ""
+            reason: str | None = None
+            if not candidate:
+                reason = "Name is required"
+            elif len(candidate) > 200:
+                reason = "Name exceeds 200 characters"
+            elif candidate.casefold() in seen:
+                reason = "Name must be unique within the database"
+            if reason is not None:
+                invalid.append(entity.name)
+                invalid_reason_counts[reason] = invalid_reason_counts.get(reason, 0) + 1
+                if len(invalid_samples) < 8:
+                    invalid_samples.append(
+                        {
+                            "entity_id": entity.id,
+                            "entity_name": entity.name,
+                            "value": candidate,
+                            "reason": reason,
+                        }
+                    )
+                continue
+            seen.add(candidate.casefold())
+            promoted_names[entity.id] = candidate
+        invalid_entity_ids = [entity.id for entity in entities if entity.id not in promoted_names]
+        if invalid and (payload.dry_run or not payload.change_anyway):
+            return FieldTypeConversionResult(
+                source_type=source_type,
+                target_type=payload.target_type,
+                total_cells=len(entities),
+                converted_cells=len(promoted_names),
+                cleared_cells=len(invalid),
+                empty_cells=0,
+                cleared_samples=invalid[:5],
+                invalid_entity_ids=invalid_entity_ids,
+                invalid_reason_counts=invalid_reason_counts,
+                invalid_samples=invalid_samples,
+            )
+        if invalid_entity_ids:
+            wrong_format_index = 1
+            for entity in entities:
+                if entity.id not in invalid_entity_ids:
+                    continue
+                while True:
+                    candidate = f"WRONG FORMAT {wrong_format_index}"
+                    wrong_format_index += 1
+                    if candidate.casefold() not in seen:
+                        break
+                seen.add(candidate.casefold())
+                promoted_names[entity.id] = candidate
+        if payload.dry_run:
+            return FieldTypeConversionResult(
+                source_type=source_type,
+                target_type=payload.target_type,
+                total_cells=len(entities),
+                converted_cells=len(promoted_names),
+                cleared_cells=0,
+                empty_cells=0,
+            )
+        old_name = _system_field(await _list_fields(db, field.database_id), "name")
+        if old_name is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Database is missing its Name field")
+        conversion_before = {
+            "fields": [snapshot_field(field), snapshot_field(old_name)],
+            "entities": [snapshot_entity(entity) for entity in entities],
+        }
+        old_name.type = FieldType.text
+        old_name.options = {
+            key: value
+            for key, value in (old_name.options or {}).items()
+            if key not in {"system_key", "required"}
+        }
+        # Release the database-scoped partial unique slot before promoting the
+        # replacement field. This also makes the swap deterministic on
+        # PostgreSQL regardless of ORM UPDATE ordering.
+        await db.flush()
+        field.type = FieldType.name
+        field.options = {
+            **payload.options,
+            "system_key": "name",
+            "required": True,
+        }
+        for entity in entities:
+            previous_name = entity.name
+            entity.name = promoted_names[entity.id]
+            entity.data = {
+                **entity.data,
+                str(old_name.id): entity.data.get(str(old_name.id), previous_name),
+                field_key: promoted_names[entity.id],
+            }
+        record_database_change(
+            db,
+            workspace_id=workspace.id,
+            database_id=field.database_id,
+            actor_id=current_user.id,
+            action="field.type_changed",
+            summary=f'Changed field "{field.name}" from {source_type.value} to name',
+            before=conversion_before,
+        )
+        await db.commit()
+        await db.refresh(field)
+        return FieldTypeConversionResult(
+            field=FieldOut.model_validate(field),
+            source_type=source_type,
+            target_type=payload.target_type,
+            total_cells=len(entities),
+            converted_cells=len(promoted_names),
+            cleared_cells=0,
+            empty_cells=0,
         )
     if source_type not in CONVERTIBLE_FIELD_TYPES:
         raise HTTPException(
@@ -629,21 +862,57 @@ async def convert_field_type(
     entities = list(
         (
             await db.scalars(
-                select(Entity)
-                .where(Entity.database_id == field.database_id)
-                .order_by(Entity.seq)
+                select(Entity).where(Entity.database_id == field.database_id).order_by(Entity.seq)
             )
         ).all()
     )
-    plan = build_field_conversion_plan(
-        field, entities, payload.target_type, payload.options
-    )
+    plan = build_field_conversion_plan(field, entities, payload.target_type, payload.options)
     converted_field: Field | None = None
     if not payload.dry_run:
+        if plan.cleared_cells and not payload.change_anyway:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Some entities have an incompatible value; review them or choose Change Anyway",
+            )
+        name_field = _system_field(await _list_fields(db, field.database_id), "name")
+        conversion_before = {
+            "fields": [snapshot_field(field)],
+            "entities": [snapshot_entity(entity) for entity in entities],
+        }
+        invalid_ids = set(plan.invalid_entity_ids)
+        taken_names = {
+            entity.name.casefold() for entity in entities if entity.id not in invalid_ids
+        }
+        wrong_format_index = 1
         for entity in entities:
             entity.data = plan.entity_data[entity.id]
+            if entity.id in invalid_ids:
+                while True:
+                    replacement = f"WRONG FORMAT {wrong_format_index}"
+                    wrong_format_index += 1
+                    if replacement.casefold() not in taken_names:
+                        break
+                taken_names.add(replacement.casefold())
+                entity.name = replacement
+                if name_field is not None:
+                    entity.data = {
+                        **entity.data,
+                        str(name_field.id): replacement,
+                    }
         field.type = payload.target_type
         field.options = plan.target_options
+        record_database_change(
+            db,
+            workspace_id=workspace.id,
+            database_id=field.database_id,
+            actor_id=current_user.id,
+            action="field.type_changed",
+            summary=(
+                f'Changed field "{field.name}" from '
+                f"{source_type.value} to {payload.target_type.value}"
+            ),
+            before=conversion_before,
+        )
         await db.commit()
         await db.refresh(field)
         converted_field = field
@@ -658,6 +927,9 @@ async def convert_field_type(
         empty_cells=plan.empty_cells,
         generated_choices=plan.generated_choices,
         cleared_samples=plan.cleared_samples,
+        invalid_entity_ids=plan.invalid_entity_ids,
+        invalid_reason_counts=plan.invalid_reason_counts,
+        invalid_samples=plan.invalid_samples,
     )
 
 
@@ -665,6 +937,7 @@ async def convert_field_type(
 async def delete_field(
     field_id: uuid.UUID,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     field = await db.get(Field, field_id)
@@ -675,6 +948,21 @@ async def delete_field(
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Built-in UID and Name fields cannot be deleted"
         )
+    links = list(
+        (await db.scalars(select(EntityLink).where(EntityLink.field_id == field.id))).all()
+    )
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=field.database_id,
+        actor_id=current_user.id,
+        action="field.deleted",
+        summary=f'Deleted field "{field.name}"',
+        before={
+            "fields": [snapshot_field(field)],
+            "links": [snapshot_link(link) for link in links],
+        },
+    )
     await cleanup_drive_files(db, field_id=field.id)
     await db.delete(field)
     await db.commit()
@@ -688,14 +976,25 @@ async def reorder_fields(
     database_id: uuid.UUID,
     payload: ReorderRequest,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await _scoped_database(database_id, workspace, db)
     fields = {f.id: f for f in await _list_fields(db, database_id)}
+    before_fields = [snapshot_field(field) for field in fields.values()]
     for index, fid in enumerate(payload.ids):
         field = fields.get(fid)
         if field is not None:
             field.order = index
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="field.reordered",
+        summary="Reordered fields",
+        before={"fields": before_fields},
+    )
     await db.commit()
 
 
@@ -753,10 +1052,115 @@ def _field_expression(field_id: str, fields: dict[str, Field]) -> Any:
         return Entity.uid
     if (field.options or {}).get("system_key") == "name":
         return Entity.name
+    if field.type == FieldType.created_time:
+        return Entity.created_at
+    if field.type == FieldType.last_edited_time:
+        return Entity.updated_at
+    if field.type == FieldType.date:
+        return cast(Entity.data[field_id]["start"].astext, String)
     text_expr = Entity.data[field_id].astext
     if field.type in {FieldType.number, FieldType.rating, FieldType.progress}:
         return cast(func.nullif(text_expr, ""), Float)
+    if field.type == FieldType.checkbox:
+        return cast(func.nullif(text_expr, ""), Boolean)
     return cast(text_expr, String)
+
+
+def _entity_filter_condition(
+    filter_item: EntityFilter,
+    fields: dict[str, Field],
+) -> Any:
+    expression = _field_expression(filter_item.field_id, fields)
+    text_expression = func.coalesce(cast(expression, String), "")
+    if filter_item.operator == "eq":
+        return expression == filter_item.value
+    if filter_item.operator == "neq":
+        return expression.is_(None) | (expression != filter_item.value)
+    if filter_item.operator == "contains":
+        return text_expression.ilike(f"%{filter_item.value}%")
+    if filter_item.operator == "not_contains":
+        return ~text_expression.ilike(f"%{filter_item.value}%")
+    if filter_item.operator == "starts_with":
+        return text_expression.ilike(f"{filter_item.value}%")
+    if filter_item.operator == "ends_with":
+        return text_expression.ilike(f"%{filter_item.value}")
+    if filter_item.operator == "gt":
+        return expression > filter_item.value
+    if filter_item.operator == "gte":
+        return expression >= filter_item.value
+    if filter_item.operator == "lt":
+        return expression < filter_item.value
+    if filter_item.operator == "lte":
+        return expression <= filter_item.value
+    if filter_item.operator == "is_empty":
+        return expression.is_(None) | text_expression.in_(("", "[]", "null"))
+    return expression.is_not(None) & ~text_expression.in_(("", "[]", "null"))
+
+
+def _entity_filter_tree_condition(
+    group: EntityFilterGroup,
+    fields: dict[str, Field],
+    *,
+    depth: int = 0,
+) -> Any | None:
+    if depth > 5:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Filter nesting cannot exceed 5 levels",
+        )
+    clauses: list[Any] = []
+    for rule in group.rules:
+        if isinstance(rule, EntityFilterGroup):
+            nested = _entity_filter_tree_condition(rule, fields, depth=depth + 1)
+            if nested is not None:
+                clauses.append(nested)
+        else:
+            clauses.append(_entity_filter_condition(rule, fields))
+    if not clauses:
+        return None
+    return or_(*clauses) if group.conj == "or" else and_(*clauses)
+
+
+def _entity_search_condition(
+    query: str,
+    search_field_id: str | None,
+    fields: dict[str, Field],
+) -> Any:
+    """Build a database-wide case-insensitive search without pagination limits."""
+    needle = query.strip()
+    pattern = f"%{needle}%"
+    if search_field_id:
+        field = fields.get(search_field_id)
+        expression = _field_expression(search_field_id, fields)
+        clauses = [cast(expression, String).ilike(pattern)]
+        if field is not None:
+            matching_choice_ids = [
+                str(choice.get("id"))
+                for choice in (field.options or {}).get("choices", [])
+                if needle.casefold() in str(choice.get("label", "")).casefold()
+            ]
+            clauses.extend(
+                cast(Entity.data[search_field_id], String).ilike(f"%{choice_id}%")
+                for choice_id in matching_choice_ids
+            )
+        return or_(*clauses)
+
+    clauses = [
+        cast(Entity.name, String).ilike(pattern),
+        cast(Entity.uid, String).ilike(pattern),
+        cast(Entity.data, String).ilike(pattern),
+    ]
+    all_matching_choice_ids = {
+        str(choice.get("id"))
+        for field in fields.values()
+        for choice in (field.options or {}).get("choices", [])
+        if needle.casefold() in str(choice.get("label", "")).casefold()
+    }
+    clauses.extend(
+        cast(Entity.data, String).ilike(f"%{choice_id}%")
+        for choice_id in all_matching_choice_ids
+    )
+    return or_(*clauses)
 
 
 @router.post(
@@ -781,35 +1185,30 @@ async def query_entities(
     }
     for aggregation_item in payload.aggregations:
         field = field_map.get(aggregation_item.field_id)
-        if (
-            aggregation_item.function in {"sum", "avg", "min", "max"}
-            and (field is None or field.type not in numeric_aggregation_types)
+        if aggregation_item.function in {"sum", "avg", "min", "max"} and (
+            field is None or field.type not in numeric_aggregation_types
         ):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 f"{aggregation_item.function} requires a numeric field",
             )
 
-    for filter_item in payload.filters:
-        expression = _field_expression(filter_item.field_id, field_map)
-        if filter_item.operator == "eq":
-            conditions.append(expression == filter_item.value)
-        elif filter_item.operator == "neq":
-            conditions.append(expression != filter_item.value)
-        elif filter_item.operator == "contains":
-            conditions.append(cast(expression, String).ilike(f"%{filter_item.value}%"))
-        elif filter_item.operator == "gt":
-            conditions.append(expression > filter_item.value)
-        elif filter_item.operator == "gte":
-            conditions.append(expression >= filter_item.value)
-        elif filter_item.operator == "lt":
-            conditions.append(expression < filter_item.value)
-        elif filter_item.operator == "lte":
-            conditions.append(expression <= filter_item.value)
-        elif filter_item.operator == "is_empty":
-            conditions.append(expression.is_(None) | (cast(expression, String) == ""))
-        else:
-            conditions.append(expression.is_not(None) & (cast(expression, String) != ""))
+    conditions.extend(
+        _entity_filter_condition(filter_item, field_map)
+        for filter_item in payload.filters
+    )
+    if payload.filter_tree is not None:
+        tree_condition = _entity_filter_tree_condition(payload.filter_tree, field_map)
+        if tree_condition is not None:
+            conditions.append(tree_condition)
+    if payload.search and payload.search.strip():
+        conditions.append(
+            _entity_search_condition(
+                payload.search,
+                payload.search_field_id,
+                field_map,
+            )
+        )
 
     total = int(await db.scalar(select(func.count()).select_from(Entity).where(*conditions)) or 0)
     order_by: list[Any] = []
@@ -822,6 +1221,19 @@ async def query_entities(
         )
     if not order_by:
         order_by = [Entity.order.asc(), Entity.seq.asc()]
+    else:
+        # Keep offset pagination stable when multiple rows share a sort value.
+        order_by.extend([Entity.order.asc(), Entity.seq.asc(), Entity.id.asc()])
+
+    matched_entity_ids: list[uuid.UUID] = []
+    if payload.include_match_ids:
+        matched_entity_ids = list(
+            (
+                await db.scalars(
+                    select(Entity.id).where(*conditions).order_by(*order_by)
+                )
+            ).all()
+        )
 
     result = await db.execute(
         select(Entity)
@@ -859,7 +1271,10 @@ async def query_entities(
     groups: list[EntityGroup] = []
     if payload.group_by:
         group_expression = _field_expression(payload.group_by, field_map)
-        selections = [group_expression.label("group_key")]
+        selections = [
+            group_expression.label("group_key"),
+            func.count().label("group_total"),
+        ]
         aggregate_keys: list[str] = []
         for aggregation_item in payload.aggregations:
             expression = _field_expression(aggregation_item.field_id, field_map)
@@ -886,15 +1301,15 @@ async def query_entities(
             .where(*conditions)
             .group_by(group_expression)
             .order_by(group_expression.asc().nullslast())
-            .limit(100)
         )
         for grouped_row in grouped:
             groups.append(
                 EntityGroup(
                     key=grouped_row[0],
                     aggregates={
-                        key: grouped_row[index + 1] for index, key in enumerate(aggregate_keys)
+                        key: grouped_row[index + 2] for index, key in enumerate(aggregate_keys)
                     },
+                    total=int(grouped_row[1]),
                 )
             )
 
@@ -906,6 +1321,51 @@ async def query_entities(
         pages=(total + payload.page_size - 1) // payload.page_size,
         aggregates=aggregates,
         groups=groups,
+        matched_entity_ids=matched_entity_ids,
+    )
+
+
+@router.post(
+    "/databases/{database_id}/entities/by-ids",
+    response_model=EntityPage,
+)
+async def query_entities_by_ids(
+    database_id: uuid.UUID,
+    payload: EntityIdsQuery,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+) -> EntityPage:
+    """Page through an explicit review set without the normal view load limit."""
+    await _scoped_database(database_id, workspace, db)
+    conditions = [
+        Entity.database_id == database_id,
+        Entity.id.in_(payload.entity_ids),
+    ]
+    total = int(await db.scalar(select(func.count()).select_from(Entity).where(*conditions)) or 0)
+    entities = list(
+        (
+            await db.scalars(
+                select(Entity)
+                .where(*conditions)
+                .order_by(Entity.order, Entity.seq)
+                .offset((payload.page - 1) * payload.page_size)
+                .limit(payload.page_size)
+            )
+        ).all()
+    )
+    fields = await _list_fields(db, database_id)
+    for entity in entities:
+        db.expunge(entity)
+    await _inject_relations(db, fields, entities)
+    await _inject_rollups(db, fields, entities)
+    _inject_formulas(fields, entities)
+    _inject_system(fields, entities)
+    return EntityPage(
+        items=entities,
+        page=payload.page,
+        page_size=payload.page_size,
+        total=total,
+        pages=(total + payload.page_size - 1) // payload.page_size,
     )
 
 
@@ -1063,6 +1523,15 @@ async def create_entity(
     await db.flush()
     for fid, ids in rel.items():
         await _sync_relation(db, fmap[fid], entity, ids)
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="entity.created",
+        summary=f'Created entity "{entity.name}"',
+        created={"entities": [entity.id]},
+    )
     await db.commit()
     await db.refresh(entity)
     db.expunge(entity)  # detach before injecting computed values (see list_entities)
@@ -1112,6 +1581,16 @@ async def bulk_create_entities(
         )
         db.add(entity)
         created.append(entity)
+    await db.flush()
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="entity.bulk_created",
+        summary=f"Created {len(created)} entities",
+        created={"entities": [entity.id for entity in created]},
+    )
     await db.commit()
     for r in created:
         await db.refresh(r)
@@ -1121,6 +1600,151 @@ async def bulk_create_entities(
     _inject_formulas(fields, created)
     _inject_system(fields, created)
     return created
+
+
+@router.patch(
+    "/databases/{database_id}/entities/bulk",
+    response_model=list[EntityOut],
+)
+async def bulk_update_entities(
+    database_id: uuid.UUID,
+    payload: BulkEntityUpdate,
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[Entity]:
+    """Apply one field value to an explicit, workspace-scoped entity selection."""
+    await _scoped_database(database_id, workspace, db)
+    fields = await _list_fields(db, database_id)
+    field = next((item for item in fields if item.id == payload.field_id), None)
+    if field is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Field not found")
+    if field.type in {
+        FieldType.unique_id,
+        FieldType.rollup,
+        FieldType.formula,
+        FieldType.created_time,
+        FieldType.created_by,
+        FieldType.last_edited_time,
+        FieldType.last_edited_by,
+    }:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"{field.name} is read-only",
+        )
+
+    requested_ids = list(dict.fromkeys(payload.entity_ids))
+    loaded = list(
+        (
+            await db.scalars(
+                select(Entity).where(
+                    Entity.database_id == database_id,
+                    Entity.id.in_(requested_ids),
+                )
+            )
+        ).all()
+    )
+    by_id = {entity.id: entity for entity in loaded}
+    if len(by_id) != len(requested_ids):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "One or more entities were not found")
+    entities = [by_id[entity_id] for entity_id in requested_ids]
+    field_key = str(field.id)
+    requested_data = {field_key: payload.value}
+    await _assert_field_write_permissions(
+        db,
+        fields=fields,
+        data=requested_data,
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+    )
+    relation_data, regular_data, field_map = _split_relation(fields, requested_data)
+    cleaned = await _validate(db, database_id, regular_data)
+    before_entities = [snapshot_entity(entity) for entity in entities]
+    before_links = list(
+        (
+            await db.scalars(
+                select(EntityLink).where(
+                    or_(
+                        EntityLink.source_entity_id.in_(requested_ids),
+                        EntityLink.target_entity_id.in_(requested_ids),
+                    )
+                )
+            )
+        ).all()
+    )
+    before_link_ids = {link.id for link in before_links}
+    name_field = _system_field(fields, "name")
+
+    for entity in entities:
+        if name_field and field.id == name_field.id:
+            if not isinstance(payload.value, str):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    "Entity name must be text",
+                )
+            entity.name = await _unique_name(
+                db,
+                database_id,
+                payload.value,
+                exclude_id=entity.id,
+            )
+        _apply_auto_by(fields, cleaned, str(current_user.id), created=False)
+        entity.data = _mirror_identity(
+            fields,
+            {**entity.data, **cleaned},
+            uid=entity.uid,
+            name=entity.name,
+        )
+        try:
+            validate_required_fields(fields, entity.data)
+        except CellValidationError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                str(exc),
+            ) from exc
+        for relation_field_id, target_ids in relation_data.items():
+            await _sync_relation(
+                db,
+                field_map[relation_field_id],
+                entity,
+                target_ids,
+            )
+
+    await db.flush()
+    after_link_ids = set(
+        (
+            await db.scalars(
+                select(EntityLink.id).where(
+                    or_(
+                        EntityLink.source_entity_id.in_(requested_ids),
+                        EntityLink.target_entity_id.in_(requested_ids),
+                    )
+                )
+            )
+        ).all()
+    )
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="entity.bulk_updated",
+        summary=f'Updated "{field.name}" on {len(entities)} entities',
+        before={
+            "entities": before_entities,
+            "links": [snapshot_link(link) for link in before_links],
+        },
+        created={"links": list(after_link_ids - before_link_ids)},
+    )
+    await db.commit()
+    for entity in entities:
+        await db.refresh(entity)
+        db.expunge(entity)
+    await _inject_relations(db, fields, entities)
+    await _inject_rollups(db, fields, entities)
+    _inject_formulas(fields, entities)
+    _inject_system(fields, entities)
+    return entities
 
 
 @router.patch("/entities/{entity_id}", response_model=EntityOut)
@@ -1135,6 +1759,20 @@ async def update_entity(
     if entity is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Entity not found")
     await _scoped_database(entity.database_id, workspace, db)
+    before_entity = snapshot_entity(entity)
+    before_links = list(
+        (
+            await db.scalars(
+                select(EntityLink).where(
+                    or_(
+                        EntityLink.source_entity_id == entity.id,
+                        EntityLink.target_entity_id == entity.id,
+                    )
+                )
+            )
+        ).all()
+    )
+    before_link_ids = {link.id for link in before_links}
     fields = await _list_fields(db, entity.database_id)
     rel, reg, fmap = _split_relation(fields, payload.data)
     await _assert_field_write_permissions(
@@ -1166,6 +1804,32 @@ async def update_entity(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     for fid, ids in rel.items():
         await _sync_relation(db, fmap[fid], entity, ids)
+    await db.flush()
+    after_link_ids = set(
+        (
+            await db.scalars(
+                select(EntityLink.id).where(
+                    or_(
+                        EntityLink.source_entity_id == entity.id,
+                        EntityLink.target_entity_id == entity.id,
+                    )
+                )
+            )
+        ).all()
+    )
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=entity.database_id,
+        actor_id=current_user.id,
+        action="entity.updated",
+        summary=f'Updated entity "{entity.name}"',
+        before={
+            "entities": [before_entity],
+            "links": [snapshot_link(link) for link in before_links],
+        },
+        created={"links": list(after_link_ids - before_link_ids)},
+    )
     await db.commit()
     await db.refresh(entity)
     db.expunge(entity)  # detach before injecting computed values (see list_entities)
@@ -1180,12 +1844,37 @@ async def update_entity(
 async def delete_entity(
     entity_id: uuid.UUID,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     entity = await db.get(Entity, entity_id)
     if entity is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Entity not found")
     await _scoped_database(entity.database_id, workspace, db)
+    links = list(
+        (
+            await db.scalars(
+                select(EntityLink).where(
+                    or_(
+                        EntityLink.source_entity_id == entity.id,
+                        EntityLink.target_entity_id == entity.id,
+                    )
+                )
+            )
+        ).all()
+    )
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=entity.database_id,
+        actor_id=current_user.id,
+        action="entity.deleted",
+        summary=f'Deleted entity "{entity.name}"',
+        before={
+            "entities": [snapshot_entity(entity)],
+            "links": [snapshot_link(link) for link in links],
+        },
+    )
     await cleanup_drive_files(db, entity_id=entity.id)
     await db.delete(entity)
     await db.commit()
@@ -1199,13 +1888,24 @@ async def reorder_entities(
     database_id: uuid.UUID,
     payload: ReorderRequest,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await _scoped_database(database_id, workspace, db)
     result = await db.execute(select(Entity).where(Entity.database_id == database_id))
     entities = {r.id: r for r in result.scalars().all()}
+    before_entities = [snapshot_entity(entity) for entity in entities.values()]
     for index, rid in enumerate(payload.ids):
         entity = entities.get(rid)
         if entity is not None:
             entity.order = index
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="entity.reordered",
+        summary="Reordered entities",
+        before={"entities": before_entities},
+    )
     await db.commit()

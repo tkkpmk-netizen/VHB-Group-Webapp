@@ -1,7 +1,12 @@
 """Engine tests: fields, rows, validation, isolation (requires Postgres)."""
 
+import uuid
+
 import httpx
 import pytest
+
+from app.models.field import Entity, Field, FieldType
+from app.services.field_conversion import _as_number, build_field_conversion_plan
 
 
 async def _setup(client: httpx.AsyncClient, email: str = "a@example.com") -> tuple[dict, str]:
@@ -29,7 +34,7 @@ async def _add_field(client, headers, db_id, name, ftype, options=None):
 async def test_create_fields_all_simple_types(client: httpx.AsyncClient) -> None:
     headers, db_id = await _setup(client)
     for name, ftype in [
-        ("Name", "text"),
+        ("Display name", "text"),
         ("Amount", "number"),
         ("Done", "checkbox"),
         ("Due", "date"),
@@ -45,7 +50,7 @@ async def test_create_fields_all_simple_types(client: httpx.AsyncClient) -> None
 @pytest.mark.asyncio
 async def test_row_crud_and_inline_update(client: httpx.AsyncClient) -> None:
     headers, db_id = await _setup(client)
-    name_f = await _add_field(client, headers, db_id, "Name", "text")
+    name_f = await _add_field(client, headers, db_id, "Display name", "text")
     amt_f = await _add_field(client, headers, db_id, "Amount", "number")
 
     # create row
@@ -73,6 +78,132 @@ async def test_row_crud_and_inline_update(client: httpx.AsyncClient) -> None:
     assert r.status_code == 204
     r = await client.get(f"/databases/{db_id}/entities", headers=headers)
     assert r.json() == []
+
+
+@pytest.mark.asyncio
+async def test_database_history_restores_and_undoes_changes(
+    client: httpx.AsyncClient,
+) -> None:
+    headers, db_id = await _setup(client, "history@example.com")
+    amount = await _add_field(client, headers, db_id, "Amount", "number")
+    created = await client.post(
+        f"/databases/{db_id}/entities",
+        json={"name": "Invoice", "data": {amount: 10}},
+        headers=headers,
+    )
+    entity_id = created.json()["id"]
+    updated = await client.patch(
+        f"/entities/{entity_id}",
+        json={"data": {amount: 25}},
+        headers=headers,
+    )
+    assert updated.json()["data"][amount] == 25
+
+    history = await client.get(
+        f"/databases/{db_id}/history",
+        headers=headers,
+    )
+    assert history.status_code == 200, history.text
+    assert history.json()[0]["action"] == "entity.updated"
+
+    undone = await client.post(
+        f"/databases/{db_id}/history/undo",
+        headers=headers,
+    )
+    assert undone.status_code == 200, undone.text
+    rows = await client.get(f"/databases/{db_id}/entities", headers=headers)
+    assert rows.json()[0]["data"][amount] == 10
+
+    # The next undo reverses entity creation because the update revision is
+    # already marked restored.
+    undone_create = await client.post(
+        f"/databases/{db_id}/history/undo",
+        headers=headers,
+    )
+    assert undone_create.status_code == 200, undone_create.text
+    rows = await client.get(f"/databases/{db_id}/entities", headers=headers)
+    assert rows.json() == []
+
+
+@pytest.mark.asyncio
+async def test_database_history_restores_layout_with_active_view_preset(
+    client: httpx.AsyncClient,
+) -> None:
+    headers, db_id = await _setup(client, "history-layout@example.com")
+    layout = await client.post(
+        f"/databases/{db_id}/layouts",
+        json={"name": "Sales board", "type": "board"},
+        headers=headers,
+    )
+    assert layout.status_code == 201, layout.text
+    layout_id = layout.json()["id"]
+    preset = await client.post(
+        f"/layouts/{layout_id}/view-presets",
+        json={
+            "name": "Open deals",
+            "filter": {"conj": "and", "rules": []},
+            "sorts": [],
+            "hide_empty": False,
+        },
+        headers=headers,
+    )
+    assert preset.status_code == 201, preset.text
+    preset_id = preset.json()["id"]
+    activated = await client.patch(
+        f"/layouts/{layout_id}",
+        json={"active_view_preset_id": preset_id},
+        headers=headers,
+    )
+    assert activated.status_code == 200, activated.text
+    deleted = await client.delete(f"/layouts/{layout_id}", headers=headers)
+    assert deleted.status_code == 204, deleted.text
+
+    history = await client.get(f"/databases/{db_id}/history", headers=headers)
+    deleted_revision = next(item for item in history.json() if item["action"] == "layout.deleted")
+    restored = await client.post(
+        f"/databases/{db_id}/history/{deleted_revision['id']}/restore",
+        headers=headers,
+    )
+    assert restored.status_code == 200, restored.text
+    layouts = await client.get(f"/databases/{db_id}/layouts", headers=headers)
+    restored_layout = next(item for item in layouts.json() if item["id"] == layout_id)
+    assert restored_layout["active_view_preset_id"] == preset_id
+    presets = await client.get(
+        f"/layouts/{layout_id}/view-presets",
+        headers=headers,
+    )
+    assert presets.json()[0]["name"] == "Open deals"
+
+
+@pytest.mark.asyncio
+async def test_entity_id_review_query_pages_beyond_normal_load_limit(
+    client: httpx.AsyncClient,
+) -> None:
+    headers, db_id = await _setup(client, "review-all@example.com")
+    for batch in range(3):
+        names = [f"Review {batch}-{index}" for index in range(100 if batch < 2 else 5)]
+        created = await client.post(
+            f"/databases/{db_id}/entities/bulk",
+            json={"names": names},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+    ids: list[str] = []
+    for page in range(1, 4):
+        result = await client.post(
+            f"/databases/{db_id}/entities/query",
+            json={"page": page, "page_size": 100},
+            headers=headers,
+        )
+        ids.extend(item["id"] for item in result.json()["items"])
+    reviewed = await client.post(
+        f"/databases/{db_id}/entities/by-ids",
+        json={"entity_ids": ids, "page": 3, "page_size": 100},
+        headers=headers,
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["total"] == 205
+    assert len(reviewed.json()["items"]) == 5
 
 
 @pytest.mark.asyncio
@@ -198,8 +329,6 @@ async def test_entity_name_is_required_unique_and_uid_is_generated(
 @pytest.mark.asyncio
 async def test_bulk_create_rows(client: httpx.AsyncClient) -> None:
     headers, db_id = await _setup(client)
-    await _add_field(client, headers, db_id, "Name", "text")
-
     r = await client.post(
         f"/databases/{db_id}/entities/bulk",
         json={"names": ["A", "B", "C", "D", "E"]},
@@ -262,7 +391,7 @@ async def test_value_validation(client: httpx.AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_adding_field_keeps_existing_rows(client: httpx.AsyncClient) -> None:
     headers, db_id = await _setup(client)
-    name_f = await _add_field(client, headers, db_id, "Name", "text")
+    name_f = await _add_field(client, headers, db_id, "Display name", "text")
     r = await client.post(
         f"/databases/{db_id}/entities",
         json={"name": "Test entity", "data": {name_f: "Acme"}},
@@ -376,33 +505,43 @@ async def test_field_type_conversion_previews_maps_and_clears_cells(
     assert preview.json()["cleared_cells"] == 1
     assert preview.json()["empty_cells"] == 1
     assert preview.json()["field"] is None
+    assert preview.json()["invalid_reason_counts"] == {
+        "No numeric value could be extracted": 1
+    }
+    assert preview.json()["invalid_samples"] == [
+        {
+            "entity_id": preview.json()["invalid_entity_ids"][0],
+            "entity_name": "Invalid",
+            "value": "not a number",
+            "reason": "No numeric value could be extracted",
+        }
+    ]
 
-    unchanged_fields = await client.get(
-        f"/databases/{db_id}/fields", headers=headers
-    )
-    unchanged_field = next(
-        field for field in unchanged_fields.json() if field["id"] == field_id
-    )
+    unchanged_fields = await client.get(f"/databases/{db_id}/fields", headers=headers)
+    unchanged_field = next(field for field in unchanged_fields.json() if field["id"] == field_id)
     assert unchanged_field["type"] == "text"
-    unchanged_entities = await client.get(
-        f"/databases/{db_id}/entities", headers=headers
-    )
+    unchanged_entities = await client.get(f"/databases/{db_id}/entities", headers=headers)
     unchanged_by_name = {entity["name"]: entity for entity in unchanged_entities.json()}
     assert unchanged_by_name["Invalid"]["data"][field_id] == "not a number"
 
     applied = await client.post(
         f"/fields/{field_id}/convert-type",
-        json={"target_type": "number", "dry_run": False},
+        json={
+            "target_type": "number",
+            "dry_run": False,
+            "change_anyway": True,
+        },
         headers=headers,
     )
     assert applied.status_code == 200, applied.text
     assert applied.json()["field"]["type"] == "number"
-    converted_entities = await client.get(
-        f"/databases/{db_id}/entities", headers=headers
-    )
+    converted_entities = await client.get(f"/databases/{db_id}/entities", headers=headers)
     converted_by_name = {entity["name"]: entity for entity in converted_entities.json()}
     assert converted_by_name["Convertible"]["data"][field_id] == 12.5
-    assert field_id not in converted_by_name["Invalid"]["data"]
+    wrong_format = next(
+        entity for entity in converted_entities.json() if entity["name"].startswith("WRONG FORMAT ")
+    )
+    assert field_id not in wrong_format["data"]
     assert field_id not in converted_by_name["Empty"]["data"]
 
     select_preview = await client.post(
@@ -422,9 +561,43 @@ async def test_field_type_conversion_previews_maps_and_clears_cells(
     assert select_applied.status_code == 200, select_applied.text
     converted_field = select_applied.json()["field"]
     assert converted_field["type"] == "select"
-    assert [choice["label"] for choice in converted_field["options"]["choices"]] == [
-        "12.5"
+    assert [choice["label"] for choice in converted_field["options"]["choices"]] == ["12.5"]
+
+
+def test_text_to_select_generates_an_option_for_every_unique_value() -> None:
+    database_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    field = Field(
+        id=uuid.uuid4(),
+        database_id=database_id,
+        name="BRAND",
+        type=FieldType.text,
+        options={},
+        order=2,
+    )
+    entities = [
+        Entity(
+            id=uuid.uuid4(),
+            database_id=database_id,
+            data_source_id=source_id,
+            data={str(field.id): f"Brand {index}"},
+            uid=str(index),
+            name=f"Product {index}",
+            seq=index,
+            order=index,
+        )
+        for index in range(350)
     ]
+
+    plan = build_field_conversion_plan(field, entities, FieldType.select, {})
+
+    assert plan.generated_choices == 350
+    assert plan.converted_cells == 350
+    assert plan.cleared_cells == 0
+    assert plan.invalid_reason_counts == {}
+    assert {
+        choice["label"] for choice in plan.target_options["choices"]
+    } == {f"Brand {index}" for index in range(350)}
 
 
 @pytest.mark.asyncio
@@ -441,6 +614,61 @@ async def test_field_type_conversion_rejects_system_fields(
         headers=headers,
     )
     assert response.status_code == 409
+
+
+def test_number_conversion_extracts_currency_and_grouped_digits() -> None:
+    assert _as_number("$4.1") == 4.1
+    assert _as_number("170,000,000đ") == 170000000
+    assert _as_number("EUR -1.250,75") == -1250.75
+
+
+@pytest.mark.asyncio
+async def test_name_field_is_unique_renameable_and_can_be_promoted(
+    client: httpx.AsyncClient,
+) -> None:
+    headers, db_id = await _setup(client, "name-field@example.com")
+    fields_response = await client.get(f"/databases/{db_id}/fields", headers=headers)
+    name_field = next(field for field in fields_response.json() if field["type"] == "name")
+    assert name_field["options"]["required"] is True
+
+    renamed = await client.patch(
+        f"/fields/{name_field['id']}",
+        json={"name": "Entity title"},
+        headers=headers,
+    )
+    assert renamed.status_code == 200, renamed.text
+
+    duplicate = await client.post(
+        f"/databases/{db_id}/fields",
+        json={"name": " entity TITLE ", "type": "text", "options": {}},
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+
+    replacement_id = await _add_field(client, headers, db_id, "External title", "text")
+    for entity_name, external_title in [("First", "Alpha"), ("Second", "Beta")]:
+        created = await client.post(
+            f"/databases/{db_id}/entities",
+            json={"name": entity_name, "data": {replacement_id: external_title}},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+
+    converted = await client.post(
+        f"/fields/{replacement_id}/convert-type",
+        json={"target_type": "name", "dry_run": False},
+        headers=headers,
+    )
+    assert converted.status_code == 200, converted.text
+    assert converted.json()["field"]["type"] == "name"
+
+    fields_after = (await client.get(f"/databases/{db_id}/fields", headers=headers)).json()
+    assert len([field for field in fields_after if field["type"] == "name"]) == 1
+    assert (
+        next(field for field in fields_after if field["id"] == name_field["id"])["type"] == "text"
+    )
+    rows = (await client.get(f"/databases/{db_id}/entities", headers=headers)).json()
+    assert {row["name"] for row in rows} == {"Alpha", "Beta"}
 
 
 @pytest.mark.asyncio

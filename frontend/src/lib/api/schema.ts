@@ -425,6 +425,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/{database_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Database History */
+        get: operations["list_database_history_databases__database_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/{database_id}/history/{change_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore History Item */
+        post: operations["restore_history_item_databases__database_id__history__change_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/{database_id}/history/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo Database Change */
+        post: operations["undo_database_change_databases__database_id__history_undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases/{database_id}/formula-preview": {
         parameters: {
             query?: never;
@@ -573,6 +624,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/{database_id}/entities/by-ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query Entities By Ids
+         * @description Page through an explicit review set without the normal view load limit.
+         */
+        post: operations["query_entities_by_ids_databases__database_id__entities_by_ids_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases/{database_id}/entities/sub-item-tree": {
         parameters: {
             query?: never;
@@ -607,7 +678,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Bulk Update Entities
+         * @description Apply one field value to an explicit, workspace-scoped entity selection.
+         */
+        patch: operations["bulk_update_entities_databases__database_id__entities_bulk_patch"];
         trace?: never;
     };
     "/entities/{entity_id}": {
@@ -715,6 +790,43 @@ export interface paths {
         head?: never;
         /** Update Data Source */
         patch: operations["update_data_source_data_sources__data_source_id__patch"];
+        trace?: never;
+    };
+    "/databases/{database_id}/data-sources/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reorder Data Sources */
+        post: operations["reorder_data_sources_databases__database_id__data_sources_reorder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/{database_id}/data-sources/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Data Sources
+         * @description Move every entity into the destination, then remove the merged sources.
+         */
+        post: operations["merge_data_sources_databases__database_id__data_sources_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/layouts/{layout_id}/view-presets": {
@@ -1833,6 +1945,18 @@ export interface components {
             /** Data Source Id */
             data_source_id?: string | null;
         };
+        /** BulkEntityUpdate */
+        BulkEntityUpdate: {
+            /** Entity Ids */
+            entity_ids: string[];
+            /**
+             * Field Id
+             * Format: uuid
+             */
+            field_id: string;
+            /** Value */
+            value?: unknown;
+        };
         /** DashboardCreate */
         DashboardCreate: {
             /**
@@ -1898,6 +2022,19 @@ export interface components {
          * @enum {string}
          */
         DataSourceKind: "manual" | "imported";
+        /**
+         * DataSourceMerge
+         * @description Merge one or more non-primary sources into an existing destination.
+         */
+        DataSourceMerge: {
+            /** Source Ids */
+            source_ids: string[];
+            /**
+             * Destination Id
+             * Format: uuid
+             */
+            destination_id: string;
+        };
         /** DataSourceOut */
         DataSourceOut: {
             /**
@@ -1923,6 +2060,16 @@ export interface components {
             origin_job_id: string | null;
             /** Order */
             order: number;
+            /**
+             * Entity Count
+             * @default 0
+             */
+            entity_count: number;
+        };
+        /** DataSourceReorder */
+        DataSourceReorder: {
+            /** Ids */
+            ids: string[];
         };
         /** DataSourceUpdate */
         DataSourceUpdate: {
@@ -1932,6 +2079,50 @@ export interface components {
             description?: string | null;
             /** Order */
             order?: number | null;
+        };
+        /** DatabaseChangeOut */
+        DatabaseChangeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Database Id
+             * Format: uuid
+             */
+            database_id: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /** Action */
+            action: string;
+            /** Summary */
+            summary: string;
+            /** Reverted At */
+            reverted_at: string | null;
+            /** Reverted By Id */
+            reverted_by_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** DatabaseChangeRestoreResult */
+        DatabaseChangeRestoreResult: {
+            restored_change: components["schemas"]["DatabaseChangeOut"];
+            /** Restored */
+            restored?: {
+                [key: string]: number;
+            };
+            /** Affected Ids */
+            affected_ids?: {
+                [key: string]: string[];
+            };
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
         };
         /** DatabaseCreate */
         DatabaseCreate: {
@@ -1952,6 +2143,8 @@ export interface components {
              * @enum {string}
              */
             format: "csv" | "xlsx";
+            /** Entity Ids */
+            entity_ids?: string[] | null;
         };
         /** DatabaseImportCreate */
         DatabaseImportCreate: {
@@ -1973,6 +2166,8 @@ export interface components {
             field_types?: {
                 [key: string]: components["schemas"]["FieldType"];
             };
+            /** Skipped Columns */
+            skipped_columns?: string[];
             /**
              * Name Column
              * @default
@@ -2218,18 +2413,46 @@ export interface components {
              * Operator
              * @enum {string}
              */
-            operator: "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte" | "is_empty" | "is_not_empty";
+            operator: "eq" | "neq" | "contains" | "not_contains" | "starts_with" | "ends_with" | "gt" | "gte" | "lt" | "lte" | "is_empty" | "is_not_empty";
             /** Value */
             value?: unknown;
+        };
+        /** EntityFilterGroup */
+        EntityFilterGroup: {
+            /**
+             * Conj
+             * @default and
+             * @enum {string}
+             */
+            conj: "and" | "or";
+            /** Rules */
+            rules?: (components["schemas"]["EntityFilter"] | components["schemas"]["EntityFilterGroup"])[];
         };
         /** EntityGroup */
         EntityGroup: {
             /** Key */
             key: unknown;
+            /** Total */
+            total: number;
             /** Aggregates */
             aggregates?: {
                 [key: string]: unknown;
             };
+        };
+        /** EntityIdsQuery */
+        EntityIdsQuery: {
+            /** Entity Ids */
+            entity_ids: string[];
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
         };
         /** EntityOut */
         EntityOut: {
@@ -2277,6 +2500,8 @@ export interface components {
             };
             /** Groups */
             groups?: components["schemas"]["EntityGroup"][];
+            /** Matched Entity Ids */
+            matched_entity_ids?: string[];
         };
         /** EntityQuery */
         EntityQuery: {
@@ -2292,12 +2517,22 @@ export interface components {
             page_size: number;
             /** Filters */
             filters?: components["schemas"]["EntityFilter"][];
+            filter_tree?: components["schemas"]["EntityFilterGroup"] | null;
             /** Sorts */
             sorts?: components["schemas"]["EntitySort"][];
             /** Aggregations */
             aggregations?: components["schemas"]["EntityAggregation"][];
             /** Group By */
             group_by?: string | null;
+            /** Search */
+            search?: string | null;
+            /** Search Field Id */
+            search_field_id?: string | null;
+            /**
+             * Include Match Ids
+             * @default false
+             */
+            include_match_ids: boolean;
         };
         /** EntitySort */
         EntitySort: {
@@ -2363,7 +2598,21 @@ export interface components {
          * FieldType
          * @enum {string}
          */
-        FieldType: "text" | "long_text" | "number" | "checkbox" | "date" | "url" | "email" | "phone" | "select" | "multi_select" | "status" | "priority" | "rating" | "country" | "unique_id" | "relation" | "rollup" | "formula" | "people" | "progress" | "created_time" | "created_by" | "last_edited_time" | "last_edited_by" | "files";
+        FieldType: "name" | "text" | "long_text" | "number" | "checkbox" | "date" | "url" | "email" | "phone" | "select" | "multi_select" | "status" | "priority" | "rating" | "country" | "unique_id" | "relation" | "rollup" | "formula" | "people" | "progress" | "created_time" | "created_by" | "last_edited_time" | "last_edited_by" | "files";
+        /** FieldTypeConversionInvalidSample */
+        FieldTypeConversionInvalidSample: {
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Entity Name */
+            entity_name: string;
+            /** Value */
+            value: string;
+            /** Reason */
+            reason: string;
+        };
         /** FieldTypeConversionRequest */
         FieldTypeConversionRequest: {
             target_type: components["schemas"]["FieldType"];
@@ -2376,6 +2625,11 @@ export interface components {
              * @default true
              */
             dry_run: boolean;
+            /**
+             * Change Anyway
+             * @default false
+             */
+            change_anyway: boolean;
         };
         /** FieldTypeConversionResult */
         FieldTypeConversionResult: {
@@ -2397,6 +2651,14 @@ export interface components {
             generated_choices: number;
             /** Cleared Samples */
             cleared_samples?: string[];
+            /** Invalid Entity Ids */
+            invalid_entity_ids?: string[];
+            /** Invalid Reason Counts */
+            invalid_reason_counts?: {
+                [key: string]: number;
+            };
+            /** Invalid Samples */
+            invalid_samples?: components["schemas"]["FieldTypeConversionInvalidSample"][];
         };
         /** FieldUpdate */
         FieldUpdate: {
@@ -2514,6 +2776,8 @@ export interface components {
             inferred_type: string;
             /** Samples */
             samples: unknown[];
+            /** Generated Options */
+            generated_options?: string[];
         };
         /** JobCreate */
         JobCreate: {
@@ -4602,6 +4866,108 @@ export interface operations {
             };
         };
     };
+    list_database_history_databases__database_id__history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseChangeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_history_item_databases__database_id__history__change_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseChangeRestoreResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_database_change_databases__database_id__history_undo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseChangeRestoreResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     formula_preview_databases__database_id__formula_preview_post: {
         parameters: {
             query?: never;
@@ -4995,6 +5361,43 @@ export interface operations {
             };
         };
     };
+    query_entities_by_ids_databases__database_id__entities_by_ids_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntityIdsQuery"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     query_sub_item_tree_databases__database_id__entities_sub_item_tree_post: {
         parameters: {
             query?: never;
@@ -5051,6 +5454,43 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_update_entities_databases__database_id__entities_bulk_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkEntityUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5386,7 +5826,9 @@ export interface operations {
     };
     delete_data_source_data_sources__data_source_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                transfer_to_id?: string | null;
+            };
             header?: {
                 "X-Workspace-ID"?: string | null;
             };
@@ -5429,6 +5871,78 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["DataSourceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSourceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_data_sources_databases__database_id__data_sources_reorder_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataSourceReorder"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_data_sources_databases__database_id__data_sources_merge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                database_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataSourceMerge"];
             };
         };
         responses: {

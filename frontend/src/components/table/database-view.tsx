@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FaIcon, MoreHorizontal, Search, Star, Workflow } from "@/components/ui/fa-icon";
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, getWorkspaceId } from "@/lib/api/client";
+import { workspaceQueryKeys } from "@/lib/query-keys";
 import { SearchBar } from "@/components/table/search-box";
 import { ViewsBar } from "@/components/table/views-bar";
 import { ViewShell } from "@/components/table/view-shell";
 import { ResourceAccess } from "@/components/access/resource-access";
 import { DatabaseTransfers } from "@/components/table/database-transfers";
+import { DatabaseHistory } from "@/components/table/database-history";
 import { matchedEntityIds, searchHits } from "@/lib/search";
 import type { components } from "@/lib/api/schema";
 import { DEFAULT_ICONS } from "@/lib/icon-system";
@@ -17,7 +19,7 @@ import { DEFAULT_ICONS } from "@/lib/icon-system";
 type Layout = components["schemas"]["LayoutOut"];
 type Db = components["schemas"]["DatabaseOut"];
 type Field = components["schemas"]["FieldOut"];
-type Entity = components["schemas"]["EntityOut"];
+type EntityPage = components["schemas"]["EntityPage"];
 type Space = components["schemas"]["SpaceOut"];
 type Folder = components["schemas"]["FolderOut"];
 type Placement = components["schemas"]["SpaceDatabaseOut"];
@@ -39,10 +41,13 @@ export function DatabaseView({
   const [flashId, setFlashId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
+  const [undoNonce, setUndoNonce] = useState(0);
+  const [undoMessage, setUndoMessage] = useState("");
   const qc = useQueryClient();
+  const workspaceId = getWorkspaceId();
 
   const dbQ = useQuery<Db[]>({
-    queryKey: ["databases"],
+    queryKey: workspaceQueryKeys.databases(workspaceId),
     queryFn: () => apiFetch<Db[]>("/databases"),
   });
   const layoutsQ = useQuery<Layout[]>({
@@ -56,17 +61,28 @@ export function DatabaseView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const entitiesQ = useQuery<Entity[]>({
-    queryKey: ["entities-search", databaseId],
-    queryFn: () => apiFetch<Entity[]>(`/databases/${databaseId}/entities`),
+  const entitiesQ = useQuery<EntityPage>({
+    queryKey: ["entities-search", databaseId, search.trim(), scopeFieldId],
+    queryFn: () =>
+      apiFetch<EntityPage>(`/databases/${databaseId}/entities/query`, {
+        method: "POST",
+        body: JSON.stringify({
+          page: 1,
+          page_size: 50,
+          search: search.trim(),
+          search_field_id: scopeFieldId,
+          include_match_ids: true,
+        }),
+      }),
     enabled: search.trim().length > 0,
   });
   const spacesQ = useQuery<Space[]>({
-    queryKey: ["spaces"],
+    queryKey: workspaceQueryKeys.spaces(workspaceId),
     queryFn: () => apiFetch<Space[]>("/spaces"),
   });
+  const spaceIds = (spacesQ.data ?? []).map((space) => space.id);
   const foldersQ = useQuery<Record<string, Folder[]>>({
-    queryKey: ["folders", "database-locations", spacesQ.data?.map((space) => space.id)],
+    queryKey: workspaceQueryKeys.folders(workspaceId, spaceIds),
     queryFn: async () =>
       Object.fromEntries(
         await Promise.all(
@@ -79,7 +95,7 @@ export function DatabaseView({
     enabled: Boolean(spacesQ.data?.length),
   });
   const placementsQ = useQuery<Record<string, Placement[]>>({
-    queryKey: ["space-databases", "database-locations", spacesQ.data?.map((space) => space.id)],
+    queryKey: workspaceQueryKeys.placements(workspaceId, spaceIds),
     queryFn: async () =>
       Object.fromEntries(
         await Promise.all(
@@ -98,7 +114,7 @@ export function DatabaseView({
   const layouts = useMemo(() => layoutsQ.data ?? [], [layoutsQ.data]);
   const active = layouts.find((v) => v.id === activeId) ?? layouts[0];
   const fields = fieldsQ.data ?? [];
-  const entities = entitiesQ.data ?? [];
+  const entities = entitiesQ.data?.items ?? [];
   const locationPaths = useMemo(() => {
     const paths: { space: Space; folders: Folder[] }[] = [];
     for (const space of spacesQ.data ?? []) {
@@ -128,7 +144,13 @@ export function DatabaseView({
   const searchFields =
     scopeFieldId && byId[scopeFieldId] ? [byId[scopeFieldId]] : fields;
   const hits = searchActive ? searchHits(entities, searchFields, search) : [];
-  const matchedIds = searchActive ? matchedEntityIds(hits) : null;
+  const matchedIds = searchActive
+    ? new Set(
+        entitiesQ.data?.matched_entity_ids?.length
+          ? entitiesQ.data.matched_entity_ids
+          : matchedEntityIds(hits),
+      )
+    : null;
 
   const saveDescription = useMutation({
     mutationFn: (value: string) =>
@@ -163,6 +185,28 @@ export function DatabaseView({
     ? (activePlacement?.settings as { favorite?: boolean } | undefined)?.favorite === true
     : database?.is_favorite;
 
+  const undo = useMutation({
+    mutationFn: () =>
+      apiFetch<{ restored_change: { summary: string } }>(
+        `/databases/${databaseId}/history/undo`,
+        { method: "POST" },
+      ),
+    onSuccess: async (result) => {
+      setUndoMessage(`Undid: ${result.restored_change.summary}`);
+      setUndoNonce((value) => value + 1);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["database-history", databaseId] }),
+        qc.invalidateQueries({ queryKey: ["databases"] }),
+        qc.invalidateQueries({ queryKey: ["fields", databaseId] }),
+        qc.invalidateQueries({ queryKey: ["entities", databaseId] }),
+        qc.invalidateQueries({ queryKey: ["entities-search", databaseId] }),
+        qc.invalidateQueries({ queryKey: ["layouts", databaseId] }),
+        qc.invalidateQueries({ queryKey: ["data-sources", databaseId] }),
+      ]);
+    },
+    onError: () => setUndoMessage("Nothing to undo"),
+  });
+
   useEffect(() => {
     const shortcuts: Record<string, Layout["type"]> = {
       t: "table",
@@ -193,6 +237,35 @@ export function DatabaseView({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [layouts]);
+
+  useEffect(() => {
+    const onUndo = (event: KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() !== "z" ||
+        (!event.metaKey && !event.ctrlKey) ||
+        event.shiftKey
+      )
+        return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      )
+        return;
+      event.preventDefault();
+      if (!undo.isPending) undo.mutate();
+    };
+    window.addEventListener("keydown", onUndo);
+    return () => window.removeEventListener("keydown", onUndo);
+  }, [undo]);
+
+  useEffect(() => {
+    const remountView = () => setUndoNonce((value) => value + 1);
+    window.addEventListener("vhb:database-restored", remountView);
+    return () =>
+      window.removeEventListener("vhb:database-restored", remountView);
+  }, []);
 
   function jumpToEntity(id: string) {
     setFlashId(id);
@@ -318,14 +391,33 @@ export function DatabaseView({
               />
             </div>
             <div className="relative ml-auto flex shrink-0 items-center gap-0.5 bg-white pl-2">
-              <button
-                type="button"
-                title="Search database"
-                onClick={() => setSearchOpen((open) => !open)}
-                className={`flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground ${searchOpen ? "bg-muted text-foreground" : ""}`}
-              >
-                <Search className="size-3.5" />
-              </button>
+              {searchOpen ? (
+                <div className="w-[380px] max-w-[42vw]">
+                  <SearchBar
+                    compact
+                    totalResults={entitiesQ.data?.total ?? hits.length}
+                    fields={fields}
+                    hits={hits}
+                    scopeFieldId={scopeFieldId}
+                    setScopeFieldId={setScopeFieldId}
+                    query={search}
+                    setQuery={setSearch}
+                    filterToMatches={filterToMatches}
+                    setFilterToMatches={setFilterToMatches}
+                    onJump={jumpToEntity}
+                    onClose={() => setSearchOpen(false)}
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  title="Search database"
+                  onClick={() => setSearchOpen(true)}
+                  className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <Search className="size-3.5" />
+                </button>
+              )}
               <button
                 type="button"
                 title="Automation — coming soon"
@@ -341,32 +433,19 @@ export function DatabaseView({
                 compact
               />
               <DatabaseTransfers databaseId={databaseId} compact />
-              {searchOpen && (
-                <div className="vhb-popover-shadow absolute right-0 top-[calc(100%+5px)] z-[60] w-[320px] rounded-lg border bg-card p-2 animate-in fade-in slide-in-from-top-1 duration-150">
-                  <SearchBar
-                    fields={fields}
-                    hits={hits}
-                    scopeFieldId={scopeFieldId}
-                    setScopeFieldId={setScopeFieldId}
-                    query={search}
-                    setQuery={setSearch}
-                    filterToMatches={filterToMatches}
-                    setFilterToMatches={setFilterToMatches}
-                    onJump={jumpToEntity}
-                  />
-                </div>
-              )}
+              <DatabaseHistory databaseId={databaseId} compact />
             </div>
           </div>
           <div className="flex min-h-0 flex-1 flex-col">
             <ViewShell
-              key={active.id}
+              key={`${active.id}:${undoNonce}`}
               databaseId={databaseId}
               view={active}
               views={layouts}
               activeId={active.id}
               setActiveId={setActiveId}
               search={search}
+              searchFieldId={scopeFieldId}
               filterToMatches={filterToMatches}
               matchedIds={matchedIds}
               flashId={flashId}
@@ -375,6 +454,15 @@ export function DatabaseView({
         </>
       ) : (
         <div className="p-8 text-sm text-muted-foreground">Loading…</div>
+      )}
+      {undoMessage && (
+        <button
+          type="button"
+          onClick={() => setUndoMessage("")}
+          className="absolute bottom-9 left-1/2 z-[170] -translate-x-1/2 rounded-lg border bg-popover px-3 py-2 text-xs font-medium shadow-lg"
+        >
+          {undoMessage}
+        </button>
       )}
     </div>
   );

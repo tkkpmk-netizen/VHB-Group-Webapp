@@ -8,15 +8,13 @@ import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import { EntityNameDialog } from "@/components/table/entity-name-dialog";
 import type { SharedViewProps } from "@/components/table/view-shell";
 import {
-  applyFilterTree,
-  applySorts,
   displayText,
   groupEntities,
-  type FilterGroup,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
 import { formatEntityId } from "@/lib/entity-id";
 import { ViewQueryState } from "@/components/table/view-query-state";
+import { usePagedEntities } from "@/components/table/use-paged-entities";
 
 type Field = components["schemas"]["FieldOut"];
 type Entity = components["schemas"]["EntityOut"];
@@ -40,12 +38,12 @@ export function ListView({
   hidden,
   limit,
   dataSourceId,
+  search,
+  searchFieldId,
   filterToMatches,
-  matchedIds,
   openEntity,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
-  const [pages, setPages] = useState(0);
   const [newEntityOpen, setNewEntityOpen] = useState(false);
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
 
@@ -53,12 +51,21 @@ export function ListView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const entitiesQ = useQuery<Entity[]>({
-    queryKey: ["entities", databaseId, dataSourceId],
-    queryFn: () =>
-      apiFetch<Entity[]>(
-        `/databases/${databaseId}/entities${dataSourceId ? `?data_source_id=${dataSourceId}` : ""}`,
-      ),
+  const {
+    query: entitiesQ,
+    items: visible,
+    total,
+    groups: serverGroups,
+  } = usePagedEntities({
+    databaseId,
+    filterRoot,
+    sorts,
+    limit,
+    dataSourceId,
+    search,
+    searchFieldId,
+    filterToMatches,
+    groupFieldId,
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["entities", databaseId] });
   const updateCell = useMutation({
@@ -66,10 +73,9 @@ export function ListView({
       apiFetch<Entity>(`/entities/${entityId}`, {
         method: "PATCH",
         body: JSON.stringify({ data }),
-      }),
+    }),
     onSuccess: (created) => {
       setEditingEntityId(created.id);
-      setPages(Math.floor((entitiesQ.data?.length ?? 0) / limit));
       invalidate();
     },
   });
@@ -110,13 +116,6 @@ export function ListView({
 
   const fields = fieldsQ.data ?? [];
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
-  let visible = applySorts(
-    applyFilterTree(entitiesQ.data ?? [], byId, filterRoot as FilterGroup),
-    byId,
-    sorts,
-  );
-  if (filterToMatches && matchedIds)
-    visible = visible.filter((r) => matchedIds.has(r.id));
 
   const titleField = fields.find((f) => ["text", "long_text"].includes(f.type));
   const idField = fields.find((f) => f.type === "unique_id");
@@ -133,8 +132,11 @@ export function ListView({
       : null;
   if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
 
-  const shown = limit * (pages + 1);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const serverGroupTotal = (value: unknown, fallback: number) =>
+    serverGroups.find(
+      (group) => JSON.stringify(group.key) === JSON.stringify(value),
+    )?.total ?? fallback;
 
   const propCell = (f: Field, entity: Entity) => {
     const v = (entity.data as Record<string, unknown>)[f.id];
@@ -245,7 +247,7 @@ export function ListView({
                   )}
                   <ValueChip field={byId[groupFieldId!]} value={g.value} />
                   <span className="text-[10px] font-normal text-muted-foreground">
-                    {g.entities.length}
+                    {serverGroupTotal(g.value, g.entities.length)}
                   </span>
                 </button>
                 {open && g.entities.map(renderEntity)}
@@ -253,17 +255,18 @@ export function ListView({
             );
           })
         ) : (
-          visible.slice(0, shown).map(renderEntity)
+          visible.map(renderEntity)
         )}
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        {!groups && shown < visible.length && (
+        {entitiesQ.hasNextPage && (
           <button
-            onClick={() => setPages((p) => p + 1)}
+            onClick={() => void entitiesQ.fetchNextPage()}
+            disabled={entitiesQ.isFetchingNextPage}
             className="flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium text-primary hover:bg-primary/10"
           >
-            <ChevronDown className="size-4" /> Load more ({visible.length - shown} left)
+            <ChevronDown className="size-4" /> Load more ({Math.max(0, total - visible.length)} left)
           </button>
         )}
         <button

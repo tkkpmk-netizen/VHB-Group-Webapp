@@ -4,6 +4,7 @@ from app.models.asset import Asset, AssetStatus
 from app.models.dashboard import Dashboard, DashboardWidget, WidgetType
 from app.models.data_source import DataSource, DataSourceKind
 from app.models.database import Database
+from app.models.database_change import DatabaseChange
 from app.models.document import Document
 from app.models.drive_file import DriveFile
 from app.models.event import AuditEvent, OutboxEvent
@@ -32,6 +33,7 @@ __all__ = [
     "AssetStatus",
     "AuditEvent",
     "Database",
+    "DatabaseChange",
     "DatabaseFavorite",
     "Dashboard",
     "DashboardWidget",

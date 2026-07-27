@@ -3,6 +3,7 @@
 import httpx
 import pytest
 
+from app.models.field import FieldType
 from app.services.spreadsheets import export_entities, read_tabular
 
 
@@ -105,13 +106,19 @@ async def test_documents_are_workspace_isolated(client: httpx.AsyncClient) -> No
 async def test_export_job_contract(client: httpx.AsyncClient) -> None:
     headers = await _register(client, "exports@example.com")
     database = await client.post("/databases", json={"name": "Orders"}, headers=headers)
+    selected = await client.post(
+        f"/databases/{database.json()['id']}/entities",
+        json={"name": "Selected order", "data": {}},
+        headers=headers,
+    )
     response = await client.post(
         f"/databases/{database.json()['id']}/exports",
-        json={"format": "xlsx"},
+        json={"format": "xlsx", "entity_ids": [selected.json()["id"]]},
         headers=headers,
     )
     assert response.status_code == 202, response.text
     assert response.json()["job"]["type"] == "database.export"
+    assert response.json()["job"]["payload"]["entity_ids"] == [selected.json()["id"]]
 
 
 def test_csv_xlsx_roundtrip_has_headers_and_rows() -> None:
@@ -169,3 +176,53 @@ def test_export_serializes_complex_json_cells_and_escapes_formulas() -> None:
             '{"active":true,"label":"Hà Nội"}',
             "'=2+2",
         ]
+
+
+def test_export_resolves_choice_ids_to_labels() -> None:
+    class Item:
+        def __init__(
+            self,
+            name: str,
+            identifier: str,
+            field_type: FieldType,
+            choices: list[dict[str, str]],
+        ) -> None:
+            self.name = name
+            self.id = identifier
+            self.type = field_type
+            self.options = {"choices": choices}
+
+    class Record:
+        def __init__(self, data: dict[str, object]) -> None:
+            self.data = data
+
+    fields = [
+        Item(
+            "Status",
+            "status",
+            FieldType.status,
+            [{"id": "status-ready-id", "label": "Ready"}],
+        ),
+        Item(
+            "Tags",
+            "tags",
+            FieldType.multi_select,
+            [
+                {"id": "tag-vietnam-id", "label": "Vietnam"},
+                {"id": "tag-export-id", "label": "Export"},
+            ],
+        ),
+    ]
+    entities = [
+        Record(
+            {
+                "status": "status-ready-id",
+                "tags": ["tag-vietnam-id", "tag-export-id"],
+            }
+        )
+    ]
+
+    for file_format in ("csv", "xlsx"):
+        data, _ = export_entities(fields, entities, file_format)  # type: ignore[arg-type]
+        _, records = read_tabular(data, file_format)
+        assert records[0] == ["Ready", "Vietnam, Export"]

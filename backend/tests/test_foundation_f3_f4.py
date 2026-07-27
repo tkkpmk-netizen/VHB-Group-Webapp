@@ -155,6 +155,45 @@ async def test_row_query_paginates_filters_sorts_and_aggregates(
 
 
 @pytest.mark.asyncio
+async def test_group_query_reports_total_not_loaded_count(
+    client: httpx.AsyncClient,
+) -> None:
+    token, workspace_id = await _register(client, "group-total@example.com")
+    headers = _headers(token, workspace_id)
+    database = await client.post(
+        "/databases", json={"name": "Grouped"}, headers=headers
+    )
+    database_id = database.json()["id"]
+    group_field = await client.post(
+        f"/databases/{database_id}/fields",
+        json={"name": "Region", "type": "text", "options": {}},
+        headers=headers,
+    )
+    group_field_id = group_field.json()["id"]
+    for index, region in enumerate(["North", "North", "North", "South", "South"]):
+        response = await client.post(
+            f"/databases/{database_id}/entities",
+            json={
+                "name": f"Entity {index}",
+                "data": {group_field_id: region},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 201
+
+    response = await client.post(
+        f"/databases/{database_id}/entities/query",
+        json={"page": 1, "page_size": 1, "group_by": group_field_id},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert {group["key"]: group["total"] for group in response.json()["groups"]} == {
+        "North": 3,
+        "South": 2,
+    }
+
+
+@pytest.mark.asyncio
 async def test_row_query_rejects_unbounded_page_size(client: httpx.AsyncClient) -> None:
     token, workspace_id = await _register(client, "bounds@example.com")
     headers = _headers(token, workspace_id)
@@ -165,3 +204,225 @@ async def test_row_query_rejects_unbounded_page_size(client: httpx.AsyncClient) 
         headers=headers,
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_row_search_runs_before_pagination_and_returns_all_match_ids(
+    client: httpx.AsyncClient,
+) -> None:
+    token, workspace_id = await _register(client, "search-all@example.com")
+    headers = _headers(token, workspace_id)
+    database = await client.post(
+        "/databases",
+        json={"name": "Search all"},
+        headers=headers,
+    )
+    database_id = database.json()["id"]
+    for batch in range(3):
+        names = [f"Ordinary {batch}-{index}" for index in range(100)]
+        if batch == 2:
+            names[-1] = "Needle after the old load limit"
+        created = await client.post(
+            f"/databases/{database_id}/entities/bulk",
+            json={"names": names},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+
+    searched = await client.post(
+        f"/databases/{database_id}/entities/query",
+        json={
+            "page": 1,
+            "page_size": 10,
+            "search": "needle",
+            "include_match_ids": True,
+        },
+        headers=headers,
+    )
+    assert searched.status_code == 200, searched.text
+    body = searched.json()
+    assert body["total"] == 1
+    assert body["items"][0]["name"] == "Needle after the old load limit"
+    assert body["matched_entity_ids"] == [body["items"][0]["id"]]
+
+
+@pytest.mark.asyncio
+async def test_row_sort_runs_before_pagination_across_old_load_limit(
+    client: httpx.AsyncClient,
+) -> None:
+    token, workspace_id = await _register(client, "sort-all@example.com")
+    headers = _headers(token, workspace_id)
+    database = await client.post(
+        "/databases",
+        json={"name": "Globally sorted"},
+        headers=headers,
+    )
+    database_id = database.json()["id"]
+    fields = await client.get(
+        f"/databases/{database_id}/fields",
+        headers=headers,
+    )
+    name_field = next(
+        field
+        for field in fields.json()
+        if field["options"].get("system_key") == "name"
+    )
+
+    names = [f"Item {index:03d}" for index in reversed(range(300))]
+    for start in range(0, len(names), 100):
+        created = await client.post(
+            f"/databases/{database_id}/entities/bulk",
+            json={"names": names[start : start + 100]},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+
+    ascending = await client.post(
+        f"/databases/{database_id}/entities/query",
+        json={
+            "page": 1,
+            "page_size": 25,
+            "sorts": [{"field_id": name_field["id"], "direction": "asc"}],
+        },
+        headers=headers,
+    )
+    descending = await client.post(
+        f"/databases/{database_id}/entities/query",
+        json={
+            "page": 1,
+            "page_size": 25,
+            "sorts": [{"field_id": name_field["id"], "direction": "desc"}],
+        },
+        headers=headers,
+    )
+
+    assert ascending.status_code == 200, ascending.text
+    assert descending.status_code == 200, descending.text
+    assert ascending.json()["total"] == 300
+    assert ascending.json()["items"][0]["name"] == "Item 000"
+    assert ascending.json()["items"][-1]["name"] == "Item 024"
+    assert descending.json()["items"][0]["name"] == "Item 299"
+    assert descending.json()["items"][-1]["name"] == "Item 275"
+
+
+@pytest.mark.asyncio
+async def test_row_query_evaluates_nested_filter_tree_before_pagination(
+    client: httpx.AsyncClient,
+) -> None:
+    token, workspace_id = await _register(client, "filter-tree@example.com")
+    headers = _headers(token, workspace_id)
+    database = await client.post(
+        "/databases",
+        json={"name": "Nested filters"},
+        headers=headers,
+    )
+    database_id = database.json()["id"]
+    region = await client.post(
+        f"/databases/{database_id}/fields",
+        json={"name": "Region", "type": "text", "options": {}},
+        headers=headers,
+    )
+    score = await client.post(
+        f"/databases/{database_id}/fields",
+        json={"name": "Score", "type": "number", "options": {}},
+        headers=headers,
+    )
+    region_id = region.json()["id"]
+    score_id = score.json()["id"]
+    rows = [
+        ("North low", "North", 2),
+        ("North high", "North", 20),
+        ("South high", "South", 30),
+        ("West high", "West", 40),
+    ]
+    for name, region_value, score_value in rows:
+        created = await client.post(
+            f"/databases/{database_id}/entities",
+            json={
+                "name": name,
+                "data": {region_id: region_value, score_id: score_value},
+            },
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+
+    response = await client.post(
+        f"/databases/{database_id}/entities/query",
+        json={
+            "page": 1,
+            "page_size": 1,
+            "filter_tree": {
+                "conj": "and",
+                "rules": [
+                    {"field_id": score_id, "operator": "gt", "value": 10},
+                    {
+                        "conj": "or",
+                        "rules": [
+                            {
+                                "field_id": region_id,
+                                "operator": "eq",
+                                "value": "North",
+                            },
+                            {
+                                "field_id": region_id,
+                                "operator": "eq",
+                                "value": "South",
+                            },
+                        ],
+                    },
+                ],
+            },
+            "sorts": [{"field_id": score_id, "direction": "desc"}],
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 2
+    assert response.json()["items"][0]["name"] == "South high"
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_applies_one_field_to_additive_selection(
+    client: httpx.AsyncClient,
+) -> None:
+    token, workspace_id = await _register(client, "bulk-edit@example.com")
+    headers = _headers(token, workspace_id)
+    database = await client.post(
+        "/databases",
+        json={"name": "Bulk edit"},
+        headers=headers,
+    )
+    database_id = database.json()["id"]
+    status_field = await client.post(
+        f"/databases/{database_id}/fields",
+        json={"name": "Review note", "type": "text", "options": {}},
+        headers=headers,
+    )
+    field_id = status_field.json()["id"]
+    created = await client.post(
+        f"/databases/{database_id}/entities/bulk",
+        json={"names": ["One", "Two", "Three"]},
+        headers=headers,
+    )
+    entity_ids = [item["id"] for item in created.json()]
+
+    updated = await client.patch(
+        f"/databases/{database_id}/entities/bulk",
+        json={
+            "entity_ids": [entity_ids[0], entity_ids[2]],
+            "field_id": field_id,
+            "value": "Approved",
+        },
+        headers=headers,
+    )
+    assert updated.status_code == 200, updated.text
+    assert [item["data"][field_id] for item in updated.json()] == [
+        "Approved",
+        "Approved",
+    ]
+    untouched = await client.get(
+        f"/databases/{database_id}/entities",
+        headers=headers,
+    )
+    by_id = {item["id"]: item for item in untouched.json()}
+    assert by_id[entity_ids[1]]["data"].get(field_id) is None

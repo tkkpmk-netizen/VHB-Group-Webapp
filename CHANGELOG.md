@@ -1,7 +1,122 @@
 # Changelog — VHB Super App
 
-Changelog gộp, mới nhất ở trên. (Trước đây tách thành `CHANGELOG-2026-06-26.md` /
-`CHANGELOG-2026-06-27.md` — đã gộp vào file này.)
+---
+
+## 2026-07-27 — Query-before-pagination across every Database layout
+
+- Entity Filter, Search, Sort, Group summaries and aggregate calculations now
+  run against the complete workspace-scoped Database query before pagination.
+  ASC/DESC results no longer change as more rows are loaded.
+- Added recursive AND/OR filter trees to the bounded Entity query API, including
+  negative/starts-with/ends-with operators and deterministic sort tie-breakers
+  so equal values cannot jump between pages.
+- List, Gallery and Timeline now page through globally ordered server results;
+  Table and Board use the same complete filter tree; Calendar reads all matching
+  bounded pages in parallel because it has no Entity Load more control.
+- Relation pickers now traverse every bounded Entity page instead of silently
+  exposing only the first 200 possible relations.
+- Added regression coverage for 300-row ascending/descending sorts and nested
+  filters evaluated before pagination.
+
+---
+
+## 2026-07-27 — DataSource merge, conditional colors, and scalable Board groups
+
+- Added a workspace-scoped DataSource merge transaction. Users choose one or
+  more non-primary sources and a destination; all Entities move to the
+  destination, merged sources are removed, order is normalized, and the
+  operation is captured in Database change history for restore/undo.
+- Layouts persist conditional coloring independently. Rows/cards and
+  groups/columns can use custom Field conditions or inherit the configured
+  color of Select, Status, Multi-select, and Priority tags.
+- Board now derives columns and exact group counts from the bounded Entity
+  query API rather than from one globally capped Entity response. Every visible
+  column has its own pagination and Load more state.
+- Board renders at most ten groups initially and exposes a horizontal Load more
+  groups control. Groups can be sorted by total Entity count or name, card
+  titles use the canonical Name, and option-backed columns inherit their group
+  color.
+
+---
+
+## 2026-07-27 — Database history, Undo, and deterministic import mapping
+
+- Removed the Global Topbar from the authenticated shell. App Rail, Context
+  Sidebar and Work Area now use the full viewport height; collapsed navigation
+  is reopened by a compact overlay control that does not reserve layout space.
+- Replaced the App Rail's bottom Invite item with the user avatar. Its menu now
+  groups identity, notifications, workspace switching, Invite people, account
+  settings and logout; mobile navigation exposes the same account menu at the
+  bottom of the Context Sidebar.
+- Table checkboxes now build an additive row selection without requiring
+  `Cmd/Ctrl`; that selection survives Search, Filter, Sort, and Group changes.
+  Database search runs before server pagination and returns the complete match
+  count/ID set, while its compact input expands directly on the Layout bar.
+- The floating selection toolbar now exports exactly the selected rows to XLSX
+  and bulk-changes one editable Field across the selection through a
+  workspace-scoped, history-recorded API mutation.
+- Added workspace-scoped Database change history with actor, summary and
+  reversible inverse snapshots for Database metadata, Fields, Entities,
+  relations, DataSources, Layouts and View Presets. The History drawer can
+  restore a revision; `Ctrl/Cmd+Z` restores the latest unreverted change while
+  preserving native text-editor undo.
+- Restoring a deleted Layout now recreates its View Presets and active-preset
+  reference in dependency-safe order.
+- Search Enter now commits `Only matches`, jumps to the first ranked result and
+  closes suggestions.
+- Invalid Field-conversion review uses a dedicated ID-paginated endpoint and
+  automatically fetches every invalid page rather than stopping at the normal
+  Entity load window. Clearing the review returns to the pending conversion
+  dialog with its preview intact.
+- Import mapping now exposes `Create field`, existing Field, and `Don't Import`
+  for every incoming column. Existing Fields keep their type; new Fields expose
+  the complete safely importable catalog and preview generated choice options.
+- Spreadsheet Created time and Last edited time mappings preserve the incoming
+  business timestamps on `Entity.created_at`/`updated_at`. Numeric imports
+  normalize currency and unit strings, and imported choice labels map to the
+  generated stable option IDs.
+- Text-to-choice Field conversion now generates an option for every unique
+  non-empty source value instead of silently truncating at 200 and clearing the
+  remaining cells. Conversion previews group invalid cells by an explicit
+  reason and show the original value beside its Entity name.
+
+---
+
+## 2026-07-24 — Canonical Name fields, scalable groups, and stable drag/drop
+
+- The shared icon catalogue now exposes all 9,349 SVGs from the supplied
+  Font Awesome 5 and Material Design IconJar libraries, including filled,
+  outlined, rounded, sharp and two-tone variants while preserving legacy icon
+  names.
+- Sub-item filtering keeps a non-matching parent as dimmed hierarchy context
+  whenever a descendant matches. Group Collapse all moved into View Controls;
+  sticky group headers now paint above the complete frozen pane.
+- Lossy Field conversion now offers Filter invalid items or Change Anyway.
+  Change Anyway clears incompatible cells and gives affected Entities a unique
+  `WRONG FORMAT n` Name so they remain easy to audit.
+- Deleting a non-primary DataSource now transfers its Entities to Primary or
+  another selected DataSource in one transaction.
+- Number fields now expose the complete browser-supported ISO 4217 currency
+  catalogue, decimal precision for currency, and measurement formats for
+  length, area, volume, weight, temperature, speed and time.
+- Every Database now has exactly one required `name` Field. It can be renamed,
+  and another compatible Field can be promoted to Name after a safety preview;
+  the previous Name becomes ordinary Text. Field labels are unique within a
+  Database, including case-insensitive API validation and database constraints.
+- Text-to-Number conversion extracts numeric values from common imported
+  currency/unit strings, including `$4.1` and `170,000,000đ`, while invalid
+  values remain visible in the conversion preview before being cleared.
+- Grouped Table views use server totals and independent lazy-loaded pages per
+  expanded group. Group headers are sticky, can be reordered directly or in
+  Group settings, and include View-Control Collapse all plus per-group Load more.
+- Customize includes Data Source management for rename, reorder, and safe
+  deletion. Manual Entity ordering clears active sorts, marks Sort as Custom,
+  and exposes Reset/Save View Preset actions.
+- Removed cursor-following drag ghosts. Table/group destinations render an
+  in-place preview; the context tree remains structurally stable until drop and
+  only highlights the current destination. Escape cancels an active drag.
+- Database work areas now use compact, consistent application scrollbars rather
+  than platform-dependent scrollbar dimensions.
 
 ---
 

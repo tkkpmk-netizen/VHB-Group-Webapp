@@ -4,7 +4,7 @@ import enum
 import uuid
 from typing import Any
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,7 @@ from app.db.base import Base, TimestampMixin, new_uuid
 
 class FieldType(enum.StrEnum):
     # --- Phase E1 (implemented) ---
+    name = "name"  # exactly one required canonical entity-name field per database
     text = "text"
     long_text = "long_text"
     number = "number"  # options.format: plain | currency | percent
@@ -42,6 +43,15 @@ class FieldType(enum.StrEnum):
 
 class Field(Base, TimestampMixin):
     __tablename__ = "fields"
+    __table_args__ = (
+        UniqueConstraint("database_id", "name", name="uq_field_database_name"),
+        Index(
+            "uq_field_single_name_type",
+            "database_id",
+            unique=True,
+            postgresql_where=text("type = 'name'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
     database_id: Mapped[uuid.UUID] = mapped_column(

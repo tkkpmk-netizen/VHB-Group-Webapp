@@ -14,6 +14,7 @@ from app.api.auth import router as auth_router
 from app.api.collaboration import router as collaboration_router
 from app.api.dashboards import router as dashboards_router
 from app.api.data_sources import router as data_sources_router
+from app.api.database_history import router as database_history_router
 from app.api.databases import router as databases_router
 from app.api.documents import router as documents_router
 from app.api.drive_files import router as drive_files_router
@@ -47,6 +48,7 @@ MODULES = (
         "database",
         (
             databases_router,
+            database_history_router,
             engine_router,
             layouts_router,
             data_sources_router,
@@ -54,6 +56,7 @@ MODULES = (
         ),
         (
             "databases",
+            "database_changes",
             "database_favorites",
             "fields",
             "entities",

@@ -206,6 +206,7 @@ def _is_number(v: Any) -> bool:
 
 
 TEXT_LIKE = {
+    FieldType.name,
     FieldType.text,
     FieldType.long_text,
     FieldType.url,

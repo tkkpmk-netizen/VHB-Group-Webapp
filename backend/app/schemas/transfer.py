@@ -15,6 +15,9 @@ class DatabaseImportCreate(BaseModel):
     format: Literal["csv", "xlsx"]
     mapping: dict[str, uuid.UUID] = Field(default_factory=dict)
     field_types: dict[str, FieldType] = Field(default_factory=dict)
+    # Explicitly ignored source columns. This is separate from ``mapping`` so
+    # an omitted mapping can continue to mean "create a matching field".
+    skipped_columns: list[str] = Field(default_factory=list)
     # The source column selected as the mandatory system Name. UID is always
     # generated from the destination database sequence and cannot be mapped.
     name_column: str = ""
@@ -33,6 +36,7 @@ class DatabaseImportCreate(BaseModel):
 
 class DatabaseExportCreate(BaseModel):
     format: Literal["csv", "xlsx"] = "xlsx"
+    entity_ids: list[uuid.UUID] | None = Field(default=None, max_length=100_000)
 
 
 class TransferJobOut(BaseModel):
@@ -44,6 +48,7 @@ class ImportPreviewColumn(BaseModel):
     header: str
     inferred_type: str
     samples: list[Any]
+    generated_options: list[str] = Field(default_factory=list)
 
 
 class DatabaseImportPreview(BaseModel):

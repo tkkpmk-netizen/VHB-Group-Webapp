@@ -2,6 +2,52 @@
 @import "tw-animate-css";
 @import "grapesjs/dist/css/grapes.min.css";
 
+/* Compact, product-owned scrollbars for every database work surface. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 28%, transparent)
+    transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-width: 28px;
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 28%, transparent);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--foreground) 42%, transparent);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-button,
+*::-webkit-scrollbar-track-piece {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /* VHB product system: compact, workspace-first UI aligned with ClickUp 4.0. */
@@ -11,7 +57,6 @@
   --radius: 0.375rem;
 
   --app-rail-width: 3.25rem;
-  --app-topbar-height: 2rem;
   --context-sidebar-width: 14.5rem;
 
   --app-rail-start: #0d63bd;
@@ -237,6 +282,21 @@ body {
   );
 }
 
+.vhb-data-grid tbody tr[data-entity-id][data-conditional-color="true"] > td {
+  background-color: var(--vhb-row-color);
+}
+
+.vhb-data-grid
+  tbody
+  tr[data-entity-id][data-conditional-color="true"]:not(.row-selected):hover
+  > td {
+  background-color: color-mix(
+    in srgb,
+    var(--color-primary) 5%,
+    var(--vhb-row-color)
+  );
+}
+
 .vhb-data-grid tbody tr[data-entity-id][data-search-match="true"] > td {
   background-color: color-mix(
     in srgb,
@@ -251,6 +311,13 @@ body {
     var(--color-primary) 20%,
     var(--color-card)
   );
+}
+
+/* A parent remains visible when only one of its sub-items matches the filter.
+   It is context, not a result, so de-emphasize its content without changing
+   the opaque cell surfaces required by the frozen pane. */
+.vhb-data-grid tbody tr[data-filter-context="ancestor"] > td {
+  color: color-mix(in srgb, currentColor 48%, transparent);
 }
 
 .vhb-data-grid .vhb-frozen-cell {

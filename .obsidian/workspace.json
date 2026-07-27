@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "PRODUCTION_PLAN.md",
+                "file": "docs/ux-guidelines.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "PRODUCTION_PLAN"
+              "title": "ux-guidelines"
             }
           }
         ]
@@ -155,13 +155,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "PRODUCTION_PLAN.md",
+                "file": "docs/ux-guidelines.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of PRODUCTION_PLAN"
+              "title": "Outline of ux-guidelines"
             }
           },
           {
@@ -192,14 +192,27 @@
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
       "bases:Create new base": false,
-      "realclaudian:Open Claudian": false
+      "realclaudian:Open Claudian": false,
+      "workspaces:Manage workspace layouts": false
     }
   },
   "active": "a14b4af4203bd1b5",
   "lastOpenFiles": [
+    "frontend/src/lib/conditional-colors.test.ts",
+    "frontend/src/lib/conditional-colors.ts",
+    "docs/ui-system.md",
+    "docs/product-context.md",
+    "PRODUCTION_PLAN.md",
+    "AGENTS.md",
+    "().md",
+    "docs/field-catalog.md",
+    "docs/clickup-ui-runtime-analysis.md",
+    "docs/adr/0023-database-lifecycle-and-placement-favorites.md",
+    "docs/adr/0024-database-change-history-and-import-provenance.md",
+    "README.md",
+    "CLAUDE.md",
     "CHANGELOG.md",
     "docs/adr/0005-core-functions.md",
-    "AGENTS.md",
     "docs/adr/0018-space-database-placements-and-dashboards.md",
     "backend/alembic/versions/__pycache__/b3e5f7a9c1d3_space_database_placements.cpython-312.pyc",
     "backend/alembic/versions/b3e5f7a9c1d3_space_database_placements.py",
@@ -209,11 +222,8 @@
     "design-system/vhb-super-app/MASTER.md",
     "design-system/vhb-super-app",
     "design-system",
-    "PRODUCTION_PLAN.md",
-    "docs/ui-system.md",
     "backend/alembic/versions/__pycache__/a2d4f6b8c0e2_database_order.cpython-312.pyc",
     "frontend/src/components/spaces/resource-manager.tsx",
-    "frontend/src/components/spaces",
     "docs/ux-guidelines.md",
     "docs/adr/0011-sites-public-runtime.md",
     "docs/adr/0012-web-designer-grapesjs-source.md",
@@ -224,15 +234,6 @@
     "docs/adr/0017-entity-layout-datasource-viewpreset.md",
     "docs/adr/0002-authz-model.md",
     "docs/adr/0001-dynamic-schema.md",
-    "System Structure.md",
-    "tmp/pdfs/clickup-ui.pophst/page-01.png",
-    "README.md",
-    "CLAUDE.md",
-    "frontend/README.md",
-    "frontend/CLAUDE.md",
-    "frontend/AGENTS.md",
-    "docs/adr/0010-google-drive-files-media.md",
-    "docs/adr/0009-notification-delivery.md",
-    "docs/adr/0007-dashboard-query-bindings.md"
+    "tmp/pdfs/clickup-ui.pophst/page-01.png"
   ]
 }

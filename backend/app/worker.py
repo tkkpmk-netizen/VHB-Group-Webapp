@@ -73,8 +73,11 @@ async def execute_job(db: AsyncSession, job: Job, storage: ObjectStorage) -> dic
             records=records,
             mapping=dict(job.payload.get("mapping") or {}),
             field_types=dict(job.payload.get("field_types") or {}),
+            skipped_columns=list(job.payload.get("skipped_columns") or []),
             create_missing_fields=bool(job.payload.get("create_missing_fields", True)),
             data_source_id=uuid.UUID(str(job.payload["data_source_id"])),
+            created_data_source=bool(job.payload.get("created_data_source", False)),
+            actor_id=uuid.UUID(str(job.payload.get("actor_id") or job.created_by_id)),
             name_column=str(job.payload["name_column"]),
             include_rows=job.payload.get("include_rows"),
             incoming_duplicate_policy=str(job.payload.get("incoming_duplicate_policy", "suffix")),
@@ -91,13 +94,15 @@ async def execute_job(db: AsyncSession, job: Job, storage: ObjectStorage) -> dic
                 )
             ).scalars()
         )
+        entity_query = select(Entity).where(Entity.database_id == database.id)
+        requested_ids = job.payload.get("entity_ids")
+        if requested_ids is not None:
+            entity_query = entity_query.where(
+                Entity.id.in_([uuid.UUID(str(entity_id)) for entity_id in requested_ids])
+            )
         entities = list(
             (
-                await db.execute(
-                    select(Entity)
-                    .where(Entity.database_id == database.id)
-                    .order_by(Entity.order, Entity.seq)
-                )
+                await db.execute(entity_query.order_by(Entity.order, Entity.seq))
             ).scalars()
         )
         file_format = str(job.payload["format"])

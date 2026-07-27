@@ -41,6 +41,14 @@ class FieldTypeConversionRequest(BaseModel):
     target_type: FieldType
     options: dict[str, Any] = PField(default_factory=dict)
     dry_run: bool = True
+    change_anyway: bool = False
+
+
+class FieldTypeConversionInvalidSample(BaseModel):
+    entity_id: uuid.UUID
+    entity_name: str
+    value: str
+    reason: str
 
 
 class FieldTypeConversionResult(BaseModel):
@@ -53,6 +61,11 @@ class FieldTypeConversionResult(BaseModel):
     empty_cells: int
     generated_choices: int = 0
     cleared_samples: list[str] = PField(default_factory=list)
+    invalid_entity_ids: list[uuid.UUID] = PField(default_factory=list)
+    invalid_reason_counts: dict[str, int] = PField(default_factory=dict)
+    invalid_samples: list[FieldTypeConversionInvalidSample] = PField(
+        default_factory=list
+    )
 
 
 class EntityCreate(BaseModel):
@@ -73,6 +86,12 @@ class BulkEntityCreate(BaseModel):
     data_source_id: uuid.UUID | None = None
 
 
+class BulkEntityUpdate(BaseModel):
+    entity_ids: list[uuid.UUID] = PField(min_length=1, max_length=100_000)
+    field_id: uuid.UUID
+    value: Any = None
+
+
 class EntityOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -87,8 +106,29 @@ class EntityOut(BaseModel):
 
 class EntityFilter(BaseModel):
     field_id: str
-    operator: Literal["eq", "neq", "contains", "gt", "gte", "lt", "lte", "is_empty", "is_not_empty"]
+    operator: Literal[
+        "eq",
+        "neq",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "is_empty",
+        "is_not_empty",
+    ]
     value: Any = None
+
+
+class EntityFilterGroup(BaseModel):
+    conj: Literal["and", "or"] = "and"
+    rules: list["EntityFilter | EntityFilterGroup"] = PField(
+        default_factory=list,
+        max_length=20,
+    )
 
 
 class EntitySort(BaseModel):
@@ -115,9 +155,19 @@ class EntityQuery(BaseModel):
     page: int = PField(default=1, ge=1)
     page_size: int = PField(default=50, ge=1, le=200)
     filters: list[EntityFilter] = PField(default_factory=list, max_length=20)
+    filter_tree: EntityFilterGroup | None = None
     sorts: list[EntitySort] = PField(default_factory=list, max_length=5)
     aggregations: list[EntityAggregation] = PField(default_factory=list, max_length=20)
     group_by: str | None = None
+    search: str | None = PField(default=None, max_length=500)
+    search_field_id: str | None = None
+    include_match_ids: bool = False
+
+
+class EntityIdsQuery(BaseModel):
+    entity_ids: list[uuid.UUID] = PField(min_length=1, max_length=100_000)
+    page: int = PField(default=1, ge=1)
+    page_size: int = PField(default=50, ge=1, le=200)
 
 
 class SubItemTreeQuery(BaseModel):
@@ -128,6 +178,7 @@ class SubItemTreeQuery(BaseModel):
 
 class EntityGroup(BaseModel):
     key: Any
+    total: int
     aggregates: dict[str, Any] = PField(default_factory=dict)
 
 
@@ -139,6 +190,7 @@ class EntityPage(BaseModel):
     pages: int
     aggregates: dict[str, Any] = PField(default_factory=dict)
     groups: list[EntityGroup] = PField(default_factory=list)
+    matched_entity_ids: list[uuid.UUID] = PField(default_factory=list)
 
 
 class ReorderRequest(BaseModel):

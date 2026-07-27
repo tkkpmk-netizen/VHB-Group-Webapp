@@ -24,14 +24,13 @@ import {
   type GanttScale,
 } from "@/components/table/gantt-scale";
 import {
-  applyFilterTree,
-  applySorts,
   toText,
   type FilterGroup,
   type SortRule,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
 import { ViewQueryState } from "@/components/table/view-query-state";
+import { usePagedEntities } from "@/components/table/use-paged-entities";
 
 type Field = components["schemas"]["FieldOut"];
 type Entity = components["schemas"]["EntityOut"];
@@ -165,8 +164,9 @@ export function GanttView({
   sorts,
   limit,
   dataSourceId,
+  search,
+  searchFieldId,
   filterToMatches,
-  matchedIds,
   openEntity,
 }: {
   databaseId: string;
@@ -184,13 +184,13 @@ export function GanttView({
   sorts: SortRule[];
   limit: number;
   dataSourceId: string | null;
+  search: string;
+  searchFieldId: string | null;
   filterToMatches: boolean;
-  matchedIds: Set<string> | null;
   openEntity: (entity: Entity) => void;
 }) {
   const qc = useQueryClient();
   const [now] = useState(() => Date.now()); // stable "today" marker for this mount
-  const [pages, setPages] = useState(0); // entity "load more" clicks
   const [newEntityOpen, setNewEntityOpen] = useState(false);
   const [extBefore, setExtBefore] = useState(0); // window extensions (earlier)
   const [extAfter, setExtAfter] = useState(0); // window extensions (later)
@@ -234,12 +234,19 @@ export function GanttView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const entitiesQ = useQuery<Entity[]>({
-    queryKey: ["entities", databaseId, dataSourceId],
-    queryFn: () =>
-      apiFetch<Entity[]>(
-        `/databases/${databaseId}/entities${dataSourceId ? `?data_source_id=${dataSourceId}` : ""}`,
-      ),
+  const {
+    query: entitiesQ,
+    items: entities,
+    total,
+  } = usePagedEntities({
+    databaseId,
+    filterRoot,
+    sorts,
+    limit,
+    dataSourceId,
+    search,
+    searchFieldId,
+    filterToMatches,
   });
   const save = useMutation({
     mutationFn: ({
@@ -266,7 +273,6 @@ export function GanttView({
     onSuccess: (created) => {
       setEditingEntityId(created.id);
       setNewEntityOpen(false);
-      setPages(Math.floor((entitiesQ.data?.length ?? 0) / limit));
       qc.invalidateQueries({ queryKey: ["entities", databaseId] });
     },
   });
@@ -292,9 +298,6 @@ export function GanttView({
 
   const fields = fieldsQ.data ?? [];
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
-  let entities = applyFilterTree(entitiesQ.data ?? [], byId, filterRoot);
-  if (filterToMatches && matchedIds) entities = entities.filter((r) => matchedIds.has(r.id));
-  entities = applySorts(entities, byId, sorts);
 
   const dateFields = dateLikeFields(fields, entities);
   const picked = ganttField ? byId[ganttField] : undefined;
@@ -425,10 +428,8 @@ export function GanttView({
     (x): x is { r: Entity; span: Span } => !!x.span,
   );
   const undatedEntities = allSpans.filter((x) => !x.span).map((x) => x.r);
-  // Entity load limit (mirrors the table): render first N entities, reveal more.
-  const shown = limit * (pages + 1);
-  const entitySpans = datedAll.slice(0, shown);
-  const hiddenCount = datedAll.length - entitySpans.length;
+  const entitySpans = datedAll;
+  const hiddenCount = Math.max(0, total - entities.length);
 
   // --- Time window: today ± windowDays, auto-grown to fit every LOADED bar so
   //     nothing is cut off. Loading more entities (below) extends it automatically.
@@ -878,9 +879,10 @@ export function GanttView({
       )}
 
       <div className="mt-2 flex w-max items-center gap-2">
-        {hiddenCount > 0 && (
+        {entitiesQ.hasNextPage && (
           <button
-            onClick={() => setPages((p) => p + 1)}
+            onClick={() => void entitiesQ.fetchNextPage()}
+            disabled={entitiesQ.isFetchingNextPage}
             className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10"
           >
             <ChevronDown className="size-4" /> Load more ({hiddenCount} left)

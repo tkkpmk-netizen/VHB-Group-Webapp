@@ -21,6 +21,7 @@ export const LAYOUT_ICONS: Record<LayoutOut["type"], string> = {
 };
 
 const FIELD_ICONS: Partial<Record<FieldOut["type"], string>> = {
+  name: "font",
   text: "font",
   long_text: "align-left",
   number: "hashtag",

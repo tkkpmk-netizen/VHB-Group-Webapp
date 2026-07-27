@@ -16,8 +16,10 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ResourceAccess } from "@/components/access/resource-access";
 import { Dropdown } from "@/components/ui/dropdown";
+import type { components } from "@/lib/api/schema";
 import { apiFetch } from "@/lib/api/client";
 import { DEFAULT_ICONS } from "@/lib/icon-system";
+import { toText } from "@/lib/view";
 
 type Dashboard = {
   id: string;
@@ -27,7 +29,7 @@ type Dashboard = {
 };
 type Database = { id: string; name: string };
 type SpaceDatabase = { database: Database };
-type Field = { id: string; name: string; type: string };
+type Field = components["schemas"]["FieldOut"];
 type WidgetType = "metric" | "bar" | "table";
 type Widget = {
   id: string;
@@ -62,14 +64,23 @@ function WidgetCard({
     queryKey: ["widget-data", widget.id],
     queryFn: () =>
       apiFetch<{ data: EntityPage }>(`/dashboard-widgets/${widget.id}/data`),
-    refetchInterval: 30_000,
+    // Dashboard mutations invalidate this query. Poll less aggressively for
+    // cross-user updates so an idle dashboard does not hammer the API.
+    refetchInterval: 120_000,
   });
-  const { data: fields = [] } = useQuery<Field[]>({
+  const {
+    data: fields = [],
+    isLoading: areFieldsLoading,
+    isError: hasFieldsError,
+  } = useQuery<Field[]>({
     queryKey: ["fields", widget.database_id],
     queryFn: () =>
       apiFetch<Field[]>(`/databases/${widget.database_id}/fields`),
-    enabled: widget.type === "table",
+    enabled: widget.type === "bar" || widget.type === "table",
   });
+  const needsFields = widget.type === "bar" || widget.type === "table";
+  const isWidgetLoading = isLoading || (needsFields && areFieldsLoading);
+  const hasWidgetError = isError || (needsFields && hasFieldsError);
   const aggregation = widget.query.aggregations?.[0];
   const key = aggregation
     ? `${aggregation.function}:${aggregation.field_id}`
@@ -79,6 +90,7 @@ function WidgetCard({
     1,
     ...groups.map((group) => Number(group.aggregates[key] ?? 0)),
   );
+  const groupField = fields.find((field) => field.id === widget.query.group_by);
   const tableFields = fields.slice(0, 4);
 
   return (
@@ -102,15 +114,15 @@ function WidgetCard({
         </button>
       </header>
       <div className="min-h-36 p-4">
-        {isLoading && (
+        {isWidgetLoading && (
           <LoaderCircle className="mx-auto mt-8 size-5 animate-spin text-muted-foreground" />
         )}
-        {isError && (
+        {hasWidgetError && (
           <p className="py-8 text-center text-xs text-destructive">
             Could not load widget data.
           </p>
         )}
-        {data && widget.type === "metric" && (
+        {data && !hasWidgetError && widget.type === "metric" && (
           <>
             <p className="text-3xl font-semibold tracking-tight">
               {Number(data.data.aggregates[key] ?? data.data.total).toLocaleString()}
@@ -120,14 +132,17 @@ function WidgetCard({
             </p>
           </>
         )}
-        {data && widget.type === "bar" && (
+        {data && !isWidgetLoading && !hasWidgetError && widget.type === "bar" && (
           <div className="space-y-3">
             {groups.map((group) => {
               const value = Number(group.aggregates[key] ?? 0);
+              const label = groupField
+                ? toText(groupField, group.key)
+                : String(group.key ?? "");
               return (
                 <div key={String(group.key)}>
                   <div className="mb-1 flex justify-between gap-3 text-xs">
-                    <span className="truncate">{String(group.key ?? "Empty")}</span>
+                    <span className="truncate">{label || "Empty"}</span>
                     <span className="font-medium">{value.toLocaleString()}</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -146,7 +161,7 @@ function WidgetCard({
             )}
           </div>
         )}
-        {data && widget.type === "table" && (
+        {data && !isWidgetLoading && !hasWidgetError && widget.type === "table" && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
@@ -163,7 +178,7 @@ function WidgetCard({
                   <tr key={row.id} className="border-b last:border-0">
                     {tableFields.map((field) => (
                       <td key={field.id} className="max-w-40 truncate px-2 py-2">
-                        {String(row.data[field.id] ?? "—")}
+                        {toText(field, row.data[field.id]) || "—"}
                       </td>
                     ))}
                   </tr>

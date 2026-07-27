@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus } from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
 import { Dropdown } from "@/components/ui/dropdown";
 import { looksDate } from "@/components/table/gantt-scale";
-import { applyFilterTree, type FilterGroup } from "@/lib/view";
+import {
+  serverFilterTreeFor,
+  type FilterGroup,
+  type SortRule,
+} from "@/lib/view";
 import type { components } from "@/lib/api/schema";
 import { ViewQueryState } from "@/components/table/view-query-state";
+import { fetchAllEntityQueryPages } from "@/components/table/use-paged-entities";
 
 type Field = components["schemas"]["FieldOut"];
 type Entity = components["schemas"]["EntityOut"];
@@ -141,9 +146,11 @@ export function CalendarView({
   setCalendarMode,
   toolbarSlot,
   filterRoot,
+  sorts,
   dataSourceId,
+  search,
+  searchFieldId,
   filterToMatches,
-  matchedIds,
   openEntity,
 }: {
   databaseId: string;
@@ -153,9 +160,11 @@ export function CalendarView({
   setCalendarMode: (m: string) => void;
   toolbarSlot: HTMLElement | null;
   filterRoot: FilterGroup;
+  sorts: SortRule[];
   dataSourceId: string | null;
+  search: string;
+  searchFieldId: string | null;
   filterToMatches: boolean;
-  matchedIds: Set<string> | null;
   openEntity: (entity: Entity) => void;
 }) {
   const qc = useQueryClient();
@@ -175,17 +184,44 @@ export function CalendarView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
+  const filterTree = useMemo(
+    () => serverFilterTreeFor(filterRoot),
+    [filterRoot],
+  );
   const entitiesQ = useQuery<Entity[]>({
-    queryKey: ["entities", databaseId, dataSourceId],
+    queryKey: [
+      "entities",
+      databaseId,
+      "calendar-all",
+      dataSourceId,
+      JSON.stringify(filterTree),
+      JSON.stringify(sorts),
+      filterToMatches ? search.trim() : "",
+      filterToMatches ? searchFieldId : null,
+    ],
     queryFn: () =>
-      apiFetch<Entity[]>(
-        `/databases/${databaseId}/entities${dataSourceId ? `?data_source_id=${dataSourceId}` : ""}`,
-      ),
+      fetchAllEntityQueryPages(databaseId, {
+        filters: dataSourceId
+          ? [
+              {
+                field_id: "data_source_id",
+                operator: "eq",
+                value: dataSourceId,
+              },
+            ]
+          : [],
+        filter_tree: filterTree,
+        sorts: sorts.map((sort) => ({
+          field_id: sort.fieldId,
+          direction: sort.dir,
+        })),
+        search: filterToMatches ? search.trim() || null : null,
+        search_field_id: filterToMatches ? searchFieldId : null,
+      }),
   });
+  const entities = entitiesQ.data ?? [];
   const fields = fieldsQ.data ?? [];
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
-  let entities = applyFilterTree(entitiesQ.data ?? [], byId, filterRoot);
-  if (filterToMatches && matchedIds) entities = entities.filter((r) => matchedIds.has(r.id));
 
   const dateFields = fields.filter(
     (f) =>
@@ -417,6 +453,9 @@ export function CalendarView({
                 <div
                   key={ev.entity.id}
                   draggable={editable}
+                  data-drag-highlight
+                  data-drag-preview-kind="calendar-item"
+                  data-drag-preview-label={title(ev.entity)}
                   onDragStart={() => setDragId(ev.entity.id)}
                   onDoubleClick={() => openEntity(ev.entity)}
                   title={`${title(ev.entity)} · double-click to open`}
@@ -510,6 +549,9 @@ export function CalendarView({
                       <div
                         key={ev.entity.id}
                         draggable={editable}
+                        data-drag-highlight
+                        data-drag-preview-kind="calendar-item"
+                        data-drag-preview-label={title(ev.entity)}
                         onDragStart={() => setDragId(ev.entity.id)}
                         onDoubleClick={() => openEntity(ev.entity)}
                         className="absolute overflow-hidden rounded-md border border-primary/40 bg-primary/15 px-1 text-[11px] leading-4 text-primary"
@@ -606,6 +648,9 @@ export function CalendarView({
                     <div
                       key={ev.entity.id}
                       draggable={editable}
+                      data-drag-highlight
+                      data-drag-preview-kind="calendar-item"
+                      data-drag-preview-label={title(ev.entity)}
                       onDragStart={() => setDragId(ev.entity.id)}
                       className="truncate rounded bg-primary/15 px-1 text-[11px] text-primary"
                       title={title(ev.entity)}

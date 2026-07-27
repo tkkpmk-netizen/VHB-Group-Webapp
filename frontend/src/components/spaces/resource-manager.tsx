@@ -18,7 +18,7 @@ import {
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { DragEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -28,6 +28,11 @@ import { IconPicker } from "@/components/ui/icon-picker";
 import { apiFetch } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
 import { DEFAULT_ICONS } from "@/lib/icon-system";
+import {
+  DRAG_CANCEL_EVENT,
+  DRAG_END_EVENT,
+  DRAG_START_EVENT,
+} from "@/lib/drag-preview";
 
 export type Db = components["schemas"]["DatabaseOut"];
 export type Space = components["schemas"]["SpaceOut"];
@@ -68,6 +73,13 @@ export type ResourceDialogState =
 export function startDatabaseDrag(event: DragEvent<HTMLElement>, database: Db | string) {
   const databaseId = typeof database === "string" ? database : database.id;
   activeResourceDrag = { kind: "database", databaseId };
+  event.currentTarget.addEventListener(
+    "dragend",
+    () => {
+      activeResourceDrag = null;
+    },
+    { once: true },
+  );
   event.dataTransfer.effectAllowed = "copy";
   event.dataTransfer.setData(DATABASE_DRAG_TYPE, databaseId);
   event.dataTransfer.setData("text/plain", databaseId);
@@ -80,6 +92,13 @@ export function startPlacementDrag(event: DragEvent<HTMLElement>, placement: Spa
     spaceId: placement.space_id,
   };
   activeResourceDrag = { kind: "placement", ...payload };
+  event.currentTarget.addEventListener(
+    "dragend",
+    () => {
+      activeResourceDrag = null;
+    },
+    { once: true },
+  );
   event.dataTransfer.effectAllowed = "copyMove";
   event.dataTransfer.setData(PLACEMENT_DRAG_TYPE, JSON.stringify(payload));
   event.dataTransfer.setData(DATABASE_DRAG_TYPE, placement.database_id);
@@ -113,7 +132,15 @@ export function useSpaceDatabaseOrganizer(
   }>({ base: placements, value: placements });
   const displayPlacements =
     localPlacements.base === placements ? localPlacements.value : placements;
-  const lastLiveMove = useRef("");
+  const displayPlacementsRef = useRef(displayPlacements);
+  const previewItems = useRef<SpaceDatabaseOrderItem[] | null>(null);
+  const previewSnapshot = useRef<SpaceDatabase[] | null>(null);
+  const dragCancelled = useRef(false);
+  useEffect(() => {
+    if (!previewSnapshot.current) {
+      displayPlacementsRef.current = displayPlacements;
+    }
+  }, [displayPlacements]);
   const reorder = useMutation({
     mutationFn: (items: SpaceDatabaseOrderItem[]) =>
       apiFetch<void>(`/spaces/${spaceId}/databases/reorder`, {
@@ -136,11 +163,15 @@ export function useSpaceDatabaseOrganizer(
     folderId: string | null,
     beforeId?: string,
   ) {
-    const placement = displayPlacements.find((item) => item.id === placementId);
+    const currentPlacements = displayPlacementsRef.current;
+    const placement = currentPlacements.find((item) => item.id === placementId);
     if (!placement) return;
+    if (!previewSnapshot.current) previewSnapshot.current = currentPlacements;
     const sourceFolderId = placement.folder_id;
     const target = sortPlacements(
-      displayPlacements.filter((item) => item.folder_id === folderId && item.id !== placementId),
+      currentPlacements.filter(
+        (item) => item.folder_id === folderId && item.id !== placementId,
+      ),
     );
     const beforeIndex = beforeId ? target.findIndex((item) => item.id === beforeId) : -1;
     target.splice(beforeIndex >= 0 ? beforeIndex : target.length, 0, {
@@ -155,59 +186,77 @@ export function useSpaceDatabaseOrganizer(
     if (sourceFolderId !== folderId) {
       items.push(
         ...sortPlacements(
-          displayPlacements.filter(
+          currentPlacements.filter(
             (item) => item.folder_id === sourceFolderId && item.id !== placementId,
           ),
         ).map((item, order) => ({ id: item.id, folder_id: sourceFolderId, order })),
       );
     }
+    const nextPlacements = currentPlacements.map((item) => {
+      const changed = items.find((candidate) => candidate.id === item.id);
+      return changed
+        ? {
+            ...item,
+            folder_id:
+              changed.folder_id === undefined
+                ? item.folder_id
+                : changed.folder_id,
+            order: changed.order,
+          }
+        : item;
+    });
+    const accumulatedItems = new Map(
+      (previewItems.current ?? []).map((item) => [item.id, item]),
+    );
+    items.forEach((item) => accumulatedItems.set(item.id, item));
+    previewItems.current = [...accumulatedItems.values()];
+    displayPlacementsRef.current = nextPlacements;
     setLocalPlacements({
       base: placements,
-      value: displayPlacements.map((item) => {
-        const changed = items.find((candidate) => candidate.id === item.id);
-        return changed
-          ? {
-              ...item,
-              folder_id: changed.folder_id === undefined ? item.folder_id : changed.folder_id,
-              order: changed.order,
-            }
-          : item;
-      }),
+      value: nextPlacements,
     });
-    reorder.mutate(items);
   }
+
+  function commitPreview() {
+    if (dragCancelled.current) return;
+    const items = previewItems.current;
+    previewItems.current = null;
+    previewSnapshot.current = null;
+    if (items?.length) reorder.mutate(items);
+  }
+
+  const cancelPreview = useCallback(() => {
+    dragCancelled.current = true;
+    const snapshot = previewSnapshot.current;
+    if (snapshot) {
+      displayPlacementsRef.current = snapshot;
+      setLocalPlacements((current) => ({ base: current.base, value: snapshot }));
+    }
+    previewItems.current = null;
+    previewSnapshot.current = null;
+    activeResourceDrag = null;
+  }, []);
 
   function liveInto(event: DragEvent<HTMLElement>, folderId: string | null, beforeId?: string) {
     event.preventDefault();
-    const draggedPlacement = readPlacementDrag(event);
-    if (draggedPlacement?.spaceId === spaceId) {
-      const signature = `${draggedPlacement.placementId}:${folderId ?? "root"}:${beforeId ?? "end"}`;
-      if (lastLiveMove.current !== signature) {
-        lastLiveMove.current = signature;
-        movePlacement(draggedPlacement.placementId, folderId, beforeId);
-      }
-      return;
-    }
-    const databaseId =
-      draggedPlacement?.databaseId ||
-      (activeResourceDrag?.kind === "database" ? activeResourceDrag.databaseId : "") ||
-      event.dataTransfer.getData(DATABASE_DRAG_TYPE);
-    const signature = `add:${databaseId}:${folderId ?? "root"}`;
-    if (
-      databaseId &&
-      lastLiveMove.current !== signature &&
-      !displayPlacements.some((item) => item.database_id === databaseId)
-    ) {
-      lastLiveMove.current = signature;
-      add.mutate({ databaseId, folderId });
-    }
+    if (dragCancelled.current) return;
+    // Keep the tree stable while the pointer crosses nested hit targets.
+    // The destination owns a lightweight highlight; data moves once on drop.
+    void folderId;
+    void beforeId;
   }
 
-  function dropInto(event: DragEvent<HTMLElement>, folderId: string | null) {
+  function dropInto(
+    event: DragEvent<HTMLElement>,
+    folderId: string | null,
+    beforeId?: string,
+  ) {
     event.preventDefault();
+    if (dragCancelled.current) return;
     const draggedPlacement = readPlacementDrag(event);
     if (draggedPlacement?.spaceId === spaceId) {
-      movePlacement(draggedPlacement.placementId, folderId);
+      movePlacement(draggedPlacement.placementId, folderId, beforeId);
+      commitPreview();
       return;
     }
     const databaseId =
@@ -216,6 +265,21 @@ export function useSpaceDatabaseOrganizer(
       add.mutate({ databaseId, folderId });
     }
   }
+
+  useEffect(() => {
+    const cancel = () => cancelPreview();
+    const start = () => {
+      dragCancelled.current = false;
+    };
+    window.addEventListener(DRAG_CANCEL_EVENT, cancel);
+    window.addEventListener(DRAG_END_EVENT, cancel);
+    window.addEventListener(DRAG_START_EVENT, start);
+    return () => {
+      window.removeEventListener(DRAG_CANCEL_EVENT, cancel);
+      window.removeEventListener(DRAG_END_EVENT, cancel);
+      window.removeEventListener(DRAG_START_EVENT, start);
+    };
+  }, [cancelPreview]);
 
   return {
     addDatabase: (databaseId: string, folderId: string | null) =>
@@ -254,11 +318,14 @@ export function CompactMenu({
 
   useEffect(() => {
     if (!contextPoint) return;
-    setPosition({
-      top: Math.max(8, Math.min(contextPoint.y, window.innerHeight - 260)),
-      left: Math.max(8, Math.min(contextPoint.x, window.innerWidth - 198)),
+    const frame = requestAnimationFrame(() => {
+      setPosition({
+        top: Math.max(8, Math.min(contextPoint.y, window.innerHeight - 260)),
+        left: Math.max(8, Math.min(contextPoint.x, window.innerWidth - 198)),
+      });
+      setOpen(true);
     });
-    setOpen(true);
+    return () => cancelAnimationFrame(frame);
   }, [contextPoint]);
 
   function openMenu() {
@@ -377,10 +444,12 @@ function PlacementNode({
   placement,
   onDialog,
   onDropBefore,
+  onDropAt,
 }: {
   placement: SpaceDatabase;
   onDialog: (state: ResourceDialogState) => void;
   onDropBefore: (event: DragEvent<HTMLElement>, placementId: string) => void;
+  onDropAt: (event: DragEvent<HTMLElement>, placementId: string) => void;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -389,23 +458,38 @@ function PlacementNode({
     pathname === `/databases/${placement.database_id}` &&
     searchParams.get("placement") === placement.id;
   return (
-    <div
+    <motion.div
+      layout="position"
       draggable
-      onDragStart={(event) => startPlacementDrag(event, placement)}
+      data-drag-highlight
+      data-drag-preview-kind="tree-item"
+      data-drag-preview-label={placement.database.name}
+      onDragStartCapture={(event) => startPlacementDrag(event, placement)}
       onDragEnter={(event) => {
         event.stopPropagation();
+        event.currentTarget.dataset.dragOver = "true";
         onDropBefore(event, placement.id);
       }}
       onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => event.preventDefault()}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          delete event.currentTarget.dataset.dragOver;
+        }
+      }}
+      onDrop={(event) => {
+        delete event.currentTarget.dataset.dragOver;
+        event.stopPropagation();
+        onDropAt(event, placement.id);
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
         setContextPoint({ x: event.clientX, y: event.clientY });
       }}
-      className={`group/database relative flex h-[30px] items-center rounded-md pl-1 text-xs transition-colors hover:bg-muted hover:text-foreground ${
+      className={`group/database relative flex h-[30px] items-center rounded-md pl-1 text-xs transition-colors hover:bg-muted hover:text-foreground data-[drag-over=true]:bg-accent data-[drag-over=true]:shadow-[inset_0_2px_0_var(--color-primary)] ${
         active ? "bg-[var(--surface-selected)] font-medium text-[#1264d7]" : "text-muted-foreground"
       }`}
+      transition={{ layout: { duration: 0.18, ease: [0.16, 1, 0.3, 1] } }}
     >
       <GripVertical className="mr-0.5 size-3 shrink-0 cursor-grab opacity-0 group-hover/database:opacity-60 group-focus-within/database:opacity-60" />
       <Link
@@ -449,7 +533,7 @@ function PlacementNode({
           },
         ]}
       />
-    </div>
+    </motion.div>
   );
 }
 
@@ -488,7 +572,8 @@ function FolderNode({
         onDragLeave={(event) => delete event.currentTarget.dataset.dragOver}
         onDrop={(event) => {
           delete event.currentTarget.dataset.dragOver;
-          event.preventDefault();
+          event.stopPropagation();
+          organizer.dropInto(event, folder.id);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -586,6 +671,9 @@ function FolderNode({
                 event.preventDefault();
                 organizer.liveInto(event, folder.id, beforeId);
               }}
+              onDropAt={(event, beforeId) =>
+                organizer.dropInto(event, folder.id, beforeId)
+              }
             />
           ))}
         </div>
@@ -630,7 +718,8 @@ function SpaceTree({
         onDragLeave={(event) => delete event.currentTarget.dataset.dragOver}
         onDrop={(event) => {
           delete event.currentTarget.dataset.dragOver;
-          event.preventDefault();
+          event.stopPropagation();
+          organizer.dropInto(event, null);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -717,6 +806,9 @@ function SpaceTree({
                 event.preventDefault();
                 organizer.liveInto(event, null, beforeId);
               }}
+              onDropAt={(event, beforeId) =>
+                organizer.dropInto(event, null, beforeId)
+              }
             />
           ))}
           {!rootFolders.length && !rootPlacements.length && (

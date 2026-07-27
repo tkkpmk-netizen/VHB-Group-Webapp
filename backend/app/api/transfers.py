@@ -90,8 +90,11 @@ async def import_database(
             "format": payload.format,
             "mapping": {key: str(value) for key, value in payload.mapping.items()},
             "field_types": {key: str(value) for key, value in payload.field_types.items()},
+            "skipped_columns": payload.skipped_columns,
             "create_missing_fields": payload.create_missing_fields,
             "data_source_id": str(data_source.id),
+            "created_data_source": not reused_source,
+            "actor_id": str(current_user.id),
             "name_column": payload.name_column,
             "include_rows": payload.include_rows,
             "incoming_duplicate_policy": payload.incoming_duplicate_policy,
@@ -146,6 +149,13 @@ async def preview_database_import(
                 [row[index] if index < len(row) else None for row in records]
             ),
             samples=[row[index] if index < len(row) else None for row in records[:5]],
+            generated_options=list(
+                dict.fromkeys(
+                    str(row[index]).strip()
+                    for row in records
+                    if index < len(row) and row[index] not in (None, "")
+                )
+            )[:100],
         )
         for index, header in enumerate(headers)
     ]
@@ -176,7 +186,15 @@ async def export_database(
         workspace_id=workspace.id,
         created_by_id=current_user.id,
         job_type="database.export",
-        payload={"database_id": str(database_id), "format": payload.format},
+        payload={
+            "database_id": str(database_id),
+            "format": payload.format,
+            "entity_ids": (
+                [str(entity_id) for entity_id in payload.entity_ids]
+                if payload.entity_ids is not None
+                else None
+            ),
+        },
         max_attempts=settings.worker_max_attempts,
     )
     return TransferJobOut(job=JobOut.model_validate(job))

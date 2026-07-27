@@ -1,7 +1,7 @@
 /** Client-side Filter / Sort / Group helpers for the table view. */
 
-import { countryByCode } from "@/lib/countries";
-import type { components } from "@/lib/api/schema";
+import { countryByCode } from "./countries";
+import type { components } from "./api/schema";
 
 type Field = components["schemas"]["FieldOut"];
 type Entity = components["schemas"]["EntityOut"];
@@ -10,6 +10,15 @@ export type FilterCond = { fieldId: string; op: string; value: string };
 export type FilterGroup = { conj: "and" | "or"; rules: FilterNode[] };
 export type FilterNode = FilterCond | FilterGroup;
 export type SortRule = { fieldId: string; dir: "asc" | "desc" };
+export type ServerFilter = {
+  field_id: string;
+  operator: string;
+  value?: unknown;
+};
+export type ServerFilterGroup = {
+  conj: "and" | "or";
+  rules: (ServerFilter | ServerFilterGroup)[];
+};
 
 export function isGroup(n: FilterNode): n is FilterGroup {
   return (n as FilterGroup).rules !== undefined;
@@ -17,6 +26,64 @@ export function isGroup(n: FilterNode): n is FilterGroup {
 
 export function emptyGroup(): FilterGroup {
   return { conj: "and", rules: [] };
+}
+
+function serverFilterForCondition(rule: FilterCond): ServerFilter | null {
+  if (!rule.fieldId) return null;
+  if (rule.op === "empty") {
+    return { field_id: rule.fieldId, operator: "is_empty" };
+  }
+  if (rule.op === "not_empty") {
+    return { field_id: rule.fieldId, operator: "is_not_empty" };
+  }
+  if (rule.op === "checked" || rule.op === "unchecked") {
+    return {
+      field_id: rule.fieldId,
+      operator: "eq",
+      value: rule.op === "checked",
+    };
+  }
+  const operator = {
+    is: "eq",
+    equals: "eq",
+    on: "eq",
+    eq: "eq",
+    is_not: "neq",
+    not_equals: "neq",
+    ne: "neq",
+    contains: "contains",
+    not_contains: "not_contains",
+    starts_with: "starts_with",
+    ends_with: "ends_with",
+    gt: "gt",
+    after: "gt",
+    gte: "gte",
+    lt: "lt",
+    before: "lt",
+    lte: "lte",
+  }[rule.op];
+  return operator
+    ? { field_id: rule.fieldId, operator, value: rule.value }
+    : null;
+}
+
+/**
+ * Translate the complete UI filter tree for server-side evaluation.
+ * Empty/incomplete rules are omitted exactly as the client matcher omits them.
+ */
+export function serverFilterTreeFor(
+  root: FilterGroup,
+): ServerFilterGroup | null {
+  const convertGroup = (group: FilterGroup): ServerFilterGroup | null => {
+    const rules = group.rules.flatMap((rule) => {
+      const converted = isGroup(rule)
+        ? convertGroup(rule)
+        : serverFilterForCondition(rule);
+      return converted ? [converted] : [];
+    });
+    return rules.length > 0 ? { conj: group.conj, rules } : null;
+  };
+  return convertGroup(root);
 }
 
 type Choice = { id: string; label: string };
@@ -225,7 +292,15 @@ export function applyFilterTree(
   root: FilterGroup,
 ): Entity[] {
   if (root.rules.length === 0) return entities;
-  return entities.filter((entity) => matchNode(entity, byId, root));
+  return entities.filter((entity) => matchesFilter(entity, byId, root));
+}
+
+export function matchesFilter(
+  entity: Entity,
+  byId: Record<string, Field>,
+  root: FilterGroup,
+): boolean {
+  return root.rules.length === 0 || matchNode(entity, byId, root);
 }
 
 export function applySorts(

@@ -9,6 +9,7 @@ import {
   ArrowUpAZ,
   ArrowUpDown,
   Bookmark,
+  Database,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -30,7 +31,7 @@ import {
   FaIcon,
 } from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
-import { Dropdown } from "@/components/ui/dropdown";
+import { Dropdown, MultiDropdown } from "@/components/ui/dropdown";
 import { DATE_FORMATS } from "@/components/table/gantt-view";
 import { FieldConfig } from "@/components/table/field-config";
 import {
@@ -43,9 +44,18 @@ import type { ViewPresetT } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
 import { iconForField } from "@/lib/icon-system";
 import { calculationForField, calculationOptions } from "@/lib/calculations";
+import {
+  CHIP_COLORS,
+} from "@/lib/field-colors";
+import {
+  DEFAULT_CONDITIONAL_COLOR,
+  type ConditionalColorConfig,
+  type ConditionalColorRule,
+} from "@/lib/conditional-colors";
 
 type Field = components["schemas"]["FieldOut"];
 type Layout = components["schemas"]["LayoutOut"];
+type DataSource = components["schemas"]["DataSourceOut"];
 type Page =
   | "main"
   | "view"
@@ -54,6 +64,8 @@ type Page =
   | "filter"
   | "sort"
   | "group"
+  | "conditional-colors"
+  | "data-sources"
   | "fields";
 
 const LIMIT_OPTIONS = [10, 20, 50, 100, 200].map((n) => ({
@@ -68,6 +80,7 @@ export function SettingsSidebar({
   activeId,
   setActiveId,
   fields,
+  dataSources,
   hidden,
   setHidden,
   hasSubItems,
@@ -76,6 +89,10 @@ export function SettingsSidebar({
   setBoardField,
   boardSubgroup,
   setBoardSubgroup,
+  boardGroupSort,
+  setBoardGroupSort,
+  conditionalColor,
+  setConditionalColor,
   ganttDateFormat,
   setGanttDateFormat,
   limit,
@@ -88,6 +105,9 @@ export function SettingsSidebar({
   setGroupFieldId,
   hideEmpty,
   setHideEmpty,
+  groupOrder,
+  setGroupOrder,
+  groupSummaries,
   frozenUpTo,
   setFrozenUpTo,
   calc,
@@ -106,6 +126,7 @@ export function SettingsSidebar({
   activeId: string;
   setActiveId: (id: string) => void;
   fields: Field[];
+  dataSources: DataSource[];
   hidden: Set<string>;
   setHidden: (s: Set<string>) => void;
   hasSubItems: boolean;
@@ -114,6 +135,12 @@ export function SettingsSidebar({
   setBoardField: (id: string | null) => void;
   boardSubgroup: string | null;
   setBoardSubgroup: (id: string | null) => void;
+  boardGroupSort: "default" | "count_desc" | "count_asc" | "name_asc";
+  setBoardGroupSort: (
+    value: "default" | "count_desc" | "count_asc" | "name_asc",
+  ) => void;
+  conditionalColor: ConditionalColorConfig;
+  setConditionalColor: (value: ConditionalColorConfig) => void;
   ganttDateFormat: string;
   setGanttDateFormat: (f: string) => void;
   limit: number;
@@ -126,6 +153,9 @@ export function SettingsSidebar({
   setGroupFieldId: (id: string | null) => void;
   hideEmpty: boolean;
   setHideEmpty: (b: boolean) => void;
+  groupOrder: string[];
+  setGroupOrder: (value: string[]) => void;
+  groupSummaries: { key: string; label: string; total: number }[];
   frozenUpTo: number;
   setFrozenUpTo: (value: number) => void;
   calc: Record<string, string>;
@@ -146,6 +176,11 @@ export function SettingsSidebar({
   const [viewDrag, setViewDrag] = useState<string | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
+  const [dataSourceDrag, setDataSourceDrag] = useState<string | null>(null);
+  const [deleteSourceId, setDeleteSourceId] = useState<string | null>(null);
+  const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
+  const [mergeSourceIds, setMergeSourceIds] = useState<string[]>([]);
+  const [mergeDestinationId, setMergeDestinationId] = useState<string | null>(null);
 
   const patchField = useMutation({
     mutationFn: ({ id, options }: { id: string; options: Record<string, unknown> }) =>
@@ -172,6 +207,81 @@ export function SettingsSidebar({
       setPage("fields");
     },
   });
+
+  const patchDataSource = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiFetch<DataSource>(`/data-sources/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["data-sources", databaseId] }),
+  });
+  const deleteDataSource = useMutation({
+    mutationFn: ({
+      id,
+      transferToId,
+    }: {
+      id: string;
+      transferToId?: string | null;
+    }) =>
+      apiFetch<void>(
+        `/data-sources/${id}${
+          transferToId
+            ? `?transfer_to_id=${encodeURIComponent(transferToId)}`
+            : ""
+        }`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      setDeleteSourceId(null);
+      setTransferTargetId(null);
+      qc.invalidateQueries({ queryKey: ["data-sources", databaseId] });
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
+      qc.invalidateQueries({ queryKey: ["layouts", databaseId] });
+      qc.invalidateQueries({ queryKey: ["board-groups", databaseId] });
+      qc.invalidateQueries({ queryKey: ["board-swimlanes", databaseId] });
+      qc.invalidateQueries({ queryKey: ["board-group-page", databaseId] });
+    },
+  });
+  const reorderDataSources = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiFetch<void>(`/databases/${databaseId}/data-sources/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["data-sources", databaseId] }),
+  });
+  const mergeDataSources = useMutation({
+    mutationFn: ({
+      sourceIds,
+      destinationId,
+    }: {
+      sourceIds: string[];
+      destinationId: string;
+    }) =>
+      apiFetch<DataSource>(`/databases/${databaseId}/data-sources/merge`, {
+        method: "POST",
+        body: JSON.stringify({
+          source_ids: sourceIds,
+          destination_id: destinationId,
+        }),
+      }),
+    onSuccess: () => {
+      setMergeSourceIds([]);
+      setMergeDestinationId(null);
+      qc.invalidateQueries({ queryKey: ["data-sources", databaseId] });
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
+    },
+  });
+
+  function moveDataSource(fromId: string, toId: string) {
+    if (fromId === toId) return;
+    const ids = dataSources.map((source) => source.id).filter((id) => id !== fromId);
+    ids.splice(ids.indexOf(toId), 0, fromId);
+    reorderDataSources.mutate(ids);
+  }
 
   function move(fromId: string, toId: string) {
     if (fromId === toId) return;
@@ -379,6 +489,29 @@ export function SettingsSidebar({
                   onChange={setBoardSubgroup}
                 />
               </label>
+              <label className="block text-xs text-muted-foreground">
+                Sort groups
+                <Dropdown
+                  value={boardGroupSort}
+                  allowClear={false}
+                  options={[
+                    { value: "default", label: "Field order" },
+                    { value: "count_desc", label: "Entity count · high to low" },
+                    { value: "count_asc", label: "Entity count · low to high" },
+                    { value: "name_asc", label: "Group name · A–Z" },
+                  ]}
+                  onChange={(value) => {
+                    if (
+                      value === "default" ||
+                      value === "count_desc" ||
+                      value === "count_asc" ||
+                      value === "name_asc"
+                    ) {
+                      setBoardGroupSort(value);
+                    }
+                  }}
+                />
+              </label>
             </div>
           )}
           {viewType === "gantt" && (
@@ -402,6 +535,18 @@ export function SettingsSidebar({
           {row(<ListFilter className="size-4" />, "Filter", () => setPage("filter"), countRules(filterRoot) ? String(countRules(filterRoot)) : undefined)}
           {row(<ArrowUpDown className="size-4" />, "Sort", () => setPage("sort"), sorts.length ? String(sorts.length) : undefined)}
           {row(<GroupIcon className="size-4" />, "Group", () => setPage("group"), groupField?.name)}
+          {row(
+            <FaIcon name="palette" className="size-4" />,
+            "Conditional color",
+            () => setPage("conditional-colors"),
+            conditionalColor.mode === "none" ? undefined : conditionalColor.mode,
+          )}
+          {row(
+            <Database className="size-4" />,
+            "Data sources",
+            () => setPage("data-sources"),
+            String(dataSources.length),
+          )}
           {row(<ListOrdered className="size-4" />, "Edit Field", () => setPage("fields"))}
           <div className="my-1 border-t" />
           <label className="flex min-h-8 items-center gap-2 rounded-md px-2 text-xs">
@@ -447,6 +592,9 @@ export function SettingsSidebar({
               <div
                 key={v.id}
                 draggable={renameId !== v.id}
+                data-drag-highlight
+                data-drag-preview-kind="layout"
+                data-drag-preview-label={v.name}
                 onDragStart={() => setViewDrag(v.id)}
                 onDragOver={(e) => viewDrag && e.preventDefault()}
                 onDrop={() => {
@@ -650,6 +798,9 @@ export function SettingsSidebar({
                 <div
                   key={f.id}
                   draggable
+                  data-drag-highlight
+                  data-drag-preview-kind="field"
+                  data-drag-preview-label={f.name}
                   onDragStart={() => setDragId(f.id)}
                   onDragOver={(e) => dragId && e.preventDefault()}
                   onDrop={() => {
@@ -715,6 +866,498 @@ export function SettingsSidebar({
             hideEmpty={hideEmpty}
             setHideEmpty={setHideEmpty}
           />
+          {groupFieldId && groupSummaries.length > 0 && (
+            <section className="mt-4 border-t pt-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Custom group order
+              </p>
+              <div className="space-y-1">
+                {[
+                  ...groupSummaries.filter((group) => groupOrder.includes(group.key)),
+                  ...groupSummaries.filter((group) => !groupOrder.includes(group.key)),
+                ]
+                  .sort((left, right) => {
+                    const li = groupOrder.indexOf(left.key);
+                    const ri = groupOrder.indexOf(right.key);
+                    if (li < 0 && ri < 0) return 0;
+                    if (li < 0) return 1;
+                    if (ri < 0) return -1;
+                    return li - ri;
+                  })
+                  .map((group) => (
+                    <div
+                      key={group.key}
+                      draggable
+                      data-drag-highlight
+                      onDragStart={() => setDragId(group.key)}
+                      onDragOver={(event) => dragId && event.preventDefault()}
+                      onDrop={() => {
+                        if (!dragId || dragId === group.key) return;
+                        const current = [
+                          ...groupOrder,
+                          ...groupSummaries
+                            .map((item) => item.key)
+                            .filter((key) => !groupOrder.includes(key)),
+                        ].filter((key) => key !== dragId);
+                        current.splice(current.indexOf(group.key), 0, dragId);
+                        setGroupOrder(current);
+                        setDragId(null);
+                      }}
+                      className="flex h-8 items-center gap-2 rounded-md px-1.5 text-xs hover:bg-muted"
+                    >
+                      <GripVertical className="size-3.5 cursor-grab text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate">{group.label}</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {group.total}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          )}
+        </div>
+      </>
+    );
+  } else if (page === "conditional-colors") {
+    const tagFields = fields.filter((field) =>
+      ["select", "status", "multi_select", "priority"].includes(field.type),
+    );
+    const updateRule = (
+      id: string,
+      patch: Partial<ConditionalColorRule>,
+    ) => {
+      setConditionalColor({
+        ...conditionalColor,
+        rules: conditionalColor.rules.map((rule) =>
+          rule.id === id ? { ...rule, ...patch } : rule,
+        ),
+      });
+    };
+    body = (
+      <>
+        {header("Conditional color", () => setPage("main"))}
+        <div className="flex-1 space-y-3 overflow-y-auto p-3 text-xs">
+          <label className="block space-y-1 text-muted-foreground">
+            Color mode
+            <Dropdown
+              value={conditionalColor.mode}
+              allowClear={false}
+              options={[
+                { value: "none", label: "None" },
+                { value: "tag", label: "Use tag colors" },
+                { value: "rules", label: "Custom conditions" },
+              ]}
+              onChange={(value) =>
+                setConditionalColor({
+                  ...conditionalColor,
+                  mode:
+                    value === "tag" || value === "rules" ? value : "none",
+                })
+              }
+            />
+          </label>
+          {conditionalColor.mode !== "none" && (
+            <label className="block space-y-1 text-muted-foreground">
+              Apply color to
+              <Dropdown
+                value={conditionalColor.target}
+                allowClear={false}
+                options={[
+                  { value: "rows", label: "Rows / cards" },
+                  { value: "groups", label: "Groups / columns" },
+                  { value: "both", label: "Rows and groups" },
+                ]}
+                onChange={(value) =>
+                  setConditionalColor({
+                    ...conditionalColor,
+                    target:
+                      value === "groups" || value === "both"
+                        ? value
+                        : "rows",
+                  })
+                }
+              />
+            </label>
+          )}
+          {conditionalColor.mode === "tag" && (
+            <label className="block space-y-1 text-muted-foreground">
+              Tag field
+              <Dropdown
+                value={conditionalColor.tagFieldId}
+                placeholder="Choose Select, Status, Multi-select or Priority"
+                searchable
+                options={tagFields.map((field) => ({
+                  value: field.id,
+                  label: field.name,
+                }))}
+                onChange={(value) =>
+                  setConditionalColor({
+                    ...conditionalColor,
+                    tagFieldId: value,
+                  })
+                }
+              />
+              <span className="block text-[10px] leading-4">
+                Uses the original color of the first matching tag.
+              </span>
+            </label>
+          )}
+          {conditionalColor.mode === "rules" && (
+            <section className="space-y-2">
+              {conditionalColor.rules.map((rule, index) => {
+                const field = fields.find(
+                  (candidate) => candidate.id === rule.fieldId,
+                );
+                const needsValue = !["empty", "not_empty"].includes(
+                  rule.operator,
+                );
+                const choices =
+                  (field?.options as {
+                    choices?: {
+                      id: string;
+                      label: string;
+                      color?: string;
+                    }[];
+                  })?.choices ?? [];
+                return (
+                  <div
+                    key={rule.id}
+                    className="space-y-1.5 rounded-lg border bg-muted/20 p-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-foreground">
+                        Rule {index + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConditionalColor({
+                            ...conditionalColor,
+                            rules: conditionalColor.rules.filter(
+                              (candidate) => candidate.id !== rule.id,
+                            ),
+                          })
+                        }
+                        className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={`Delete rule ${index + 1}`}
+                      >
+                        <Trash2 className="size-3" />
+                      </button>
+                    </div>
+                    <Dropdown
+                      value={rule.fieldId || null}
+                      placeholder="Field"
+                      searchable
+                      options={fields.map((candidate) => ({
+                        value: candidate.id,
+                        label: candidate.name,
+                      }))}
+                      onChange={(value) =>
+                        updateRule(rule.id, {
+                          fieldId: value ?? "",
+                          value: "",
+                        })
+                      }
+                    />
+                    <Dropdown
+                      value={rule.operator}
+                      allowClear={false}
+                      options={operatorsFor(field?.type ?? "text")}
+                      onChange={(value) =>
+                        value && updateRule(rule.id, { operator: value })
+                      }
+                    />
+                    {needsValue &&
+                      (choices.length > 0 ? (
+                        <Dropdown
+                          value={rule.value || null}
+                          placeholder="Value"
+                          searchable
+                          options={choices.map((choice) => ({
+                            value: choice.id,
+                            label: choice.label,
+                            color: choice.color,
+                          }))}
+                          onChange={(value) =>
+                            updateRule(rule.id, { value: value ?? "" })
+                          }
+                        />
+                      ) : (
+                        <input
+                          value={rule.value}
+                          onChange={(event) =>
+                            updateRule(rule.id, {
+                              value: event.target.value,
+                            })
+                          }
+                          placeholder="Value"
+                          className="h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      ))}
+                    <Dropdown
+                      value={rule.color}
+                      allowClear={false}
+                      options={CHIP_COLORS.map((color) => ({
+                        value: color.id,
+                        label: color.label,
+                        color: color.id,
+                      }))}
+                      onChange={(value) =>
+                        value && updateRule(rule.id, { color: value })
+                      }
+                    />
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() =>
+                  setConditionalColor({
+                    ...conditionalColor,
+                    rules: [
+                      ...conditionalColor.rules,
+                      {
+                        id: crypto.randomUUID(),
+                        fieldId: fields[0]?.id ?? "",
+                        operator: "equals",
+                        value: "",
+                        color: "blue",
+                      },
+                    ],
+                  })
+                }
+                className="flex h-8 w-full items-center justify-center gap-1 rounded-md border border-dashed text-primary hover:bg-primary/5"
+              >
+                <Plus className="size-3.5" /> Add condition
+              </button>
+            </section>
+          )}
+          {conditionalColor.mode !== "none" && (
+            <button
+              type="button"
+              onClick={() =>
+                setConditionalColor(DEFAULT_CONDITIONAL_COLOR)
+              }
+              className="h-8 w-full rounded-md text-muted-foreground hover:bg-muted"
+            >
+              Clear conditional colors
+            </button>
+          )}
+        </div>
+      </>
+    );
+  } else if (page === "data-sources") {
+    body = (
+      <>
+        {header("Data sources", () => setPage("main"))}
+        <div className="flex-1 space-y-1 overflow-y-auto p-3">
+          <p className="px-1 pb-2 text-[11px] text-muted-foreground">
+            Drag to reorder. Entities can be transferred before deleting a source.
+          </p>
+          {dataSources.length > 1 && (
+            <section className="mb-2 space-y-2 rounded-lg border bg-muted/20 p-2.5">
+              <div className="flex items-center gap-2">
+                <FaIcon name="object-group" className="size-3.5 text-primary" />
+                <p className="text-xs font-medium">Merge data sources</p>
+              </div>
+              <MultiDropdown
+                values={mergeSourceIds}
+                placeholder="Sources to merge…"
+                searchable
+                options={dataSources
+                  .filter(
+                    (source) =>
+                      !source.is_primary &&
+                      source.id !== mergeDestinationId,
+                  )
+                  .map((source) => ({
+                    value: source.id,
+                    label: `${source.name} · ${source.entity_count ?? 0}`,
+                  }))}
+                onChange={setMergeSourceIds}
+              />
+              <Dropdown
+                value={mergeDestinationId}
+                placeholder="Destination source…"
+                searchable
+                options={dataSources
+                  .filter(
+                    (source) => !mergeSourceIds.includes(source.id),
+                  )
+                  .map((source) => ({
+                    value: source.id,
+                    label: `${source.name}${source.is_primary ? " · Primary" : ""}`,
+                  }))}
+                onChange={setMergeDestinationId}
+              />
+              {mergeDataSources.isError && (
+                <p className="text-[11px] text-destructive">
+                  {mergeDataSources.error instanceof Error
+                    ? mergeDataSources.error.message
+                    : "Could not merge these sources."}
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={
+                  mergeSourceIds.length === 0 ||
+                  !mergeDestinationId ||
+                  mergeDataSources.isPending
+                }
+                onClick={() => {
+                  if (!mergeDestinationId) return;
+                  mergeDataSources.mutate({
+                    sourceIds: mergeSourceIds,
+                    destinationId: mergeDestinationId,
+                  });
+                }}
+                className="h-7 w-full rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {mergeDataSources.isPending
+                  ? "Merging…"
+                  : `Merge ${mergeSourceIds.length || ""} source${
+                      mergeSourceIds.length === 1 ? "" : "s"
+                    }`}
+              </button>
+            </section>
+          )}
+          {deleteSourceId && (
+            <section className="mb-2 space-y-2 rounded-lg border border-amber-400/40 bg-amber-50 p-2.5 text-xs dark:bg-amber-950/20">
+              <p className="font-medium">Move entities before deletion</p>
+              <p className="text-[11px] text-muted-foreground">
+                This source contains{" "}
+                {dataSources.find((source) => source.id === deleteSourceId)
+                  ?.entity_count ?? 0}{" "}
+                entities. Choose their destination.
+              </p>
+              <Dropdown
+                value={transferTargetId}
+                placeholder="Choose destination…"
+                allowClear={false}
+                options={dataSources
+                  .filter((source) => source.id !== deleteSourceId)
+                  .map((source) => ({
+                    value: source.id,
+                    label: `${source.name}${source.is_primary ? " · Primary" : ""}`,
+                  }))}
+                onChange={setTransferTargetId}
+              />
+              {deleteDataSource.isError && (
+                <p className="text-[11px] text-destructive">
+                  {deleteDataSource.error instanceof Error
+                    ? deleteDataSource.error.message
+                    : "Could not delete this source."}
+                </p>
+              )}
+              <div className="flex justify-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteSourceId(null);
+                    setTransferTargetId(null);
+                  }}
+                  className="h-7 rounded px-2 text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!transferTargetId || deleteDataSource.isPending}
+                  onClick={() =>
+                    deleteDataSource.mutate({
+                      id: deleteSourceId,
+                      transferToId: transferTargetId,
+                    })
+                  }
+                  className="h-7 rounded bg-destructive px-2 font-medium text-destructive-foreground disabled:opacity-50"
+                >
+                  Move & delete
+                </button>
+              </div>
+            </section>
+          )}
+          {dataSources.map((source) => (
+            <div
+              key={source.id}
+              draggable={renameId !== source.id}
+              data-drag-highlight
+              onDragStart={() => setDataSourceDrag(source.id)}
+              onDragOver={(event) =>
+                dataSourceDrag && event.preventDefault()
+              }
+              onDrop={() => {
+                if (dataSourceDrag) {
+                  moveDataSource(dataSourceDrag, source.id);
+                  setDataSourceDrag(null);
+                }
+              }}
+              className="flex h-9 items-center gap-2 rounded-md px-1.5 hover:bg-muted"
+            >
+              <GripVertical className="size-3.5 cursor-grab text-muted-foreground" />
+              <Database className="size-3.5 shrink-0 text-primary" />
+              {renameId === source.id ? (
+                <input
+                  autoFocus
+                  value={renameText}
+                  onChange={(event) => setRenameText(event.target.value)}
+                  onBlur={() => {
+                    const next = renameText.trim();
+                    if (next && next !== source.name) {
+                      patchDataSource.mutate({ id: source.id, name: next });
+                    }
+                    setRenameId(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                    if (event.key === "Escape") setRenameId(null);
+                  }}
+                  className="h-7 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onDoubleClick={() => {
+                    setRenameId(source.id);
+                    setRenameText(source.name);
+                  }}
+                  className="min-w-0 flex-1 truncate text-left text-xs"
+                >
+                  {source.name}
+                  {source.is_primary && (
+                    <span className="ml-1 text-[10px] text-muted-foreground">
+                      Primary
+                    </span>
+                  )}
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={source.is_primary || deleteDataSource.isPending}
+                onClick={() => {
+                  if ((source.entity_count ?? 0) > 0) {
+                    const primary =
+                      dataSources.find(
+                        (candidate) =>
+                          candidate.is_primary && candidate.id !== source.id,
+                      ) ??
+                      dataSources.find((candidate) => candidate.id !== source.id);
+                    setDeleteSourceId(source.id);
+                    setTransferTargetId(primary?.id ?? null);
+                    return;
+                  }
+                  deleteDataSource.mutate({ id: source.id });
+                }}
+                title={
+                  source.is_primary
+                    ? "The primary source cannot be deleted"
+                    : "Delete data source"
+                }
+                className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
+          ))}
         </div>
       </>
     );

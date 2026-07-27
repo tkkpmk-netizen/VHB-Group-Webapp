@@ -5,7 +5,9 @@
 ## Nguyên tắc thiết kế (quan trọng)
 
 1. **Một số "loại field" thực ra là biến thể của một kiểu lưu trữ + cấu hình**, không cần type riêng:
-   - **number** lưu số; `format` = `plain | currency | percent` (+ `precision`, `currency_code` vd VND/USD). → **Currency & Percent KHÔNG phải type riêng**, là format của number (giống Notion). *(Đúng ý "gộp number vào currency".)*
+   - **number** lưu số; `format` = `integer | decimal | currency | percent | unit`
+     (+ `precision`, mã ISO 4217 `currency_code`, hoặc `unit_code`). → **Currency,
+     Percent và đơn vị đo KHÔNG phải type riêng**, là format của number.
    - **status** = select có thêm **nhóm** (To-do / In-progress / Done) + dùng cho workflow/board.
    - **priority** = select preset (Urgent/High/Normal/Low).
    - **rating** = number giới hạn 1–5 hiển thị sao/emoji.
@@ -16,29 +18,57 @@
 
 3. **Computed fields (rollup, formula) phụ thuộc relation + engine tính toán** → bắt buộc làm SAU khi có relation.
 
-4. **Đổi loại field là thao tác preview trước, apply sau.** Các field nhập liệu
+4. **Mỗi Database có đúng một `name` field.** Đây là field bắt buộc của Entity,
+   có thể đổi nhãn nhưng không thể xóa. Có thể promote một field tương thích
+   thành `name` khi toàn bộ giá trị khác rỗng và độc nhất; field `name` cũ trở
+   thành `text`. Tên của mọi field trong cùng Database phải độc nhất, không phân
+   biệt hoa/thường và khoảng trắng đầu/cuối.
+
+5. **Đổi loại field là thao tác preview trước, apply sau.** Các field nhập liệu
    persisted (`text`, `long_text`, `number`, `checkbox`, `date`, `url`, `email`,
    `phone`, `country`, `select`, `multi_select`, `status`, `priority`, `rating`,
    `people`, `progress`) có thể đổi qua lại:
    - giá trị tương thích được chuẩn hóa sang storage contract của loại mới;
-   - giá trị không tương thích bị xóa khỏi `Entity.data` khi người dùng xác nhận;
-   - chuyển sang choice type tự tạo tối đa 200 choice ổn định từ các giá trị khác
-     nhau hiện có;
+   - giá trị không tương thích có thể được lọc riêng để sửa; `Change Anyway`
+     xóa cell lỗi và đổi Name của Entity thành `WRONG FORMAT n` độc nhất để
+     chúng không biến mất khỏi quy trình kiểm tra;
+   - chuyển sang choice type tự tạo đầy đủ choice ổn định từ mọi giá trị khác
+     nhau hiện có; không cắt ngầm theo giới hạn và không xóa dữ liệu chỉ vì số
+     lượng option lớn;
+   - preview nhóm các cell lỗi theo nguyên nhân cụ thể và hiển thị Entity, giá
+     trị gốc cùng lý do để người dùng sửa trước khi apply;
    - `required`, field permission, alignment, wrap và metadata visibility được
      giữ lại; option đặc thù của loại cũ không bị rò sang loại mới;
    - identity, relation, files, rollup, formula và system/auto fields không cho
      đổi loại vì dữ liệu của chúng nằm ngoài cell JSONB hoặc do server tính.
 
-5. **Calculate phải theo loại field.** Mọi field hỗ trợ Count/Filled/Empty/
+   Khi đổi sang `number`, hệ thống bóc tách ký tự tiền tệ/đơn vị và dấu phân
+   cách nhóm (`$4.1` → `4.1`, `170,000,000đ` → `170000000`) trước khi đánh dấu
+   cell là không tương thích.
+
+6. **Calculate phải theo loại field.** Mọi field hỗ trợ Count/Filled/Empty/
    Unique/% Filled; chỉ `number`, `rating`, `progress` hỗ trợ Sum/Average/Min/
    Max. Mã phép tính Average trên API là `avg`; client chuẩn hóa state cũ
    `average` thành `avg`.
 
-## Danh mục đầy đủ (25 loại, gom nhóm)
+7. **Import không tự ý đổi loại Field có sẵn.** Mỗi cột nguồn phải chọn một
+   trong ba kết quả: map vào Field hiện có (type bị khóa), tạo Field mới với
+   type được chọn, hoặc `Don't Import`. Select/Multi-select/Status/Priority mới
+   hiển thị trước danh sách option sẽ tạo. Cột Name bắt buộc map vào Name
+   canonical; UID luôn do server sinh.
+
+8. **Created time và Last edited time là provenance của Entity.** Khi import,
+   giá trị spreadsheet/ISO/epoch hợp lệ được ghi lại vào `Entity.created_at`
+   và `Entity.updated_at`, không lưu thành cell JSONB và không thay thế bằng
+   thời gian job import chạy. Nếu chỉ có Created time, `updated_at` khởi tạo
+   bằng cùng giá trị.
+
+## Danh mục đầy đủ (26 loại, gom nhóm)
 
 ### A. Text-like (lưu string)
 | key | mô tả |
 |---|---|
+| `name` | tên canonical bắt buộc và độc nhất của Entity; đúng một field/Database |
 | `text` | 1 dòng |
 | `long_text` | đoạn dài / rich text (Notion rich_text, ClickUp text) |
 | `url` | link, validate |
@@ -48,7 +78,7 @@
 ### B. Numeric (lưu number)
 | key | mô tả |
 |---|---|
-| `number` | format: `plain`/`currency`/`percent`; options: `precision`, `currency_code` |
+| `number` | format: `integer`/`decimal`/`currency`/`percent`/`unit`; options: `precision`, `currency_code`, `unit_code` (length/area/volume/weight/temperature/speed/time) |
 
 ### C. Boolean / Date
 | key | mô tả |
@@ -105,7 +135,7 @@
 **Phase E3 — cần hạ tầng thêm:**
 `files` (CM7 Google Drive-backed), `location` (Maps), `progress` (subtask)
 
-## Views (ghi nhận, làm sau theo phase riêng)
+## Layout (ghi nhận, làm sau theo phase riêng)
 Notion: table, board, calendar, timeline, gallery, list, form, chart, map, dashboard.
 ClickUp: list, board, calendar, gantt. Mỗi view: grouping, filters (AND/OR), sorting, columns.
-→ MVP làm **Table view** trước; Board/Calendar/Gantt ở phase sau.
+→ MVP làm **Table layout** trước; Board/Calendar/Gantt ở phase sau.

@@ -15,7 +15,20 @@ export type FaIconProps = Omit<HTMLAttributes<HTMLSpanElement>, "color"> & {
 
 export type LucideIcon = (props: Omit<FaIconProps, "name">) => React.JSX.Element;
 
-const SAFE_ICON_NAME = /^[a-z0-9.-]+$/;
+const SAFE_ICON_NAME = /^[a-z0-9._-]+$/;
+
+function iconMask(name: string): string {
+  if (!SAFE_ICON_NAME.test(name)) return "url(/icons/fa5-solid/circle.svg)";
+  if (name.startsWith("fa5--")) {
+    return `url(/icons/fa5/${name.slice("fa5--".length)}.svg)`;
+  }
+  if (name.startsWith("material--")) {
+    return `url(/icons/material/${name.slice("material--".length)}.svg)`;
+  }
+  // Persisted icon names created before the combined IconJar catalogue remain
+  // valid and continue to resolve against the original solid subset.
+  return `url(/icons/fa5-solid/${name}.svg)`;
+}
 
 export function FaIcon({
   name,
@@ -32,9 +45,8 @@ export function FaIcon({
   // Font Awesome glyphs do not use either value.
   void strokeWidth;
   void absoluteStrokeWidth;
-  const safeName = SAFE_ICON_NAME.test(name) ? name : "circle";
   const dimension = size == null ? undefined : typeof size === "number" ? `${size}px` : size;
-  const mask = `url(/icons/fa5-solid/${safeName}.svg)`;
+  const mask = iconMask(name);
   const mergedStyle: CSSProperties = {
     width: dimension,
     height: dimension,

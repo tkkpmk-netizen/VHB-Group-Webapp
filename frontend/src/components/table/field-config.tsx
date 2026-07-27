@@ -19,6 +19,11 @@ import { FormulaEditor } from "@/components/table/formula-editor";
 import { CHIP_COLORS, chipColor, STATUS_GROUPS } from "@/lib/field-colors";
 import type { components } from "@/lib/api/schema";
 import { defaultIconForFieldType } from "@/lib/icon-system";
+import {
+  CURRENCY_CODES,
+  MEASUREMENT_UNITS,
+  NUMBER_FORMATS,
+} from "@/lib/number-formats";
 
 type Field = components["schemas"]["FieldOut"];
 type FieldType = Field["type"];
@@ -28,6 +33,7 @@ type FieldTypeConversionResult =
   components["schemas"]["FieldTypeConversionResult"];
 
 const CONVERTIBLE_FIELD_TYPES: { value: FieldType; label: string }[] = [
+  { value: "name", label: "Name" },
   { value: "text", label: "Text" },
   { value: "long_text", label: "Long text" },
   { value: "number", label: "Number" },
@@ -46,7 +52,9 @@ const CONVERTIBLE_FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "progress", label: "Progress" },
 ];
 const CONVERTIBLE_TYPE_SET = new Set(
-  CONVERTIBLE_FIELD_TYPES.map((type) => type.value),
+  CONVERTIBLE_FIELD_TYPES
+    .filter((type) => type.value !== "name")
+    .map((type) => type.value),
 );
 
 function fieldTypeLabel(type: FieldType) {
@@ -56,7 +64,6 @@ function fieldTypeLabel(type: FieldType) {
   );
 }
 
-const CURRENCIES = ["VND", "USD", "EUR", "JPY", "CNY", "KRW", "GBP"];
 const DATE_FORMATS = [
   { id: "iso", label: "2026-12-31" },
   { id: "dmy", label: "31/12/2026" },
@@ -208,6 +215,20 @@ export function FieldConfig({
   const [pendingType, setPendingType] = useState<FieldType | null>(null);
   const [conversionPreview, setConversionPreview] =
     useState<FieldTypeConversionResult | null>(null);
+  const [reviewingInvalid, setReviewingInvalid] = useState(false);
+
+  useEffect(() => {
+    const returnToConversion = () => setReviewingInvalid(false);
+    window.addEventListener(
+      "vhb:end-invalid-field-review",
+      returnToConversion,
+    );
+    return () =>
+      window.removeEventListener(
+        "vhb:end-invalid-field-review",
+        returnToConversion,
+      );
+  }, []);
 
   const patch = useMutation({
     mutationFn: (body: { name: string; options: Options; icon: string; icon_color: string }) =>
@@ -234,12 +255,19 @@ export function FieldConfig({
   });
 
   const applyTypeConversion = useMutation({
-    mutationFn: (targetType: FieldType) =>
+    mutationFn: ({
+      targetType,
+      changeAnyway = false,
+    }: {
+      targetType: FieldType;
+      changeAnyway?: boolean;
+    }) =>
       apiFetch<FieldTypeConversionResult>(`/fields/${field.id}/convert-type`, {
         method: "POST",
         body: JSON.stringify({
           target_type: targetType,
           dry_run: false,
+          change_anyway: changeAnyway,
         }),
       }),
     onSuccess: (result) => {
@@ -307,7 +335,7 @@ export function FieldConfig({
         <label className="mb-1.5 block text-[11px] font-semibold text-muted-foreground">
           Field type
         </label>
-        {CONVERTIBLE_TYPE_SET.has(field.type) ? (
+        {field.type !== "name" && CONVERTIBLE_TYPE_SET.has(field.type) ? (
           <Dropdown
             value={field.type}
             allowClear={false}
@@ -344,9 +372,10 @@ export function FieldConfig({
             <label className="flex items-center gap-2 text-xs">
               <input
                 type="checkbox"
-                checked={opts.required === true}
+                checked={field.type === "name" || opts.required === true}
+                disabled={field.type === "name"}
                 onChange={(event) => commit({ ...opts, required: event.target.checked })}
-                className="size-4 accent-[var(--color-primary)]"
+                className="size-4 accent-[var(--color-primary)] disabled:opacity-50"
               />
               <span className="flex-1">Required</span>
             </label>
@@ -392,21 +421,18 @@ export function FieldConfig({
                   : ((opts.format as string) ?? "integer")
               }
               allowClear={false}
-              options={[
-                { value: "integer", label: "Integer" },
-                { value: "decimal", label: "Decimal" },
-                { value: "percent", label: "Percent" },
-                { value: "currency", label: "Currency" },
-              ]}
+              options={[...NUMBER_FORMATS]}
               onChange={(v) => v && commit({ ...opts, format: v })}
             />
-            {opts.format === "decimal" && (
+            {["decimal", "currency", "unit", "percent"].includes(
+              (opts.format as string) ?? "",
+            ) && (
               <label className="flex items-center justify-between text-xs">
                 Decimal places
                 <input
                   type="number"
                   min={0}
-                  max={6}
+                  max={10}
                   value={(opts.precision as number) ?? 2}
                   onChange={(e) =>
                     commit({ ...opts, precision: Number(e.target.value) })
@@ -421,8 +447,27 @@ export function FieldConfig({
                 <Dropdown
                   value={(opts.currency_code as string) ?? "VND"}
                   allowClear={false}
-                  options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+                  options={CURRENCY_CODES.map((currency) => ({
+                    value: currency,
+                    label: currency,
+                  }))}
                   onChange={(v) => v && commit({ ...opts, currency_code: v })}
+                />
+              </div>
+            )}
+            {opts.format === "unit" && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Measurement unit</label>
+                <Dropdown
+                  value={(opts.unit_code as string) ?? "kg"}
+                  allowClear={false}
+                  options={MEASUREMENT_UNITS.map((unit) => ({
+                    value: unit.value,
+                    label: `${unit.label} · ${unit.category}`,
+                  }))}
+                  onChange={(value) =>
+                    value && commit({ ...opts, unit_code: value })
+                  }
                 />
               </div>
             )}
@@ -605,6 +650,7 @@ export function FieldConfig({
       )}
 
       {pendingType &&
+        !reviewingInvalid &&
         createPortal(
           <div className="fixed inset-0 z-[180] flex items-start justify-center bg-black/30 p-4 pt-[18vh]">
             <button
@@ -684,7 +730,7 @@ export function FieldConfig({
                           {conversionPreview.cleared_cells}
                         </strong>
                         <span className="text-[10px] text-muted-foreground">
-                          Cleared
+                          Invalid
                         </span>
                       </div>
                       <div className="rounded-lg border p-2 text-center">
@@ -698,19 +744,94 @@ export function FieldConfig({
                     </div>
                     {conversionPreview.generated_choices > 0 && (
                       <p className="rounded-md bg-primary/5 px-2.5 py-2 text-[11px] text-primary">
-                        {conversionPreview.generated_choices} options will be
-                        created from existing values.
+                        All {conversionPreview.generated_choices} unique values
+                        will be created as options. No values are omitted.
                       </p>
                     )}
                     {conversionPreview.cleared_cells > 0 && (
-                      <div className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-50 p-2.5 text-[11px] text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
-                        <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-                        <span>
-                          Incompatible cells will be permanently cleared.
-                          {(conversionPreview.cleared_samples ?? []).length
-                            ? ` Examples: ${(conversionPreview.cleared_samples ?? []).join(", ")}.`
-                            : ""}
-                        </span>
+                      <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-50 p-2.5 text-[11px] text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+                          <span>
+                            {conversionPreview.cleared_cells} non-empty{" "}
+                            {conversionPreview.cleared_cells === 1
+                              ? "value cannot"
+                              : "values cannot"}{" "}
+                            be represented by{" "}
+                            {fieldTypeLabel(conversionPreview.target_type)}.
+                            “Change Anyway” clears those cells and renames their
+                            entities to WRONG FORMAT with a unique suffix.
+                          </span>
+                        </div>
+                        {Object.entries(
+                          conversionPreview.invalid_reason_counts ?? {},
+                        ).length > 0 && (
+                          <div className="overflow-hidden rounded-md border border-amber-400/30 bg-background/70">
+                            {Object.entries(
+                              conversionPreview.invalid_reason_counts ?? {},
+                            ).map(([reason, count]) => (
+                              <div
+                                key={reason}
+                                className="flex items-start justify-between gap-3 border-b border-amber-400/20 px-2 py-1.5 last:border-b-0"
+                              >
+                                <span>{reason}</span>
+                                <strong className="shrink-0 tabular-nums">
+                                  {count}
+                                </strong>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {(conversionPreview.invalid_samples ?? []).length >
+                          0 && (
+                          <div className="space-y-1">
+                            <p className="font-semibold">Invalid value samples</p>
+                            <div className="max-h-32 overflow-y-auto rounded-md border border-amber-400/30 bg-background/70">
+                              {(conversionPreview.invalid_samples ?? []).map(
+                                (sample) => (
+                                  <div
+                                    key={sample.entity_id}
+                                    className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] gap-x-2 border-b border-amber-400/20 px-2 py-1.5 last:border-b-0"
+                                  >
+                                    <span
+                                      className="truncate font-medium"
+                                      title={sample.entity_name}
+                                    >
+                                      {sample.entity_name}
+                                    </span>
+                                    <code
+                                      className="truncate font-sans text-[10px]"
+                                      title={sample.value}
+                                    >
+                                      {sample.value || "(blank)"}
+                                    </code>
+                                    <span className="col-span-2 text-[10px] text-amber-800/80 dark:text-amber-200/80">
+                                      {sample.reason}
+                                    </span>
+                                  </div>
+                                ),
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.dispatchEvent(
+                              new CustomEvent("vhb:review-invalid-field", {
+                                detail: {
+                                  fieldId: field.id,
+                                  entityIds:
+                                    conversionPreview.invalid_entity_ids ?? [],
+                                },
+                              }),
+                            );
+                            setReviewingInvalid(true);
+                          }}
+                          className="h-7 rounded border border-amber-500/40 bg-background px-2 font-medium text-amber-900 hover:bg-amber-100 dark:text-amber-100"
+                        >
+                          Filter invalid items
+                        </button>
                       </div>
                     )}
                   </>
@@ -733,9 +854,12 @@ export function FieldConfig({
                   disabled={
                     !conversionPreview ||
                     previewTypeConversion.isPending ||
-                    applyTypeConversion.isPending
+                    applyTypeConversion.isPending ||
+                    conversionPreview.cleared_cells > 0
                   }
-                  onClick={() => applyTypeConversion.mutate(pendingType)}
+                  onClick={() =>
+                    applyTypeConversion.mutate({ targetType: pendingType })
+                  }
                   className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
                 >
                   {applyTypeConversion.isPending && (
@@ -743,6 +867,24 @@ export function FieldConfig({
                   )}
                   Change type
                 </button>
+                {conversionPreview && conversionPreview.cleared_cells > 0 && (
+                  <button
+                    type="button"
+                    disabled={applyTypeConversion.isPending}
+                    onClick={() =>
+                      applyTypeConversion.mutate({
+                        targetType: pendingType,
+                        changeAnyway: true,
+                      })
+                    }
+                    className="flex h-8 items-center gap-1.5 rounded-md bg-amber-600 px-3 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {applyTypeConversion.isPending && (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    )}
+                    Change Anyway
+                  </button>
+                )}
               </div>
             </motion.section>
           </div>,

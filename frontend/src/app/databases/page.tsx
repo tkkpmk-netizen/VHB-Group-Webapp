@@ -36,6 +36,7 @@ import {
   useSpaceDatabaseOrganizer,
 } from "@/components/spaces/resource-manager";
 import { apiFetch, getWorkspaceId } from "@/lib/api/client";
+import { workspaceQueryKeys } from "@/lib/query-keys";
 import type { components } from "@/lib/api/schema";
 import { DEFAULT_ICONS } from "@/lib/icon-system";
 import { ResourceAccess } from "@/components/access/resource-access";
@@ -89,6 +90,9 @@ function DatabaseRow({
   return (
     <div
       draggable
+      data-drag-highlight
+      data-drag-preview-kind="database"
+      data-drag-preview-label={database.name}
       onDragStart={(event) => startDatabaseDrag(event, database.id)}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -234,13 +238,19 @@ function PlacementLine({
   return (
     <div
       draggable
+      data-drag-highlight
+      data-drag-preview-kind="tree-item"
+      data-drag-preview-label={placement.database.name}
       onDragStart={(event) => startPlacementDrag(event, placement)}
       onDragEnter={(event) => {
         event.stopPropagation();
         organizer.liveInto(event, placement.folder_id, placement.id);
       }}
       onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.stopPropagation();
+        organizer.dropInto(event, placement.folder_id, placement.id);
+      }}
       className="group grid h-8 grid-cols-[minmax(240px,1fr)_88px_minmax(140px,.7fr)_36px] items-center border-b bg-card text-[11px] text-muted-foreground transition-[transform,background-color] duration-200 ease-out last:border-b-0 hover:bg-muted/65 hover:text-foreground max-md:grid-cols-[minmax(190px,1fr)_72px_36px]"
     >
       <Link
@@ -305,8 +315,9 @@ function FolderFile({
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={(event) => delete event.currentTarget.dataset.dragOver}
         onDrop={(event) => {
-          event.preventDefault();
+          event.stopPropagation();
           delete event.currentTarget.dataset.dragOver;
+          organizer.dropInto(event, folder.id);
         }}
         transition={{ layout: { duration: 0.2, ease: [0.16, 1, 0.3, 1] } }}
         className="group/folder grid h-8 grid-cols-[minmax(240px,1fr)_88px_minmax(140px,.7fr)_36px] items-center border-b bg-card text-[11px] hover:bg-muted/65 data-[drag-over=true]:bg-accent max-md:grid-cols-[minmax(190px,1fr)_72px_36px]"
@@ -414,8 +425,9 @@ function SpaceFile({
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={(event) => delete event.currentTarget.dataset.dragOver}
         onDrop={(event) => {
-          event.preventDefault();
+          event.stopPropagation();
           delete event.currentTarget.dataset.dragOver;
+          organizer.dropInto(event, null);
         }}
         transition={{ layout: { duration: 0.2, ease: [0.16, 1, 0.3, 1] } }}
         className="group/space grid h-9 grid-cols-[minmax(240px,1fr)_88px_minmax(140px,.7fr)_36px] items-center border-b bg-[var(--surface-subtle)] text-xs data-[drag-over=true]:bg-accent max-md:grid-cols-[minmax(190px,1fr)_72px_36px]"
@@ -511,7 +523,7 @@ function DatabaseBar({
     database.name.toLowerCase().includes(search.trim().toLowerCase()),
   );
   return (
-    <aside className="w-full shrink-0 border-t bg-card lg:sticky lg:top-0 lg:h-[calc(100dvh-var(--app-topbar-height))] lg:w-64 lg:border-l lg:border-t-0">
+    <aside className="w-full shrink-0 border-t bg-card lg:sticky lg:top-0 lg:h-dvh lg:w-64 lg:border-l lg:border-t-0">
       <div className="flex h-12 items-center gap-2 border-b px-3">
         <DatabaseIcon className="size-4 text-[#1264d7]" />
         <div className="min-w-0 flex-1">
@@ -550,6 +562,9 @@ function DatabaseBar({
             <div
               key={database.id}
               draggable
+              data-drag-highlight
+              data-drag-preview-kind="database"
+              data-drag-preview-label={database.name}
               onDragStart={(event) => startDatabaseDrag(event, database)}
               className="group flex h-9 items-center gap-1.5 rounded-md px-1.5 text-xs hover:bg-muted"
             >
@@ -746,15 +761,18 @@ function DatabasesContent() {
   const view = searchParams.get("view") ?? "management";
   const [dialog, setDialog] = useState<ResourceDialogState | null>(null);
   const { data: spaces = [], isLoading: spacesLoading } = useQuery<Space[]>({
-    queryKey: ["spaces", workspaceId],
+    queryKey: workspaceQueryKeys.spaces(workspaceId),
     queryFn: () => apiFetch<Space[]>("/spaces"),
   });
   const { data: databases = [], isLoading: databasesLoading } = useQuery<Db[]>({
-    queryKey: ["databases", workspaceId],
+    queryKey: workspaceQueryKeys.databases(workspaceId),
     queryFn: () => apiFetch<Db[]>("/databases"),
   });
   const { data: foldersBySpace = {} } = useQuery<Record<string, FolderType[]>>({
-    queryKey: ["folders", workspaceId, spaces.map((space) => space.id)],
+    queryKey: workspaceQueryKeys.folders(
+      workspaceId,
+      spaces.map((space) => space.id),
+    ),
     queryFn: async () =>
       Object.fromEntries(
         await Promise.all(
@@ -769,7 +787,10 @@ function DatabasesContent() {
   const { data: placementsBySpace = {} } = useQuery<
     Record<string, SpaceDatabase[]>
   >({
-    queryKey: ["space-databases", workspaceId, spaces.map((space) => space.id)],
+    queryKey: workspaceQueryKeys.placements(
+      workspaceId,
+      spaces.map((space) => space.id),
+    ),
     queryFn: async () =>
       Object.fromEntries(
         await Promise.all(

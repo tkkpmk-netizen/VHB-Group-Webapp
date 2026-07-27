@@ -10,6 +10,8 @@ type IconManifestItem = {
   name: string;
   label: string;
   file: string;
+  pack?: string;
+  style?: string;
 };
 
 type IconPickerProps = {
@@ -83,7 +85,7 @@ export function IconPicker({
   useEffect(() => {
     if (!open || icons.length > 0) return;
     let cancelled = false;
-    fetch("/icons/fa5-solid/manifest.json")
+    fetch("/icons/manifest.json")
       .then((response) => response.json() as Promise<IconManifestItem[]>)
       .then((items) => {
         if (!cancelled) setIcons(items);
@@ -120,11 +122,27 @@ export function IconPicker({
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) {
       const common = new Set(COMMON_ICONS);
-      const featured = icons.filter((item) => common.has(item.name));
-      return featured.length ? featured : COMMON_ICONS.map((name) => ({ name, label: name, file: `${name}.svg` }));
+      const featured = icons.filter(
+        (item) =>
+          common.has(item.name.replace(/^fa5--/, "")) ||
+          common.has(item.name.replace(/^material--/, "")),
+      );
+      return featured.length
+        ? featured.slice(0, 144)
+        : COMMON_ICONS.map((name) => ({
+            name,
+            label: name,
+            file: `${name}.svg`,
+            pack: "Font Awesome 5",
+            style: "solid",
+          }));
     }
     return icons
-      .filter((item) => `${item.label} ${item.name}`.toLowerCase().includes(normalizedQuery))
+      .filter((item) =>
+        `${item.label} ${item.name} ${item.pack ?? ""} ${item.style ?? ""}`
+          .toLowerCase()
+          .includes(normalizedQuery),
+      )
       .slice(0, 144);
   }, [icons, query]);
 
@@ -183,7 +201,7 @@ export function IconPicker({
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--text-tertiary)]"
-                    placeholder="Search 1,002 solid icons…"
+                    placeholder="Search 9,349 icons…"
                     aria-label="Search icons"
                   />
                   {query ? (
@@ -218,7 +236,7 @@ export function IconPicker({
 
               <div className="max-h-[320px] overflow-y-auto p-2.5">
                 <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                  {query ? `${visibleIcons.length} matches` : "Recommended"}
+                  {query ? `${visibleIcons.length} matches` : "Recommended · all styles"}
                 </p>
                 <div className="grid grid-cols-8 gap-1">
                   {visibleIcons.map((icon) => (
@@ -227,7 +245,9 @@ export function IconPicker({
                       type="button"
                       aria-label={icon.label}
                       aria-pressed={icon.name === value}
-                      title={icon.label}
+                      title={`${icon.label}${icon.pack ? ` · ${icon.pack}` : ""}${
+                        icon.style ? ` · ${icon.style}` : ""
+                      }`}
                       className={`inline-flex aspect-square items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${
                         icon.name === value
                           ? "bg-[var(--surface-selected)] text-[var(--accent-foreground)]"
@@ -244,7 +264,9 @@ export function IconPicker({
                   ))}
                 </div>
                 {visibleIcons.length === 0 ? (
-                  <p className="py-10 text-center text-sm text-[var(--text-secondary)]">No solid icon found.</p>
+                  <p className="py-10 text-center text-sm text-[var(--text-secondary)]">
+                    No icon found.
+                  </p>
                 ) : null}
               </div>
               </motion.div> : null}

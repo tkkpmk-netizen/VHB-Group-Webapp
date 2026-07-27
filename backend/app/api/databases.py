@@ -29,6 +29,10 @@ from app.services.authorization import (
     require_database_action,
     require_workspace_action,
 )
+from app.services.database_history import (
+    record_database_change,
+    snapshot_database,
+)
 from app.services.drive_file_cleanup import cleanup_drive_files
 
 router = APIRouter(prefix="/databases", tags=["databases"])
@@ -99,7 +103,7 @@ async def create_database(
         Field(
             database_id=database.id,
             name="Name",
-            type=FieldType.text,
+            type=FieldType.name,
             icon="font",
             options={"system_key": "name", "required": True},
             order=1,
@@ -196,7 +200,17 @@ async def reorder_databases(
             user_id=current_user.id,
             action=Action.write,
         )
+        before = snapshot_database(database)
         database.order = item.order
+        record_database_change(
+            db,
+            workspace_id=workspace.id,
+            database_id=database.id,
+            actor_id=current_user.id,
+            action="database.reordered",
+            summary="Reordered database",
+            before={"database": before},
+        )
     await db.commit()
 
 
@@ -218,8 +232,18 @@ async def update_database(
         user_id=current_user.id,
         action=Action.write,
     )
+    before = snapshot_database(database)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(database, key, value)
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database.id,
+        actor_id=current_user.id,
+        action="database.updated",
+        summary=f'Updated database "{database.name}"',
+        before={"database": before},
+    )
     await db.commit()
     await db.refresh(database)
     return database
@@ -286,11 +310,13 @@ async def duplicate_database(
         )
     db.add(DataSource(database_id=database.id, name="Primary", is_primary=True, order=0))
     source_layouts = list(
-        (await db.scalars(
-            select(Layout)
-            .where(Layout.database_id == source.id, Layout.placement_id.is_(None))
-            .order_by(Layout.order)
-        )).all()
+        (
+            await db.scalars(
+                select(Layout)
+                .where(Layout.database_id == source.id, Layout.placement_id.is_(None))
+                .order_by(Layout.order)
+            )
+        ).all()
     )
     for layout in source_layouts:
         db.add(

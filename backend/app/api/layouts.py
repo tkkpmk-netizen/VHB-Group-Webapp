@@ -7,13 +7,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.deps.auth import get_current_user
 from app.deps.workspace import get_current_workspace
 from app.models.database import Database
 from app.models.layout import Layout
 from app.models.resource import Space, SpaceDatabasePlacement
+from app.models.user import User
 from app.models.view_preset import ViewPreset
 from app.models.workspace import Workspace
 from app.schemas.layout import LayoutCreate, LayoutOut, LayoutUpdate
+from app.services.database_history import (
+    record_database_change,
+    snapshot_layout,
+    snapshot_view_preset,
+)
 from app.services.layouts import ensure_canonical_layouts, ensure_placement_layouts
 
 router = APIRouter(tags=["layouts"])
@@ -37,9 +44,7 @@ async def list_layouts(
 ) -> list[Layout]:
     await _scoped_database(database_id, workspace, db)
     if placement_id is not None:
-        placement = await _scoped_database_placement(
-            placement_id, database_id, workspace, db
-        )
+        placement = await _scoped_database_placement(placement_id, database_id, workspace, db)
         layouts, changed = await ensure_placement_layouts(db, placement)
     else:
         layouts, changed = await ensure_canonical_layouts(db, database_id)
@@ -58,6 +63,7 @@ async def create_layout(
     payload: LayoutCreate,
     placement_id: uuid.UUID | None = None,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Layout:
     await _scoped_database(database_id, workspace, db)
@@ -81,6 +87,16 @@ async def create_layout(
         order=order,
     )
     db.add(layout)
+    await db.flush()
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=database_id,
+        actor_id=current_user.id,
+        action="layout.created",
+        summary=f'Created layout "{layout.name}"',
+        created={"layouts": [layout.id]},
+    )
     await db.commit()
     await db.refresh(layout)
     return layout
@@ -120,9 +136,11 @@ async def update_layout(
     layout_id: uuid.UUID,
     payload: LayoutUpdate,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Layout:
     layout = await _scoped_layout(layout_id, workspace, db)
+    before = snapshot_layout(layout)
     if payload.name is not None:
         layout.name = payload.name
     if payload.type is not None:
@@ -141,6 +159,15 @@ async def update_layout(
             if preset is None or preset.layout_id != layout.id:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "View preset not found")
         layout.active_view_preset_id = payload.active_view_preset_id
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=layout.database_id,
+        actor_id=current_user.id,
+        action="layout.updated",
+        summary=f'Updated layout "{layout.name}"',
+        before={"layouts": [before]},
+    )
     await db.commit()
     await db.refresh(layout)
     return layout
@@ -150,8 +177,24 @@ async def update_layout(
 async def delete_layout(
     layout_id: uuid.UUID,
     workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     layout = await _scoped_layout(layout_id, workspace, db)
+    presets = list(
+        (await db.scalars(select(ViewPreset).where(ViewPreset.layout_id == layout.id))).all()
+    )
+    record_database_change(
+        db,
+        workspace_id=workspace.id,
+        database_id=layout.database_id,
+        actor_id=current_user.id,
+        action="layout.deleted",
+        summary=f'Deleted layout "{layout.name}"',
+        before={
+            "layouts": [snapshot_layout(layout)],
+            "view_presets": [snapshot_view_preset(preset) for preset in presets],
+        },
+    )
     await db.delete(layout)
     await db.commit()

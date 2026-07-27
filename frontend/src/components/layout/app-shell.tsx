@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Check,
   Database,
   FolderTree,
   LogOut,
@@ -8,7 +9,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
-  Sparkles,
+  Settings,
   Users,
 } from "@/components/ui/fa-icon";
 import Image from "next/image";
@@ -24,6 +25,7 @@ import {
   selectWorkspace,
 } from "@/lib/api/client";
 import { clearToken, getToken } from "@/lib/auth";
+import { workspaceQueryKeys } from "@/lib/query-keys";
 import type { components } from "@/lib/api/schema";
 import { PRODUCT_MODULES } from "@/modules/registry";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -44,7 +46,195 @@ type FolderType = components["schemas"]["FolderOut"];
 type Db = components["schemas"]["DatabaseOut"];
 type User = components["schemas"]["UserOut"];
 
-function AppRail() {
+function userInitials(user?: User) {
+  return (user?.full_name ?? user?.email ?? "VHB")
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1))
+    .join("")
+    .toUpperCase();
+}
+
+function AccountMenu({
+  workspaces,
+  activeId,
+  onSelect,
+  user,
+  variant = "rail",
+}: {
+  workspaces: Membership[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  user?: User;
+  variant?: "rail" | "sidebar";
+}) {
+  const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const active = workspaces.find((workspace) => workspace.id === activeId);
+  const initials = userInitials(user);
+
+  async function logout() {
+    try {
+      await apiFetch<void>("/auth/logout", { method: "POST" });
+    } finally {
+      clearToken();
+      router.push("/login");
+    }
+  }
+
+  return (
+    <div className={variant === "rail" ? "relative" : "relative w-full"}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Open user menu. Current workspace: ${active?.name ?? "none"}`}
+        title={user?.full_name ?? user?.email ?? "Account"}
+        className={
+          variant === "rail"
+            ? "group flex h-[48px] w-[44px] flex-col items-center justify-center gap-0.5 rounded-md text-[9px] font-medium text-white/85 hover:bg-[var(--app-rail-hover)] hover:text-white"
+            : "flex h-10 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"
+        }
+      >
+        <span
+          className={
+            variant === "rail"
+              ? "flex size-7 items-center justify-center rounded-full bg-white text-[9px] font-bold text-[#0b5caf] shadow-sm ring-1 ring-white/35 transition-transform group-hover:scale-[1.04]"
+              : "flex size-7 shrink-0 items-center justify-center rounded-full bg-[#0b5caf] text-[9px] font-bold text-white"
+          }
+        >
+          {initials}
+        </span>
+        {variant === "rail" ? (
+          <span className="w-full truncate px-0.5 text-center leading-none">
+            Account
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-medium">
+              {user?.full_name ?? "VHB user"}
+            </span>
+            <span className="block truncate text-[10px] text-muted-foreground">
+              {active?.name ?? user?.email ?? "Account"}
+            </span>
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close user menu"
+            className="fixed inset-0 z-[80] cursor-default"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            role="menu"
+            className={`vhb-popover-shadow fixed z-[90] w-[272px] rounded-lg border bg-popover p-1 ${
+              variant === "rail"
+                ? "bottom-2 left-[calc(var(--app-rail-width)+0.5rem)]"
+                : "bottom-12 left-2 max-w-[calc(100vw-1rem)]"
+            }`}
+          >
+            <div className="flex items-center gap-2 border-b px-2 py-2">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#0b5caf] text-[10px] font-bold text-white">
+                {initials}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold">
+                  {user?.full_name ?? "VHB user"}
+                </p>
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {user?.email}
+                </p>
+              </div>
+              <NotificationBell placement="account" />
+            </div>
+
+            <p className="px-2 pb-1 pt-2 text-[10px] font-semibold text-muted-foreground">
+              Workspace
+            </p>
+            <div className="max-h-40 overflow-y-auto">
+              {workspaces.map((workspace) => (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onSelect(workspace.id);
+                    setOpen(false);
+                  }}
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {workspace.name}
+                  </span>
+                  <span className="text-[9px] uppercase text-muted-foreground">
+                    {workspace.role}
+                  </span>
+                  <Check
+                    className={`size-3 text-primary ${
+                      workspace.id === activeId ? "opacity-100" : "opacity-0"
+                    }`}
+                  />
+                </button>
+              ))}
+              {workspaces.length === 0 && (
+                <p className="px-2 py-3 text-xs text-muted-foreground">
+                  No workspace access.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-1 border-t pt-1">
+              <Link
+                href="/settings/people"
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="flex h-8 items-center gap-2 rounded-md px-2 text-xs hover:bg-muted"
+              >
+                <Users className="size-3.5 text-muted-foreground" />
+                Invite people
+              </Link>
+              <Link
+                href="/settings/account"
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="flex h-8 items-center gap-2 rounded-md px-2 text-xs hover:bg-muted"
+              >
+                <Settings className="size-3.5 text-muted-foreground" />
+                Account settings
+              </Link>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void logout()}
+                className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-destructive hover:bg-destructive/10"
+              >
+                <LogOut className="size-3.5" />
+                Log out
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AppRail({
+  workspaces,
+  activeId,
+  onSelectWorkspace,
+  user,
+}: {
+  workspaces: Membership[];
+  activeId: string | null;
+  onSelectWorkspace: (id: string) => void;
+  user?: User;
+}) {
   const pathname = usePathname();
   return (
     <aside className="hidden w-[var(--app-rail-width)] shrink-0 flex-col items-center bg-[linear-gradient(180deg,var(--app-rail-start),var(--app-rail-end))] py-1.5 text-white lg:flex">
@@ -92,98 +282,13 @@ function AppRail() {
           );
         })}
       </nav>
-      <Link
-        href="/settings/people"
-        className="flex h-[48px] w-[44px] flex-col items-center justify-center gap-0.5 rounded-md text-[9px] font-medium text-white/85 hover:bg-[var(--app-rail-hover)] hover:text-white"
-      >
-        <Users className="size-[17px]" strokeWidth={1.8} />
-        Invite
-      </Link>
+      <AccountMenu
+        workspaces={workspaces}
+        activeId={activeId}
+        onSelect={onSelectWorkspace}
+        user={user}
+      />
     </aside>
-  );
-}
-
-function WorkspaceSwitcher({
-  workspaces,
-  activeId,
-  onSelect,
-  user,
-}: {
-  workspaces: Membership[];
-  activeId: string | null;
-  onSelect: (id: string) => void;
-  user?: User;
-}) {
-  const [open, setOpen] = useState(false);
-  const active = workspaces.find((workspace) => workspace.id === activeId);
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex size-8 items-center justify-center rounded-full bg-[#242424] text-[10px] font-bold text-white ring-1 ring-black/10 hover:ring-2 hover:ring-[var(--ring)]"
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`Switch workspace. Current workspace: ${active?.name ?? "none"}`}
-        title={active?.name ?? "Select workspace"}
-      >
-        {(user?.full_name ?? user?.email ?? "VHB")
-          .split(/\s+/)
-          .slice(0, 2)
-          .map((part) => part.slice(0, 1))
-          .join("")
-          .toUpperCase()}
-      </button>
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close workspace menu"
-            className="fixed inset-0 z-[80] cursor-default"
-            onClick={() => setOpen(false)}
-          />
-          <div
-            role="menu"
-            className="vhb-popover-shadow absolute right-0 top-10 z-[90] w-[248px] rounded-lg border bg-popover p-1"
-          >
-            <p className="px-2 pb-1 pt-1.5 text-[10px] font-semibold text-muted-foreground">
-              Switch workspace
-            </p>
-            <div className="mb-1 flex items-center gap-2 border-b px-2 pb-2">
-              <span className="flex size-7 items-center justify-center rounded-full bg-[#242424] text-[9px] font-bold text-white">
-                {(user?.full_name ?? user?.email ?? "VHB").slice(0, 2).toUpperCase()}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-xs font-medium">{user?.full_name ?? "VHB user"}</p>
-                <p className="truncate text-[10px] text-muted-foreground">{user?.email}</p>
-              </div>
-            </div>
-            {workspaces.map((workspace) => (
-              <button
-                key={workspace.id}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  onSelect(workspace.id);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-              >
-                <span className="truncate">{workspace.name}</span>
-                <span className="ml-3 text-[9px] uppercase text-muted-foreground">
-                  {workspace.role}
-                </span>
-              </button>
-            ))}
-            {workspaces.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-muted-foreground">
-                No workspace access. Ask an administrator to invite you.
-              </p>
-            ) : null}
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -198,6 +303,7 @@ function ContextSidebar({
   workspaceName,
   onDialog,
   onNavigate,
+  mobileAccount,
 }: {
   spaces: Space[];
   folders: FolderType[];
@@ -209,6 +315,7 @@ function ContextSidebar({
   workspaceName?: string;
   onDialog: (state: ResourceDialogState) => void;
   onNavigate: () => void;
+  mobileAccount?: React.ReactNode;
 }) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -218,9 +325,9 @@ function ContextSidebar({
       onClickCapture={(event) => {
         if ((event.target as HTMLElement).closest("a")) onNavigate();
       }}
-      className="fixed bottom-0 left-0 top-[var(--app-topbar-height)] z-[60] flex w-[min(18rem,calc(100vw-2rem))] flex-col border-r border-sidebar-border bg-sidebar shadow-xl lg:static lg:z-auto lg:h-full lg:w-[var(--context-sidebar-width)] lg:shadow-none"
+      className="fixed inset-y-0 left-0 z-[60] flex w-[min(18rem,calc(100vw-2rem))] flex-col border-r border-sidebar-border bg-sidebar shadow-xl lg:static lg:z-auto lg:h-full lg:w-[var(--context-sidebar-width)] lg:shadow-none"
     >
-      <div className="flex h-10 shrink-0 items-center gap-1 rounded-b-lg border-b border-sidebar-border bg-card px-2 shadow-sm">
+      <div className="flex h-9 shrink-0 items-center gap-1 rounded-br-lg border-b border-sidebar-border bg-card px-2 shadow-sm">
         <h2 className="min-w-0 flex-1 truncate px-1 text-sm font-semibold">
           {isDatabase ? "Spaces" : moduleLabel}
         </h2>
@@ -345,98 +452,13 @@ function ContextSidebar({
           <span className="min-w-0 flex-1 truncate">Space Management</span>
         </Link>
       </div>}
+      {mobileAccount && (
+        <div className="border-t border-sidebar-border p-2 lg:hidden">
+          {mobileAccount}
+        </div>
+      )}
       <span className="sr-only">{workspaceName}</span>
     </aside>
-  );
-}
-
-function Topbar({
-  workspaces,
-  activeId,
-  onSelectWorkspace,
-  onOpenSidebar,
-  sidebarOpen,
-  user,
-}: {
-  workspaces: Membership[];
-  activeId: string | null;
-  onSelectWorkspace: (id: string) => void;
-  onOpenSidebar: () => void;
-  sidebarOpen: boolean;
-  user?: User;
-}) {
-  const router = useRouter();
-  return (
-    <header className="flex h-[var(--app-topbar-height)] shrink-0 items-center border-b bg-card">
-      <div
-        className={`flex h-full min-w-0 items-center gap-1 border-r px-1.5 transition-[width] lg:shrink-0 ${
-          sidebarOpen ? "w-[12rem] lg:w-[var(--context-sidebar-width)]" : "w-auto lg:w-11"
-        }`}
-      >
-        <button
-          type="button"
-          onClick={onOpenSidebar}
-          aria-label="Open sidebar"
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
-        >
-          <Menu className="size-4" />
-        </button>
-      </div>
-      <div className="relative flex min-w-0 flex-1 items-center justify-center gap-2 px-2">
-        {!sidebarOpen && (
-          <button
-            type="button"
-            onClick={onOpenSidebar}
-            title="Open sidebar"
-            className="absolute left-2 hidden rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground lg:block"
-          >
-            <PanelLeftOpen className="size-4" />
-          </button>
-        )}
-        <button
-          type="button"
-          disabled
-          title="Global search is not available yet"
-          className="hidden h-6 w-full max-w-[320px] items-center gap-2 rounded-full border border-input bg-background px-2.5 text-muted-foreground shadow-sm md:flex"
-        >
-          <Search className="size-3.5" />
-          <span className="truncate text-[11px]">Search</span>
-          <kbd className="ml-auto text-[9px]">⌘ J</kbd>
-        </button>
-        <div className="absolute right-2 flex items-center gap-0.5">
-          <button
-            type="button"
-            disabled
-            title="AI assistant is not available yet"
-            className="rounded p-1 text-muted-foreground"
-          >
-            <Sparkles className="size-4 text-[#7252d8]" />
-          </button>
-          <NotificationBell />
-          <WorkspaceSwitcher
-            workspaces={workspaces}
-            activeId={activeId}
-            onSelect={onSelectWorkspace}
-            user={user}
-          />
-          <button
-            type="button"
-            title="Log out"
-            onClick={async () => {
-              try {
-                await apiFetch<void>("/auth/logout", { method: "POST" });
-              } finally {
-                clearToken();
-                router.push("/login");
-              }
-            }}
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <LogOut className="size-4" />
-          </button>
-        </div>
-      </div>
-    </header>
   );
 }
 
@@ -489,17 +511,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     queryFn: () => apiFetch<User>("/auth/me"),
   });
   const { data: spaces = [] } = useQuery<Space[]>({
-    queryKey: ["spaces", selectedWorkspaceId],
+    queryKey: workspaceQueryKeys.spaces(selectedWorkspaceId),
     queryFn: () => apiFetch<Space[]>("/spaces"),
     enabled,
   });
   const { data: databases = [] } = useQuery<Db[]>({
-    queryKey: ["databases", selectedWorkspaceId],
+    queryKey: workspaceQueryKeys.databases(selectedWorkspaceId),
     queryFn: () => apiFetch<Db[]>("/databases"),
     enabled,
   });
   const { data: foldersBySpace = {} } = useQuery<Record<string, FolderType[]>>({
-    queryKey: ["folders", selectedWorkspaceId, spaces.map((space) => space.id)],
+    queryKey: workspaceQueryKeys.folders(
+      selectedWorkspaceId,
+      spaces.map((space) => space.id),
+    ),
     queryFn: async () =>
       Object.fromEntries(
         await Promise.all(
@@ -518,7 +543,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: placementsBySpace = {} } = useQuery<
     Record<string, SpaceDatabase[]>
   >({
-    queryKey: ["space-databases", selectedWorkspaceId, spaces.map((space) => space.id)],
+    queryKey: workspaceQueryKeys.placements(
+      selectedWorkspaceId,
+      spaces.map((space) => space.id),
+    ),
     queryFn: async () =>
       Object.fromEntries(
         await Promise.all(
@@ -562,7 +590,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       onClick={() => contextMenu && setContextMenu(null)}
     >
       <LiveDragPreview />
-      <AppRail />
+      <AppRail
+        workspaces={workspaces}
+        activeId={selectedWorkspaceId}
+        onSelectWorkspace={changeWorkspace}
+        user={user}
+      />
       <div className={`${mobileOpen ? "block" : "hidden"} ${sidebarOpen ? "lg:block" : "lg:hidden"}`}>
         {mobileOpen && (
           <button
@@ -583,17 +616,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           workspaceName={workspace?.name}
           onDialog={setResourceDialog}
           onNavigate={() => setMobileOpen(false)}
+          mobileAccount={
+            <AccountMenu
+              workspaces={workspaces}
+              activeId={selectedWorkspaceId}
+              onSelect={changeWorkspace}
+              user={user}
+              variant="sidebar"
+            />
+          }
         />
       </div>
+      {!mobileOpen && (
+        <button
+          type="button"
+          onClick={openSidebar}
+          aria-label="Open navigation"
+          title="Open navigation"
+          className="fixed left-2 top-2 z-40 flex size-7 items-center justify-center rounded-md border bg-card/95 text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground lg:hidden"
+        >
+          <Menu className="size-3.5" />
+        </button>
+      )}
+      {!sidebarOpen && (
+        <button
+          type="button"
+          onClick={openSidebar}
+          aria-label="Open sidebar"
+          title="Open sidebar"
+          className="fixed left-[calc(var(--app-rail-width)+0.375rem)] top-1.5 z-40 hidden size-7 items-center justify-center rounded-md border bg-card/95 text-muted-foreground shadow-sm backdrop-blur hover:bg-muted hover:text-foreground lg:flex"
+        >
+          <PanelLeftOpen className="size-3.5" />
+        </button>
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar
-          workspaces={workspaces}
-          activeId={selectedWorkspaceId}
-          onSelectWorkspace={changeWorkspace}
-          onOpenSidebar={openSidebar}
-          sidebarOpen={sidebarOpen}
-          user={user}
-        />
         <main className="flex min-h-0 flex-1 flex-col overflow-auto bg-background">
           <div className="sr-only">{workspace?.name}</div>
           {children}

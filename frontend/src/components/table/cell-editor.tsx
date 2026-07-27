@@ -21,6 +21,7 @@ import { Dropdown, MultiDropdown } from "@/components/ui/dropdown";
 import { API_BASE_URL, apiFetch, getWorkspaceId } from "@/lib/api/client";
 import { getToken } from "@/lib/auth";
 import { chipColor } from "@/lib/field-colors";
+import { formatNumberValue } from "@/lib/number-formats";
 import {
   COUNTRY_OPTIONS,
   countryByCode,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/countries";
 import type { components } from "@/lib/api/schema";
 import { formatEntityId } from "@/lib/entity-id";
+import { fetchAllEntities } from "@/components/table/use-paged-entities";
 
 type Field = components["schemas"]["FieldOut"];
 type EntityT = components["schemas"]["EntityOut"];
@@ -111,7 +113,7 @@ function choiceOptions(field: Field) {
 }
 
 const SELECT_LIKE = new Set(["select", "status", "priority"]);
-const TEXT_TYPES = new Set(["text", "long_text", "email", "url"]);
+const TEXT_TYPES = new Set(["name", "text", "long_text", "email", "url"]);
 
 const inputCls =
   "vhb-cell-input w-full select-text rounded-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none ring-0 focus:bg-transparent focus:outline-none focus:ring-0";
@@ -190,9 +192,10 @@ function formatBytes(bytes?: number | null): string {
 }
 
 type NumberOptions = {
-  format?: "plain" | "integer" | "decimal" | "percent" | "currency";
+  format?: "plain" | "integer" | "decimal" | "percent" | "currency" | "unit";
   currency_code?: string;
   precision?: number;
+  unit_code?: string;
 };
 
 function displayNumber(field: Field, value: unknown): string {
@@ -200,26 +203,7 @@ function displayNumber(field: Field, value: unknown): string {
   const n = Number(value);
   if (Number.isNaN(n)) return String(value);
   const opt = (field.options as NumberOptions) ?? {};
-  if (opt.format === "currency") {
-    try {
-      return n.toLocaleString("en-US", {
-        style: "currency",
-        currency: opt.currency_code || "VND",
-        maximumFractionDigits: opt.precision ?? 0,
-      });
-    } catch {
-      return `${n.toLocaleString("en-US")} ${opt.currency_code ?? ""}`;
-    }
-  }
-  if (opt.format === "percent") return `${n}%`;
-  if (opt.format === "decimal") {
-    const p = opt.precision ?? 2;
-    return n.toLocaleString("en-US", {
-      minimumFractionDigits: p,
-      maximumFractionDigits: p,
-    });
-  }
-  return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return formatNumberValue(n, opt);
 }
 
 type DateValue = { start: string; end: string | null };
@@ -888,8 +872,8 @@ function RelationCell({
   const isSingleParent =
     relationOptions.sub_item === true && relationOptions.mirror === true;
   const entitiesQ = useQuery<EntityT[]>({
-    queryKey: ["entities", targetDb],
-    queryFn: () => apiFetch<EntityT[]>(`/databases/${targetDb}/entities`),
+    queryKey: ["entities", targetDb, "all-relation-options"],
+    queryFn: () => fetchAllEntities(targetDb!),
     enabled: !!targetDb,
   });
   const fieldsQ = useQuery<Field[]>({

@@ -19,6 +19,17 @@ class DataSourceUpdate(BaseModel):
     order: int | None = None
 
 
+class DataSourceReorder(BaseModel):
+    ids: list[uuid.UUID] = PField(min_length=1)
+
+
+class DataSourceMerge(BaseModel):
+    """Merge one or more non-primary sources into an existing destination."""
+
+    source_ids: list[uuid.UUID] = PField(min_length=1)
+    destination_id: uuid.UUID
+
+
 class DataSourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,3 +42,4 @@ class DataSourceOut(BaseModel):
     origin_asset_id: uuid.UUID | None
     origin_job_id: uuid.UUID | None
     order: int
+    entity_count: int = 0

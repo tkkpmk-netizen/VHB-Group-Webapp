@@ -213,9 +213,14 @@ export function ViewsBar({
           );
         }
         return (
-          <div
+          <motion.div
             key={v.id}
+            layout="position"
             draggable
+            data-drag-highlight
+            data-drag-preview-kind="layout"
+            data-drag-preview-label={v.name}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             onDragStart={() => setDragId(v.id)}
             onDragEnd={() => setDragId(null)}
             onDragEnter={(e) => {
@@ -260,7 +265,7 @@ export function ViewsBar({
               />
               <span className="max-w-36 truncate">{v.name}</span>
             </button>
-          </div>
+          </motion.div>
         );
       })}
       <button

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,6 +13,7 @@ from typing import Any
 from app.models.field import Entity, Field, FieldType
 
 CONVERTIBLE_FIELD_TYPES = {
+    FieldType.name,
     FieldType.text,
     FieldType.long_text,
     FieldType.number,
@@ -32,6 +35,7 @@ CONVERTIBLE_FIELD_TYPES = {
 _SINGLE_CHOICE_TYPES = {FieldType.select, FieldType.status, FieldType.priority}
 _CHOICE_TYPES = _SINGLE_CHOICE_TYPES | {FieldType.multi_select}
 _TEXT_TYPES = {
+    FieldType.name,
     FieldType.text,
     FieldType.long_text,
     FieldType.url,
@@ -46,7 +50,7 @@ _GENERIC_OPTION_KEYS = {
     "entity_doc_visible",
 }
 _TARGET_OPTION_KEYS: dict[FieldType, set[str]] = {
-    FieldType.number: {"format", "currency_code", "precision"},
+    FieldType.number: {"format", "currency_code", "precision", "unit_code"},
     FieldType.date: {"date_format"},
     FieldType.url: {"hyperlink"},
     FieldType.select: {"choices"},
@@ -55,7 +59,7 @@ _TARGET_OPTION_KEYS: dict[FieldType, set[str]] = {
     FieldType.priority: {"choices", "groups"},
 }
 _CHOICE_COLORS = ("blue", "green", "purple", "orange", "pink", "teal", "yellow")
-_MAX_GENERATED_CHOICES = 200
+_MAX_INVALID_SAMPLES = 8
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,9 @@ class FieldConversionPlan:
     empty_cells: int
     generated_choices: int
     cleared_samples: list[str]
+    invalid_entity_ids: list[uuid.UUID]
+    invalid_reason_counts: dict[str, int]
+    invalid_samples: list[dict[str, Any]]
 
 
 def _is_empty(value: Any) -> bool:
@@ -108,9 +115,47 @@ def _as_number(value: Any) -> int | float | None:
         return value if math.isfinite(float(value)) else None
     if not isinstance(value, str):
         return None
-    normalized = value.strip().replace(",", "")
-    if normalized.endswith("%"):
-        normalized = normalized[:-1].strip()
+    normalized = value.strip()
+    # Keep one leading sign, digits and one decimal separator. Thousands
+    # separators and surrounding currency/unit text are deliberately removed.
+    first_digit = re.search(r"\d", normalized)
+    sign = (
+        "-"
+        if (
+            first_digit is not None
+            and (
+                "-" in normalized[: first_digit.start()]
+                or (
+                    normalized.lstrip().startswith("(")
+                    and normalized.rstrip().endswith(")")
+                )
+            )
+        )
+        else ""
+    )
+    numeric = re.sub(r"[^0-9.,]", "", normalized)
+    if not numeric:
+        return None
+    if "," in numeric and "." in numeric:
+        # The right-most separator is the decimal separator; the other is grouping.
+        decimal = "," if numeric.rfind(",") > numeric.rfind(".") else "."
+        grouping = "." if decimal == "," else ","
+        numeric = numeric.replace(grouping, "").replace(decimal, ".")
+    elif "," in numeric:
+        parts = numeric.split(",")
+        numeric = (
+            "".join(parts)
+            if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3)
+            else ".".join(parts)
+        )
+    elif numeric.count(".") > 1:
+        parts = numeric.split(".")
+        numeric = (
+            "".join(parts)
+            if all(len(part) == 3 for part in parts[1:])
+            else "".join(parts[:-1]) + "." + parts[-1]
+        )
+    normalized = sign + numeric
     try:
         parsed = float(normalized)
     except ValueError:
@@ -191,8 +236,6 @@ def _target_options(
                 if key in seen:
                     continue
                 seen.add(key)
-                if len(choices) >= _MAX_GENERATED_CHOICES:
-                    continue
                 choice_id = uuid.uuid5(
                     field.id, f"{target_type.value}:{key}"
                 ).hex
@@ -267,6 +310,50 @@ def _convert_value(
     return None
 
 
+def _invalid_reason(
+    value: Any,
+    target_type: FieldType,
+    target_options: dict[str, Any],
+) -> str:
+    """Explain why a non-empty value cannot be represented by the target field."""
+    if target_type in _TEXT_TYPES:
+        return "The value cannot be represented as text"
+    if target_type == FieldType.email:
+        return "Expected an email address containing @"
+    if target_type == FieldType.number:
+        return "No numeric value could be extracted"
+    if target_type == FieldType.rating:
+        return "Expected a whole number from 1 to 5"
+    if target_type == FieldType.progress:
+        return "No numeric percentage could be extracted"
+    if target_type == FieldType.checkbox:
+        return "Expected true/false, yes/no, 1/0, on/off, or checked/unchecked"
+    if target_type == FieldType.date:
+        return "Expected an ISO date or a valid date range"
+    if target_type == FieldType.people:
+        return "Expected a list of workspace user IDs"
+    if target_type in _CHOICE_TYPES:
+        labels = _choice_labels(value)
+        if not labels:
+            return "No option label could be read from the value"
+        configured_labels = {
+            str(choice.get("label") or "").casefold()
+            for choice in target_options.get("choices", [])
+        }
+        if any(label.casefold() not in configured_labels for label in labels):
+            return "Value does not match any configured option"
+        return "The value could not be mapped to an option"
+    return f"The value cannot be converted to {target_type.value}"
+
+
+def _display_value(value: Any) -> str:
+    if isinstance(value, dict | list):
+        rendered = json.dumps(value, ensure_ascii=False, default=str)
+    else:
+        rendered = str(value)
+    return rendered if len(rendered) <= 160 else f"{rendered[:157]}…"
+
+
 def build_field_conversion_plan(
     field: Field,
     entities: list[Entity],
@@ -288,6 +375,9 @@ def build_field_conversion_plan(
     cleared_cells = 0
     empty_cells = 0
     cleared_samples: list[str] = []
+    invalid_entity_ids: list[uuid.UUID] = []
+    invalid_reason_counts: dict[str, int] = {}
+    invalid_samples: list[dict[str, Any]] = []
 
     for entity in entities:
         next_data = dict(entity.data)
@@ -301,8 +391,20 @@ def build_field_conversion_plan(
             if converted is None:
                 next_data.pop(field_key, None)
                 cleared_cells += 1
+                invalid_entity_ids.append(entity.id)
+                reason = _invalid_reason(source_value, target_type, target_options)
+                invalid_reason_counts[reason] = invalid_reason_counts.get(reason, 0) + 1
                 if len(cleared_samples) < 5:
                     cleared_samples.append(entity.name)
+                if len(invalid_samples) < _MAX_INVALID_SAMPLES:
+                    invalid_samples.append(
+                        {
+                            "entity_id": entity.id,
+                            "entity_name": entity.name,
+                            "value": _display_value(source_value),
+                            "reason": reason,
+                        }
+                    )
             else:
                 next_data[field_key] = converted
                 converted_cells += 1
@@ -317,4 +419,7 @@ def build_field_conversion_plan(
         empty_cells=empty_cells,
         generated_choices=generated_choices,
         cleared_samples=cleared_samples,
+        invalid_entity_ids=invalid_entity_ids,
+        invalid_reason_counts=invalid_reason_counts,
+        invalid_samples=invalid_samples,
     )

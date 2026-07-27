@@ -20,12 +20,54 @@ type Job = {
 type TransferResult = { job: Job };
 type Field = components["schemas"]["FieldOut"];
 type ImportPreview = {
-  columns: { header: string; inferred_type: string; samples: unknown[] }[];
+  columns: {
+    header: string;
+    inferred_type: string;
+    samples: unknown[];
+    generated_options: string[];
+  }[];
   rows: unknown[][];
   entity_count: number;
   duplicate_names: Record<string, number[]>;
   existing_name_matches: string[];
 };
+
+const CREATE_FIELD = "__create__";
+const SKIP_COLUMN = "__skip__";
+const IMPORT_FIELD_TYPES = [
+  ["text", "Text"],
+  ["long_text", "Long text"],
+  ["number", "Number"],
+  ["checkbox", "Checkbox"],
+  ["date", "Date"],
+  ["url", "URL"],
+  ["email", "Email"],
+  ["phone", "Phone"],
+  ["country", "Country"],
+  ["select", "Select"],
+  ["multi_select", "Multi-select"],
+  ["status", "Status"],
+  ["priority", "Priority"],
+  ["rating", "Rating"],
+  ["people", "People"],
+  ["progress", "Progress"],
+  ["files", "Files"],
+  ["created_time", "Created time (preserve source value)"],
+  ["last_edited_time", "Last edited time (preserve source value)"],
+  ["created_by", "Created by"],
+  ["last_edited_by", "Last edited by"],
+] as const;
+const IMPORTABLE_TARGET_TYPES = new Set<string>(
+  IMPORT_FIELD_TYPES.map(([value]) => value),
+);
+
+function isImportableTarget(field: Field) {
+  return IMPORTABLE_TARGET_TYPES.has(field.type);
+}
+
+function fieldTypeLabel(type: string) {
+  return IMPORT_FIELD_TYPES.find(([value]) => value === type)?.[1] ?? type;
+}
 
 export function DatabaseTransfers({
   databaseId,
@@ -43,7 +85,7 @@ export function DatabaseTransfers({
   const [pendingImport, setPendingImport] = useState<{ assetId: string; format: "csv" | "xlsx" } | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [nameColumn, setNameColumn] = useState<string | null>(null);
-  const [mapping, setMapping] = useState<Record<string, string | null>>({});
+  const [mapping, setMapping] = useState<Record<string, string>>({});
   const [fieldTypes, setFieldTypes] = useState<Record<string, string>>({});
   const [includedRows, setIncludedRows] = useState<Set<number>>(new Set());
   const [incomingPolicy, setIncomingPolicy] = useState<"skip" | "suffix">("suffix");
@@ -108,7 +150,11 @@ export function DatabaseTransfers({
         Object.fromEntries(
           review.columns.map((column) => [
             column.header,
-            fields.find((field) => field.name.toLowerCase() === column.header.toLowerCase())?.id ?? null,
+            fields.find(
+              (field) =>
+                isImportableTarget(field) &&
+                field.name.toLowerCase() === column.header.toLowerCase(),
+            )?.id ?? CREATE_FIELD,
           ]),
         ),
       );
@@ -126,15 +172,31 @@ export function DatabaseTransfers({
     if (!pendingImport || !preview || !nameColumn) return;
     setBusy(true);
     try {
+      const nameField = fieldsQ.data?.find((field) => field.type === "name");
+      const mappedFields = Object.fromEntries(
+        Object.entries(mapping).filter(
+          ([header, fieldId]) =>
+            header !== nameColumn &&
+            fieldId !== CREATE_FIELD &&
+            fieldId !== SKIP_COLUMN,
+        ),
+      );
+      if (nameField) mappedFields[nameColumn] = nameField.id;
       const transfer = await apiFetch<TransferResult>(`/databases/${databaseId}/imports`, {
         method: "POST",
         body: JSON.stringify({
           asset_id: pendingImport.assetId,
           format: pendingImport.format,
-          mapping: Object.fromEntries(
-            Object.entries(mapping).filter(([, fieldId]) => Boolean(fieldId)),
+          mapping: mappedFields,
+          field_types: Object.fromEntries(
+            Object.entries(fieldTypes).filter(
+              ([header]) =>
+                header !== nameColumn && mapping[header] === CREATE_FIELD,
+            ),
           ),
-          field_types: fieldTypes,
+          skipped_columns: Object.entries(mapping)
+            .filter(([header, target]) => header !== nameColumn && target === SKIP_COLUMN)
+            .map(([header]) => header),
           name_column: nameColumn,
           include_rows: includedRows.size === preview.rows.length ? undefined : [...includedRows],
           incoming_duplicate_policy: incomingPolicy,
@@ -210,7 +272,7 @@ export function DatabaseTransfers({
             className="absolute inset-0"
             onClick={() => setOpen(false)}
           />
-          <section className="relative z-10 w-full max-w-lg rounded-xl border bg-card shadow-2xl">
+          <section className="relative z-10 w-full max-w-4xl rounded-xl border bg-card shadow-2xl">
             <header className="flex items-center justify-between border-b px-5 py-4">
               <div>
                 <h2 className="font-semibold">Import / Export database</h2>
@@ -288,35 +350,121 @@ export function DatabaseTransfers({
                       onChange={setNameColumn}
                     />
                   </label>
-                  {preview.columns.map((column) => (
-                    <div key={column.header} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem] gap-2">
-                      <div className="min-w-0 rounded-md bg-muted/50 px-2 py-1.5 text-xs">
-                        <span className="block truncate font-medium">{column.header}</span>
-                        <span className="text-muted-foreground">{column.inferred_type}</span>
+                  {preview.columns.map((column) => {
+                    const target = mapping[column.header] ?? CREATE_FIELD;
+                    const existingField = fieldsQ.data?.find((field) => field.id === target);
+                    const isNameColumn = column.header === nameColumn;
+                    const selectedType =
+                      fieldTypes[column.header] ?? column.inferred_type;
+                    const createsOptions = [
+                      "select",
+                      "multi_select",
+                      "status",
+                      "priority",
+                    ].includes(selectedType);
+                    return (
+                      <div
+                        key={column.header}
+                        className="grid grid-cols-[minmax(0,1fr)_minmax(13rem,1fr)_12rem] items-start gap-2 rounded-lg border border-transparent p-1 hover:border-border hover:bg-muted/20"
+                      >
+                        <div className="min-w-0 rounded-md bg-muted/50 px-2 py-1.5 text-xs">
+                          <span className="block truncate font-medium">{column.header}</span>
+                          <span className="text-muted-foreground">
+                            Detected · {fieldTypeLabel(column.inferred_type)}
+                          </span>
+                        </div>
+                        {isNameColumn ? (
+                          <div className="flex h-8 items-center rounded-md bg-primary/8 px-2 text-xs font-medium text-primary">
+                            Required Name field
+                          </div>
+                        ) : (
+                          <Dropdown
+                            value={target}
+                            allowClear={false}
+                            searchable
+                            searchPlaceholder="Search destination fields…"
+                            options={[
+                              {
+                                value: CREATE_FIELD,
+                                label: `Create "${column.header}"`,
+                              },
+                              { value: SKIP_COLUMN, label: "Don’t Import" },
+                              ...(fieldsQ.data
+                                ?.filter(isImportableTarget)
+                                .map((field) => ({
+                                  value: field.id,
+                                  label: `${field.name} · ${fieldTypeLabel(field.type)}`,
+                                })) ?? []),
+                            ]}
+                            onChange={(fieldId) =>
+                              fieldId &&
+                              setMapping((current) => ({
+                                ...current,
+                                [column.header]: fieldId,
+                              }))
+                            }
+                          />
+                        )}
+                        {isNameColumn ? (
+                          <div className="flex h-8 items-center rounded-md bg-muted px-2 text-xs font-medium">
+                            Name
+                          </div>
+                        ) : existingField ? (
+                          <div
+                            className="flex h-8 items-center rounded-md border bg-muted/40 px-2 text-xs font-medium"
+                            title="The existing field keeps its current type"
+                          >
+                            {fieldTypeLabel(existingField.type)}
+                          </div>
+                        ) : target === SKIP_COLUMN ? (
+                          <div className="flex h-8 items-center rounded-md bg-muted/40 px-2 text-xs text-muted-foreground">
+                            Not imported
+                          </div>
+                        ) : (
+                          <Dropdown
+                            value={selectedType}
+                            allowClear={false}
+                            searchable
+                            searchPlaceholder="Search field types…"
+                            options={IMPORT_FIELD_TYPES.map(([value, label]) => ({
+                              value,
+                              label,
+                            }))}
+                            onChange={(value) =>
+                              value &&
+                              setFieldTypes((current) => ({
+                                ...current,
+                                [column.header]: value,
+                              }))
+                            }
+                          />
+                        )}
+                        {!isNameColumn &&
+                          target === CREATE_FIELD &&
+                          createsOptions &&
+                          column.generated_options.length > 0 && (
+                            <div className="col-start-2 col-span-2 flex flex-wrap gap-1 px-1 pb-1 text-[11px]">
+                              <span className="mr-1 text-muted-foreground">
+                                Options to create:
+                              </span>
+                              {column.generated_options.slice(0, 8).map((option) => (
+                                <span
+                                  key={option}
+                                  className="max-w-32 truncate rounded-full bg-primary/10 px-2 py-0.5 text-primary"
+                                >
+                                  {option}
+                                </span>
+                              ))}
+                              {column.generated_options.length > 8 && (
+                                <span className="text-muted-foreground">
+                                  +{column.generated_options.length - 8} more
+                                </span>
+                              )}
+                            </div>
+                          )}
                       </div>
-                      <Dropdown
-                        value={mapping[column.header] ?? null}
-                        placeholder="Create matching field"
-                        options={fieldsQ.data?.filter((field) => field.type !== "unique_id").map((field) => ({ value: field.id, label: `${field.name} · ${field.type}` })) ?? []}
-                        onChange={(fieldId) => setMapping((current) => ({ ...current, [column.header]: fieldId }))}
-                      />
-                      <Dropdown
-                        value={fieldTypes[column.header] ?? column.inferred_type}
-                        allowClear={false}
-                        options={[
-                          { value: "text", label: "Text" },
-                          { value: "long_text", label: "Long text" },
-                          { value: "number", label: "Number" },
-                          { value: "date", label: "Date" },
-                          { value: "checkbox", label: "Checkbox" },
-                          { value: "email", label: "Email" },
-                          { value: "url", label: "URL" },
-                          { value: "phone", label: "Phone" },
-                        ]}
-                        onChange={(value) => value && setFieldTypes((current) => ({ ...current, [column.header]: value }))}
-                      />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {(Object.keys(preview.duplicate_names).length > 0 || preview.existing_name_matches.length > 0) && (

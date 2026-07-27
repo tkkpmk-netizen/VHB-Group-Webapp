@@ -20,18 +20,28 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   GripVertical,
+  LoaderCircle,
+  Pencil,
   Plus,
   Trash2,
 } from "@/components/ui/fa-icon";
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, getWorkspaceId } from "@/lib/api/client";
+import { workspaceQueryKeys } from "@/lib/query-keys";
 import { CellEditor, ValueChip } from "@/components/table/cell-editor";
 import { ColumnMenu } from "@/components/table/column-menu";
 import { Dropdown } from "@/components/ui/dropdown";
 import { FaIcon } from "@/components/ui/fa-icon";
 import { IconPicker } from "@/components/ui/icon-picker";
 import { countryByCode, parsePhone } from "@/lib/countries";
-import { applyFilterTree, applySorts, groupEntities } from "@/lib/view";
+import {
+  applyFilterTree,
+  applySorts,
+  matchesFilter,
+  serverFilterTreeFor,
+  toText,
+} from "@/lib/view";
 import type { SharedViewProps } from "@/components/table/view-shell";
 import type { components } from "@/lib/api/schema";
 import { formatEntityId } from "@/lib/entity-id";
@@ -42,11 +52,45 @@ import {
   calculationForField,
   calculationOptions,
 } from "@/lib/calculations";
+import {
+  CURRENCY_CODES,
+  MEASUREMENT_UNITS,
+  NUMBER_FORMATS,
+} from "@/lib/number-formats";
+import {
+  DRAG_CANCEL_EVENT,
+  DRAG_END_EVENT,
+  moveItemsBefore,
+} from "@/lib/drag-preview";
+import {
+  colorSurface,
+  conditionalColorForEntity,
+  conditionalColorForGroup,
+} from "@/lib/conditional-colors";
 
 type Field = components["schemas"]["FieldOut"];
 type Entity = components["schemas"]["EntityOut"];
 type EntityPage = components["schemas"]["EntityPage"];
+type EntityGroup = components["schemas"]["EntityGroup"];
 type Db = components["schemas"]["DatabaseOut"];
+type TransferJob = {
+  id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  result: Record<string, unknown> | null;
+  error: string | null;
+};
+
+type LoadedGroupPage = {
+  items: Entity[];
+  page: number;
+  pages: number;
+  loading: boolean;
+  error?: string;
+};
+
+function groupIdentity(value: unknown): string {
+  return JSON.stringify(value) ?? "__undefined__";
+}
 
 const FIELD_TYPES: { value: string; label: string; choices: boolean }[] = [
   { value: "text", label: "Text", choices: false },
@@ -104,6 +148,7 @@ function buildOptions(
   choicesStr: string,
   format: string,
   currency: string,
+  unit: string,
 ): Record<string, unknown> {
   const meta = FIELD_TYPES.find((t) => t.value === type);
   if (meta?.choices) {
@@ -119,7 +164,10 @@ function buildOptions(
     return {
       format,
       ...(format === "currency" ? { currency_code: currency.trim() || "VND" } : {}),
-      ...(format === "decimal" ? { precision: 2 } : {}),
+      ...(format === "unit" ? { unit_code: unit || "kg" } : {}),
+      ...(["decimal", "currency", "unit", "percent"].includes(format)
+        ? { precision: 2 }
+        : {}),
     };
   }
   return {};
@@ -134,6 +182,12 @@ export function TableView({
   setSorts,
   groupFieldId,
   setGroupFieldId,
+  groupOrder,
+  setGroupOrder,
+  reportGroups,
+  collapseGroupsNonce,
+  invalidEntityIds,
+  onManualReorder,
   hideEmpty,
   frozenUpTo,
   setFrozenUpTo,
@@ -143,10 +197,12 @@ export function TableView({
   limit,
   dataSourceId,
   search,
+  searchFieldId,
   filterToMatches,
   matchedIds,
   flashId,
   openEntity,
+  conditionalColor,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -161,11 +217,34 @@ export function TableView({
     null,
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkFieldId, setBulkFieldId] = useState<string | null>(null);
+  const [bulkValue, setBulkValue] = useState<unknown>(null);
+  const [bulkMessage, setBulkMessage] = useState("");
+  const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const exportDownloadedRef = useRef<string | null>(null);
   const [anchor, setAnchor] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragColId, setDragColId] = useState<string | null>(null);
-  const [dragEntityId, setDragEntityId] = useState<string | null>(null);
+  const [entityPreviewOrder, setEntityPreviewOrder] = useState<string[] | null>(
+    null,
+  );
+  const entityPreviewOrderRef = useRef<string[] | null>(null);
+  const dragEntityIdsRef = useRef<string[]>([]);
+  const dragCancelledRef = useRef(false);
+  const dragDropCommittedRef = useRef(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [groupPages, setGroupPages] = useState<Record<string, LoadedGroupPage>>(
+    {},
+  );
+  const [dragGroupKey, setDragGroupKey] = useState<string | null>(null);
+  const initializedGroups = useRef<{ fieldId: string | null; keys: Set<string> }>({
+    fieldId: null,
+    keys: new Set(),
+  });
+  const reportedGroupsSignature = useRef("");
+  const groupLoadContextRef = useRef("");
+  const groupLoadFieldRef = useRef<string | null>(null);
   const [editCell, setEditCell] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childShown, setChildShown] = useState<Record<string, number>>({}); // per-parent sub-item window
@@ -182,18 +261,51 @@ export function TableView({
   const [fOptions, setFOptions] = useState("");
   const [fFormat, setFFormat] = useState("integer");
   const [fCurrency, setFCurrency] = useState("VND");
+  const [fUnit, setFUnit] = useState("kg");
   const [fTargetDb, setFTargetDb] = useState<string | null>(null);
   const [fTwoWay, setFTwoWay] = useState(false);
 
   // Databases list — only used to pick a relation field's target database.
   const dbQ = useQuery<Db[]>({
-    queryKey: ["databases"],
+    queryKey: workspaceQueryKeys.databases(getWorkspaceId()),
     queryFn: () => apiFetch<Db[]>("/databases"),
   });
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
+  const exportJobQ = useQuery<TransferJob>({
+    queryKey: ["selected-export-job", exportJobId],
+    queryFn: () => apiFetch<TransferJob>(`/jobs/${exportJobId}`),
+    enabled: Boolean(exportJobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 800 : false;
+    },
+  });
+  useEffect(() => {
+    const job = exportJobQ.data;
+    const assetId = job?.result?.asset_id;
+    if (
+      !job ||
+      job.status !== "succeeded" ||
+      typeof assetId !== "string" ||
+      exportDownloadedRef.current === job.id
+    )
+      return;
+    exportDownloadedRef.current = job.id;
+    void apiFetch<{ download_url: string }>(`/assets/${assetId}/download`).then(
+      ({ download_url }) => {
+        const anchor = document.createElement("a");
+        anchor.href = download_url;
+        anchor.download = "";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setBulkMessage("Selected rows exported");
+      },
+    );
+  }, [exportJobQ.data]);
   const pageSize = Math.min(Math.max(limit, 1), 200);
   const fieldsById = new Map((fieldsQ.data ?? []).map((field) => [field.id, field]));
   const requestedAggregations = Object.entries(calc).flatMap(
@@ -206,6 +318,11 @@ export function TableView({
     },
   );
   const calcSignature = JSON.stringify(requestedAggregations);
+  const serverFilterTree = useMemo(
+    () => serverFilterTreeFor(filterRoot),
+    [filterRoot],
+  );
+  const serverFilterSignature = JSON.stringify(serverFilterTree);
   const entitiesQueryKey = [
     "entities",
     databaseId,
@@ -213,6 +330,11 @@ export function TableView({
     pageSize,
     dataSourceId,
     calcSignature,
+    groupFieldId,
+    JSON.stringify(sorts),
+    serverFilterSignature,
+    filterToMatches ? search.trim() : "",
+    filterToMatches ? searchFieldId : null,
   ] as const;
   const entitiesQ = useInfiniteQuery<EntityPage>({
     queryKey: entitiesQueryKey,
@@ -224,9 +346,23 @@ export function TableView({
           page: pageParam,
           page_size: pageSize,
           filters: dataSourceId
-            ? [{ field_id: "data_source_id", operator: "eq", value: dataSourceId }]
+            ? [
+                {
+                  field_id: "data_source_id",
+                  operator: "eq",
+                  value: dataSourceId,
+                },
+              ]
             : [],
+          filter_tree: serverFilterTree,
+          sorts: sorts.map((sort) => ({
+            field_id: sort.fieldId,
+            direction: sort.dir,
+          })),
           aggregations: requestedAggregations,
+          group_by: groupFieldId,
+          search: filterToMatches ? search.trim() || null : null,
+          search_field_id: filterToMatches ? searchFieldId : null,
         }),
       }),
     getNextPageParam: (lastPage) =>
@@ -239,6 +375,13 @@ export function TableView({
       ),
     [entitiesQ.data?.pages],
   );
+  const groupLoadedItems = useMemo(
+    () =>
+      mergeUniqueById(
+        ...Object.values(groupPages).map((groupPage) => groupPage.items),
+      ),
+    [groupPages],
+  );
   const subOwnerField = (fieldsQ.data ?? []).find(
     (field) =>
       (field.options as { sub_item?: boolean; mirror?: boolean })?.sub_item &&
@@ -250,8 +393,9 @@ export function TableView({
       (field.options as { mirror?: boolean })?.mirror,
   );
   const loadedEntityIds = useMemo(
-    () => entityItems.map((entity) => entity.id),
-    [entityItems],
+    () =>
+      mergeUniqueById(entityItems, groupLoadedItems).map((entity) => entity.id),
+    [entityItems, groupLoadedItems],
   );
   const subItemTreeQ = useQuery<Entity[]>({
     queryKey: [
@@ -270,9 +414,65 @@ export function TableView({
         },
       ),
     enabled:
-      Boolean(subOwnerField && subParentField) && loadedEntityIds.length > 0,
+      !groupFieldId &&
+      Boolean(subOwnerField && subParentField) &&
+      loadedEntityIds.length > 0,
   });
-  const totalEntities = entitiesQ.data?.pages[0]?.total ?? 0;
+  const invalidEntityIdsList = useMemo(
+    () => (invalidEntityIds ? [...invalidEntityIds] : []),
+    [invalidEntityIds],
+  );
+  const invalidEntitiesQ = useInfiniteQuery<EntityPage>({
+    queryKey: [
+      "entities",
+      databaseId,
+      "invalid-field-review",
+      invalidEntityIdsList,
+    ],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      apiFetch<EntityPage>(
+        `/databases/${databaseId}/entities/by-ids`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            entity_ids: invalidEntityIdsList,
+            page: pageParam,
+            page_size: pageSize,
+          }),
+        },
+      ),
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined,
+    enabled: invalidEntityIdsList.length > 0,
+  });
+  const totalEntities = invalidEntityIds
+    ? (invalidEntitiesQ.data?.pages[0]?.total ?? invalidEntityIds.size)
+    : (entitiesQ.data?.pages[0]?.total ?? 0);
+  const invalidLoadedCount =
+    invalidEntitiesQ.data?.pages.reduce(
+      (count, page) => count + page.items.length,
+      0,
+    ) ?? 0;
+  const invalidPageCount = invalidEntitiesQ.data?.pages.length ?? 0;
+  const fetchNextInvalidPage = invalidEntitiesQ.fetchNextPage;
+  const hasNextInvalidPage = invalidEntitiesQ.hasNextPage;
+  const isFetchingNextInvalidPage = invalidEntitiesQ.isFetchingNextPage;
+  useEffect(() => {
+    if (
+      !invalidEntityIds ||
+      !hasNextInvalidPage ||
+      isFetchingNextInvalidPage
+    )
+      return;
+    void fetchNextInvalidPage();
+  }, [
+    fetchNextInvalidPage,
+    hasNextInvalidPage,
+    invalidEntityIds,
+    invalidPageCount,
+    isFetchingNextInvalidPage,
+  ]);
 
   function updateCachedEntities(
     transform: (entities: Entity[]) => Entity[],
@@ -314,7 +514,7 @@ export function TableView({
       const options =
         fType === "relation"
           ? { target_database_id: fTargetDb, two_way: fTwoWay }
-          : buildOptions(fType, fOptions, fFormat, fCurrency);
+          : buildOptions(fType, fOptions, fFormat, fCurrency, fUnit);
       return apiFetch<Field>(`/databases/${databaseId}/fields`, {
         method: "POST",
         body: JSON.stringify({ name: fName.trim(), type: fType, icon: fIcon, options }),
@@ -466,6 +666,60 @@ export function TableView({
     },
   });
 
+  const bulkUpdate = useMutation({
+    mutationFn: ({
+      ids,
+      fieldId,
+      value,
+    }: {
+      ids: string[];
+      fieldId: string;
+      value: unknown;
+    }) =>
+      apiFetch<Entity[]>(`/databases/${databaseId}/entities/bulk`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          entity_ids: ids,
+          field_id: fieldId,
+          value,
+        }),
+      }),
+    onSuccess: () => {
+      setBulkEditOpen(false);
+      setBulkMessage(`Updated ${selected.size} selected rows`);
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
+      qc.invalidateQueries({ queryKey: ["entities-search", databaseId] });
+    },
+    onError: (error) => {
+      setBulkMessage(
+        error instanceof Error ? error.message : "Could not update selected rows",
+      );
+    },
+  });
+
+  async function exportSelected() {
+    setBulkMessage("");
+    exportDownloadedRef.current = null;
+    try {
+      const result = await apiFetch<{ job: TransferJob }>(
+        `/databases/${databaseId}/exports`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            format: "xlsx",
+            entity_ids: [...selected],
+          }),
+        },
+      );
+      setExportJobId(result.job.id);
+      setBulkMessage(`Preparing ${selected.size} selected rows…`);
+    } catch (error) {
+      setBulkMessage(
+        error instanceof Error ? error.message : "Could not export selected rows",
+      );
+    }
+  }
+
   const updateWidth = useMutation({
     mutationFn: ({ field, width }: { field: Field; width: number }) =>
       apiFetch<Field>(`/fields/${field.id}`, {
@@ -551,29 +805,30 @@ export function TableView({
     id: string,
     checked: boolean,
     shift: boolean,
-    additive: boolean,
   ) {
-    // Checkbox selection is a row-level mode: it clears the active cell/range
-    // and replaces an existing row selection unless the user explicitly uses
-    // Shift or Cmd/Ctrl.
+    // Checkboxes are inherently additive and never require Cmd/Ctrl. Row
+    // selection still clears the mutually-exclusive cell/range selection.
     setRange(null);
     setEditCell(null);
     const rs = entityItems;
-    if (checked && shift && anchor !== null) {
+    if (shift && anchor !== null) {
       const [lo, hi] = anchor <= idx ? [anchor, idx] : [idx, anchor];
-      setSelected(new Set(rs.slice(lo, hi + 1).map((r) => r.id)));
+      setSelected((current) => {
+        const next = new Set(current);
+        for (const row of rs.slice(lo, hi + 1)) {
+          if (checked) next.add(row.id);
+          else next.delete(row.id);
+        }
+        return next;
+      });
       setCursor(idx);
-    } else if (additive) {
+    } else {
       setSelected((current) => {
         const next = new Set(current);
         if (checked) next.add(id);
         else next.delete(id);
         return next;
       });
-      if (anchor === null) setAnchor(idx);
-      setCursor(idx);
-    } else {
-      setSelected(checked ? new Set([id]) : new Set());
       setAnchor(idx);
       setCursor(idx);
     }
@@ -617,7 +872,12 @@ export function TableView({
         method: "POST",
         body: JSON.stringify({ ids }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["entities", databaseId] }),
+    onSettled: () => {
+      entityPreviewOrderRef.current = null;
+      setEntityPreviewOrder(null);
+      dragDropCommittedRef.current = false;
+      qc.invalidateQueries({ queryKey: ["entities", databaseId] });
+    },
   });
 
   function insertField(side: "left" | "right", targetId: string) {
@@ -637,28 +897,315 @@ export function TableView({
     return arr;
   }
 
-  const fields = fieldsQ.data ?? [];
+  const fields = useMemo(() => fieldsQ.data ?? [], [fieldsQ.data]);
+  const bulkEditableFields = useMemo(
+    () =>
+      fields.filter(
+        (field) =>
+          ![
+            "unique_id",
+            "rollup",
+            "formula",
+            "created_time",
+            "created_by",
+            "last_edited_time",
+            "last_edited_by",
+            "files",
+          ].includes(field.type),
+      ),
+    [fields],
+  );
+  const bulkField =
+    bulkEditableFields.find((field) => field.id === bulkFieldId) ?? null;
   const entities = useMemo(
-    () => mergeUniqueById(subItemTreeQ.data ?? [], entityItems),
-    [entityItems, subItemTreeQ.data],
+    () =>
+      groupFieldId
+        ? groupLoadedItems
+        : mergeUniqueById(
+            ...(invalidEntitiesQ.data?.pages.map((page) => page.items) ?? []),
+            subItemTreeQ.data ?? [],
+            entityItems,
+          ),
+    [
+      entityItems,
+      groupFieldId,
+      groupLoadedItems,
+      invalidEntitiesQ.data?.pages,
+      subItemTreeQ.data,
+    ],
   );
   const choiceType = ["select", "multi_select"].includes(fType);
+  const subOwner = subOwnerField;
+  const subParent = subParentField;
+  const treeMode = !!subOwner && !!subParent && !groupFieldId;
 
-  // View tools: filter → sort → search → optional group.
-  const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
+  // View tools: filter → sort → search. Group pages are fetched independently
+  // so each expanded group owns its own pagination window.
+  const byId = useMemo(
+    () => Object.fromEntries(fields.map((field) => [field.id, field])),
+    [fields],
+  );
+  const directlyMatchingIds = useMemo(
+    () =>
+      new Set(
+        entities
+          .filter((entity) => matchesFilter(entity, byId, filterRoot))
+          .map((entity) => entity.id),
+      ),
+    [byId, entities, filterRoot],
+  );
   let visible = applySorts(
-    applyFilterTree(entities, byId, filterRoot),
+    treeMode ? entities : applyFilterTree(entities, byId, filterRoot),
     byId,
     sorts,
   );
+  if (entityPreviewOrder) {
+    const previewRank = new Map(
+      entityPreviewOrder.map((entityId, index) => [entityId, index]),
+    );
+    visible = [...visible].sort(
+      (left, right) =>
+        (previewRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (previewRank.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }
   const searchActive = search.trim().length > 0;
   if (searchActive && filterToMatches && matchedIds)
     visible = visible.filter((r) => matchedIds.has(r.id));
-  let groups =
-    groupFieldId && byId[groupFieldId]
-      ? groupEntities(visible, byId[groupFieldId])
-      : null;
-  if (groups && hideEmpty) groups = groups.filter((g) => g.label !== "Empty");
+  if (invalidEntityIds) {
+    visible = visible.filter((entity) => invalidEntityIds.has(entity.id));
+  }
+  useEffect(() => {
+    if (!flashId || !entities.some((entity) => entity.id === flashId)) return;
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-row-id="${flashId}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [entities, flashId]);
+  const groupField = groupFieldId ? byId[groupFieldId] : undefined;
+  const rawGroupDescriptors = useMemo(
+    () =>
+      groupFieldId && groupField
+        ? (entitiesQ.data?.pages[0]?.groups ?? [])
+        : [],
+    [entitiesQ.data?.pages, groupField, groupFieldId],
+  );
+  const groupDescriptors = useMemo(() => {
+    const source = hideEmpty
+      ? rawGroupDescriptors.filter(
+          (group) => group.key !== null && group.key !== "",
+        )
+      : rawGroupDescriptors;
+    const rank = new Map(groupOrder.map((key, index) => [key, index]));
+    return [...source].sort((left, right) => {
+      const leftKey = groupIdentity(left.key);
+      const rightKey = groupIdentity(right.key);
+      const leftRank = rank.get(leftKey);
+      const rightRank = rank.get(rightKey);
+      if (leftRank === undefined && rightRank === undefined) return 0;
+      if (leftRank === undefined) return 1;
+      if (rightRank === undefined) return -1;
+      return leftRank - rightRank;
+    });
+  }, [groupOrder, hideEmpty, rawGroupDescriptors]);
+  const groupSummaries = useMemo(
+    () =>
+      groupDescriptors.map((group) => ({
+        key: groupIdentity(group.key),
+        label: groupField ? toText(groupField, group.key) || "Empty" : "Empty",
+        total: group.total,
+      })),
+    [groupDescriptors, groupField],
+  );
+  useEffect(() => {
+    const signature = JSON.stringify(groupSummaries);
+    if (reportedGroupsSignature.current === signature) return;
+    reportedGroupsSignature.current = signature;
+    reportGroups(groupSummaries);
+  }, [groupSummaries, reportGroups]);
+
+  useEffect(() => {
+    const keys = new Set(groupSummaries.map((group) => group.key));
+    if (initializedGroups.current.fieldId !== groupFieldId) {
+      initializedGroups.current = { fieldId: groupFieldId, keys };
+      setGroupPages({});
+      setCollapsed(keys);
+      return;
+    }
+    const unseen = [...keys].filter(
+      (key) => !initializedGroups.current.keys.has(key),
+    );
+    if (unseen.length) {
+      setCollapsed((current) => new Set([...current, ...unseen]));
+      initializedGroups.current = { fieldId: groupFieldId, keys };
+    }
+  }, [groupFieldId, groupSummaries]);
+
+  useEffect(() => {
+    if (!groupFieldId || collapseGroupsNonce === 0) return;
+    setCollapsed(
+      new Set(groupDescriptors.map((group) => groupIdentity(group.key))),
+    );
+  }, [collapseGroupsNonce, groupDescriptors, groupFieldId]);
+
+  const loadGroupPage = useCallback(
+    async (group: EntityGroup, page = 1) => {
+      if (!groupFieldId) return;
+      const key = groupIdentity(group.key);
+      setGroupPages((current) => ({
+        ...current,
+        [key]: {
+          items: page === 1 ? [] : (current[key]?.items ?? []),
+          page: page === 1 ? 0 : (current[key]?.page ?? 0),
+          pages: current[key]?.pages ?? 1,
+          loading: true,
+        },
+      }));
+      try {
+        const result = await apiFetch<EntityPage>(
+          `/databases/${databaseId}/entities/query`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              page,
+              page_size: pageSize,
+              filters: [
+                ...(dataSourceId
+                  ? [
+                      {
+                        field_id: "data_source_id",
+                        operator: "eq",
+                        value: dataSourceId,
+                      },
+                    ]
+                  : []),
+                {
+                  field_id: groupFieldId,
+                  operator:
+                    group.key === null || group.key === ""
+                      ? "is_empty"
+                      : "eq",
+                  value: group.key,
+                },
+              ],
+              filter_tree: serverFilterTree,
+              sorts: sorts.map((sort) => ({
+                field_id: sort.fieldId,
+                direction: sort.dir,
+              })),
+              aggregations: requestedAggregations,
+              search: filterToMatches ? search.trim() || null : null,
+              search_field_id: filterToMatches ? searchFieldId : null,
+            }),
+          },
+        );
+        setGroupPages((current) => ({
+          ...current,
+          [key]: {
+            items:
+              page === 1
+                ? result.items
+                : mergeUniqueById(current[key]?.items ?? [], result.items),
+            page: result.page,
+            pages: result.pages,
+            loading: false,
+          },
+        }));
+      } catch (error) {
+        setGroupPages((current) => ({
+          ...current,
+          [key]: {
+            items: current[key]?.items ?? [],
+            page: current[key]?.page ?? 0,
+            pages: current[key]?.pages ?? 1,
+            loading: false,
+            error: error instanceof Error ? error.message : "Could not load group",
+          },
+        }));
+      }
+    },
+    [
+      dataSourceId,
+      databaseId,
+      groupFieldId,
+      pageSize,
+      requestedAggregations,
+      filterToMatches,
+      search,
+      searchFieldId,
+      serverFilterTree,
+      sorts,
+    ],
+  );
+
+  useEffect(() => {
+    if (!groupFieldId || groupDescriptors.length === 0) return;
+    const context = JSON.stringify([
+      groupFieldId,
+      dataSourceId,
+      pageSize,
+      serverFilterSignature,
+      sorts,
+      filterToMatches ? search.trim() : "",
+      filterToMatches ? searchFieldId : null,
+    ]);
+    if (groupLoadFieldRef.current !== groupFieldId) {
+      groupLoadFieldRef.current = groupFieldId;
+      groupLoadContextRef.current = context;
+      return;
+    }
+    if (!groupLoadContextRef.current) {
+      groupLoadContextRef.current = context;
+      return;
+    }
+    if (groupLoadContextRef.current === context) return;
+    groupLoadContextRef.current = context;
+    setGroupPages({});
+    groupDescriptors.forEach((group) => {
+      if (!collapsed.has(groupIdentity(group.key))) {
+        void loadGroupPage(group, 1);
+      }
+    });
+  }, [
+    collapsed,
+    dataSourceId,
+    groupDescriptors,
+    groupFieldId,
+    loadGroupPage,
+    pageSize,
+    filterToMatches,
+    search,
+    searchFieldId,
+    serverFilterSignature,
+    sorts,
+  ]);
+
+  function toggleGroup(group: EntityGroup) {
+    const key = groupIdentity(group.key);
+    const willOpen = collapsed.has(key);
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    if (willOpen && !groupPages[key]?.items.length) {
+      void loadGroupPage(group, 1);
+    }
+  }
+
+  function previewGroupOrder(targetKey: string) {
+    if (!dragGroupKey || dragGroupKey === targetKey) return;
+    const current = [
+      ...groupOrder,
+      ...groupSummaries
+        .map((group) => group.key)
+        .filter((key) => !groupOrder.includes(key)),
+    ].filter((key) => key !== dragGroupKey);
+    current.splice(current.indexOf(targetKey), 0, dragGroupKey);
+    setGroupOrder(current);
+  }
   const displayFields = fields.filter((f) => !hidden.has(f.id));
   const requiredFields = displayFields.filter(
     (field) =>
@@ -674,13 +1221,115 @@ export function TableView({
   const nameFieldId = fields.find(
     (field) => (field.options as { system_key?: string }).system_key === "name",
   )?.id;
+  const entityIds = useMemo(
+    () => entities.map((entity) => entity.id),
+    [entities],
+  );
+  const selectedEntityIds = useMemo(
+    () => entityIds.filter((entityId) => selected.has(entityId)),
+    [entityIds, selected],
+  );
+
+  function entityDisplayName(entity: Entity): string {
+    const fieldValue = nameFieldId
+      ? (entity.data as Record<string, unknown>)[nameFieldId]
+      : null;
+    if (typeof fieldValue === "string" && fieldValue.trim()) {
+      return fieldValue.trim();
+    }
+    if (fieldValue !== null && fieldValue !== undefined && String(fieldValue).trim()) {
+      return String(fieldValue).trim();
+    }
+    return entity.name?.trim() || "Untitled";
+  }
+
+  function dragIdsFor(entityId: string) {
+    return selected.has(entityId) && selectedEntityIds.length > 1
+      ? selectedEntityIds
+      : [entityId];
+  }
+
+  function dragLabelFor(entity: Entity) {
+    const movingIds = dragIdsFor(entity.id);
+    const label = entityDisplayName(entity);
+    return movingIds.length > 1 ? `${label} +${movingIds.length - 1}` : label;
+  }
+
+  const cancelEntityDrag = useCallback(() => {
+    if (dragDropCommittedRef.current) return;
+    dragCancelledRef.current = true;
+    dragDropCommittedRef.current = false;
+    dragEntityIdsRef.current = [];
+    entityPreviewOrderRef.current = null;
+    setEntityPreviewOrder(null);
+  }, []);
+
+  function beginEntityDrag(entityId: string) {
+    const movingIds = dragIdsFor(entityId);
+    dragCancelledRef.current = false;
+    dragDropCommittedRef.current = false;
+    dragEntityIdsRef.current = movingIds;
+    entityPreviewOrderRef.current = entityIds;
+    setEntityPreviewOrder(entityIds);
+    if (!selected.has(entityId)) {
+      setRange(null);
+      setEditCell(null);
+      setSelected(new Set([entityId]));
+    }
+  }
+
+  function previewEntityDrop(
+    event: React.DragEvent<HTMLTableRowElement>,
+    targetId: string,
+  ) {
+    const movingIds = dragEntityIdsRef.current;
+    if (!movingIds.length || dragCancelledRef.current) return;
+    event.preventDefault();
+
+    const currentOrder = entityPreviewOrderRef.current ?? entityIds;
+    const remaining = currentOrder.filter((id) => !movingIds.includes(id));
+    const targetIndex = remaining.indexOf(targetId);
+    const afterTarget =
+      event.clientY > event.currentTarget.getBoundingClientRect().top +
+        event.currentTarget.getBoundingClientRect().height / 2;
+    const beforeId =
+      afterTarget && targetIndex >= 0
+        ? (remaining[targetIndex + 1] ?? "__end__")
+        : targetId;
+    const nextOrder = moveItemsBefore(currentOrder, movingIds, beforeId);
+    if (nextOrder.some((id, index) => id !== currentOrder[index])) {
+      entityPreviewOrderRef.current = nextOrder;
+      setEntityPreviewOrder(nextOrder);
+    }
+  }
+
+  function commitEntityDrop() {
+    if (dragCancelledRef.current || !dragEntityIdsRef.current.length) return;
+    const nextOrder = entityPreviewOrderRef.current ?? entityIds;
+    dragDropCommittedRef.current = true;
+    dragEntityIdsRef.current = [];
+    if (nextOrder.some((id, index) => id !== entityIds[index])) {
+      onManualReorder();
+      reorderEntities.mutate(nextOrder);
+    } else {
+      entityPreviewOrderRef.current = null;
+      setEntityPreviewOrder(null);
+      dragDropCommittedRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    const cancel = () => cancelEntityDrag();
+    window.addEventListener(DRAG_CANCEL_EVENT, cancel);
+    window.addEventListener(DRAG_END_EVENT, cancel);
+    return () => {
+      window.removeEventListener(DRAG_CANCEL_EVENT, cancel);
+      window.removeEventListener(DRAG_END_EVENT, cancel);
+    };
+  }, [cancelEntityDrag]);
   const calcFields = displayFields.filter((field) =>
     calculationForField(field.type, calc[field.id]),
   );
-  const subOwner = subOwnerField;
-  const subParent = subParentField;
-  // Hierarchy mode: when sub-items on and not grouping, show a parent→child tree.
-  const treeMode = !!subOwner && !!subParent && !groups;
   const entityById = useMemo(
     () => new Map(visible.map((entity) => [entity.id, entity])),
     [visible],
@@ -697,6 +1346,20 @@ export function TableView({
     },
     [entityById, subOwner],
   );
+  const hasMatchingTreeNode = useCallback(
+    (entity: Entity, visiting = new Set<string>()): boolean => {
+      if (directlyMatchingIds.has(entity.id)) return true;
+      if (visiting.has(entity.id)) return false;
+      const next = new Set(visiting).add(entity.id);
+      return childrenOf(entity).some((child) =>
+        hasMatchingTreeNode(child, next),
+      );
+    },
+    [childrenOf, directlyMatchingIds],
+  );
+  if (treeMode && filterRoot.rules.length > 0) {
+    visible = visible.filter((entity) => hasMatchingTreeNode(entity));
+  }
   // Existing parent rows should reveal their hierarchy on first encounter.
   // Remember them so an intentional user collapse remains respected.
   useEffect(() => {
@@ -961,22 +1624,49 @@ export function TableView({
     const kids = childrenOf(entity);
     const isOpen = expanded.has(entity.id);
     const isRowSelected = selected.has(entity.id);
+    const displayName = entityDisplayName(entity);
+    const dragLabel = dragLabelFor(entity);
+    const conditionalSurface =
+      conditionalColor.target === "groups"
+        ? null
+        : colorSurface(
+            conditionalColorForEntity(
+              entity,
+              fieldsQ.data ?? [],
+              conditionalColor,
+            ),
+          );
     return (
       <tr
         key={entity.id}
         data-entity-id={entity.id}
+        data-conditional-color={conditionalSurface ? "true" : undefined}
+        style={
+          conditionalSurface
+            ? ({
+                "--vhb-row-color": conditionalSurface.backgroundColor,
+              } as React.CSSProperties)
+            : undefined
+        }
+        data-drag-highlight
+        data-drag-preview-label={dragLabel}
         data-flash={flashId === entity.id || undefined}
         data-search-match={
           (searchActive && !filterToMatches && matchedIds?.has(entity.id)) ||
           undefined
         }
-        onDragOver={(event) => dragEntityId && event.preventDefault()}
-        onDrop={() => {
-          if (!dragEntityId) return;
-          reorderEntities.mutate(
-            moveBefore(entities.map((row) => row.id), dragEntityId, entity.id),
-          );
-          setDragEntityId(null);
+        data-filter-context={
+          treeMode &&
+          filterRoot.rules.length > 0 &&
+          !directlyMatchingIds.has(entity.id)
+            ? "ancestor"
+            : undefined
+        }
+        onDragEnter={(event) => previewEntityDrop(event, entity.id)}
+        onDragOver={(event) => previewEntityDrop(event, entity.id)}
+        onDrop={(event) => {
+          event.preventDefault();
+          commitEntityDrop();
         }}
         className={`group h-[30px] ${
           flashId === entity.id
@@ -995,10 +1685,19 @@ export function TableView({
           <button
             type="button"
             draggable
-            onDragStart={() => setDragEntityId(entity.id)}
-            onDragEnd={() => setDragEntityId(null)}
+            data-drag-preview-kind="row"
+            data-drag-preview-label={dragLabel}
+            onDragStart={() => beginEntityDrag(entity.id)}
+            onDragEnd={() => {
+              dragEntityIdsRef.current = [];
+              if (!dragDropCommittedRef.current) {
+                entityPreviewOrderRef.current = null;
+                setEntityPreviewOrder(null);
+              }
+              dragCancelledRef.current = false;
+            }}
             title="Drag to reorder row"
-            aria-label={`Reorder ${entity.name}`}
+            aria-label={`Reorder ${dragLabel}`}
             className="flex h-full w-full cursor-grab items-center justify-center text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing"
           >
             <GripVertical className="size-2.5" />
@@ -1018,7 +1717,6 @@ export function TableView({
                 entity.id,
                 event.currentTarget.checked,
                 event.shiftKey,
-                event.metaKey || event.ctrlKey,
               )
             }
             className="mx-auto block size-3.5 accent-[var(--color-primary)]"
@@ -1035,10 +1733,10 @@ export function TableView({
                 typeof frozenCellStyle?.boxShadow === "string"
                   ? frozenCellStyle.boxShadow
                   : "",
-                selectionEdges.top ? "inset 0 2px 0 var(--color-primary)" : "",
-                selectionEdges.right ? "inset -2px 0 0 var(--color-primary)" : "",
-                selectionEdges.bottom ? "inset 0 -2px 0 var(--color-primary)" : "",
-                selectionEdges.left ? "inset 2px 0 0 var(--color-primary)" : "",
+                selectionEdges.top ? "inset 0 1px 0 var(--color-primary)" : "",
+                selectionEdges.right ? "inset -1px 0 0 var(--color-primary)" : "",
+                selectionEdges.bottom ? "inset 0 -1px 0 var(--color-primary)" : "",
+                selectionEdges.left ? "inset 1px 0 0 var(--color-primary)" : "",
               ]
                 .filter(Boolean)
                 .join(", ")
@@ -1142,7 +1840,7 @@ export function TableView({
                         openEntity(entity);
                       }}
                       title="Open entity"
-                      aria-label={`Open ${entity.name}`}
+                      aria-label={`Open ${displayName}`}
                       className="absolute right-1 top-0.5 z-[3] flex size-5 items-center justify-center rounded bg-card/90 text-muted-foreground opacity-0 shadow-sm hover:bg-muted hover:text-primary group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <FaIcon name="window-maximize.1" className="size-2.5" />
@@ -1288,21 +1986,30 @@ export function TableView({
                 <Dropdown
                   value={fFormat}
                   allowClear={false}
-                  options={[
-                    { value: "integer", label: "Integer" },
-                    { value: "decimal", label: "Decimal" },
-                    { value: "percent", label: "Percent" },
-                    { value: "currency", label: "Currency" },
-                  ]}
+                  options={[...NUMBER_FORMATS]}
                   onChange={(v) => v && setFFormat(v)}
                 />
               )}
               {fType === "number" && fFormat === "currency" && (
-                <input
+                <Dropdown
                   value={fCurrency}
-                  onChange={(e) => setFCurrency(e.target.value)}
-                  placeholder="VND"
-                  className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  allowClear={false}
+                  options={CURRENCY_CODES.map((currency) => ({
+                    value: currency,
+                    label: currency,
+                  }))}
+                  onChange={(value) => value && setFCurrency(value)}
+                />
+              )}
+              {fType === "number" && fFormat === "unit" && (
+                <Dropdown
+                  value={fUnit}
+                  allowClear={false}
+                  options={MEASUREMENT_UNITS.map((unit) => ({
+                    value: unit.value,
+                    label: `${unit.label} · ${unit.category}`,
+                  }))}
+                  onChange={(value) => value && setFUnit(value)}
                 />
               )}
               {fType === "relation" && (
@@ -1356,28 +2063,178 @@ export function TableView({
 
       {/* Floating selection toolbar (does not push layout) */}
       {selected.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-xl border bg-card px-4 py-2.5 text-sm shadow-lg">
-          <span className="font-medium">{selected.size} selected</span>
+        <div className="fixed bottom-6 left-1/2 z-30 flex h-10 -translate-x-1/2 items-center gap-1 rounded-xl border bg-card px-2 text-xs shadow-lg">
+          <span className="px-2 font-semibold">{selected.size} selected</span>
+          <button
+            type="button"
+            onClick={() => {
+              setBulkFieldId((current) => current ?? bulkEditableFields[0]?.id ?? null);
+              setBulkValue(null);
+              setBulkMessage("");
+              setBulkEditOpen(true);
+            }}
+            disabled={!bulkEditableFields.length}
+            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+          >
+            <Pencil className="size-3.5" /> Bulk change
+          </button>
+          <button
+            type="button"
+            onClick={() => void exportSelected()}
+            disabled={
+              exportJobQ.data?.status === "queued" ||
+              exportJobQ.data?.status === "running"
+            }
+            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            {exportJobQ.data?.status === "queued" ||
+            exportJobQ.data?.status === "running" ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <Download className="size-3.5" />
+            )}
+            Export
+          </button>
           <button
             onClick={() => duplicateEntities.mutate([...selected])}
-            className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <Copy className="size-4" /> Duplicate
+            <Copy className="size-3.5" /> Duplicate
           </button>
           <button
             onClick={() => bulkDelete.mutate([...selected])}
-            className="flex items-center gap-1 text-destructive hover:opacity-80"
+            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-destructive hover:bg-destructive/10"
           >
-            <Trash2 className="size-4" /> Delete
+            <Trash2 className="size-3.5" /> Delete
           </button>
           <button
             onClick={() => setSelected(new Set())}
-            className="ml-auto text-muted-foreground hover:text-foreground"
+            className="ml-1 h-7 rounded-md px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             Deselect
           </button>
         </div>
       )}
+      {bulkMessage && (
+        <button
+          type="button"
+          onClick={() => setBulkMessage("")}
+          className="fixed bottom-20 left-1/2 z-[165] -translate-x-1/2 rounded-lg border bg-popover px-3 py-2 text-xs font-medium shadow-lg"
+        >
+          {bulkMessage}
+        </button>
+      )}
+      {bulkEditOpen &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[150] bg-black/25"
+              onClick={() => setBulkEditOpen(false)}
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Bulk change selected rows"
+              className="fixed left-1/2 top-1/2 z-[160] w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-card p-4 shadow-2xl"
+            >
+              <div className="mb-3">
+                <h2 className="text-sm font-semibold">Bulk change cells</h2>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Apply one value to {selected.size} selected rows.
+                </p>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                    Field
+                  </p>
+                  <Dropdown
+                    compact
+                    searchable
+                    searchPlaceholder="Search fields…"
+                    value={bulkFieldId}
+                    placeholder="Choose a field"
+                    options={bulkEditableFields.map((field) => ({
+                      value: field.id,
+                      searchText: field.name,
+                      label: (
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <FaIcon
+                            name={iconForField(field)}
+                            className="size-3 text-muted-foreground"
+                          />
+                          <span className="truncate">{field.name}</span>
+                        </span>
+                      ),
+                    }))}
+                    onChange={(fieldId) => {
+                      setBulkFieldId(fieldId);
+                      setBulkValue(null);
+                    }}
+                  />
+                </div>
+                <div>
+                  <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                    New value
+                  </p>
+                  <div className="min-h-8 rounded-md border bg-background px-1 text-xs">
+                    {bulkField ? (
+                      <CellEditor
+                        key={bulkField.id}
+                        field={bulkField}
+                        value={bulkValue}
+                        databaseId={databaseId}
+                        entityId={[...selected][0]}
+                        autoEdit
+                        onCommit={setBulkValue}
+                      />
+                    ) : (
+                      <div className="flex h-8 items-center px-2 text-muted-foreground">
+                        Choose a field first
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-2 border-t pt-3">
+                <button
+                  type="button"
+                  onClick={() => setBulkEditOpen(false)}
+                  className="h-7 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkValue(null)}
+                  disabled={!bulkField}
+                  className="h-7 rounded-md border px-2.5 text-xs hover:bg-muted disabled:opacity-40"
+                >
+                  Clear value
+                </button>
+                <button
+                  type="button"
+                  disabled={!bulkField || bulkUpdate.isPending}
+                  onClick={() =>
+                    bulkField &&
+                    bulkUpdate.mutate({
+                      ids: [...selected],
+                      fieldId: bulkField.id,
+                      value: bulkValue,
+                    })
+                  }
+                  className="flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {bulkUpdate.isPending && (
+                    <LoaderCircle className="size-3 animate-spin" />
+                  )}
+                  Apply
+                </button>
+              </div>
+            </div>
+          </>,
+          document.body,
+        )}
 
       {/* Table */}
       <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-xl border bg-card [scrollbar-gutter:stable] [&_.vhb-cell-checkbox]:!size-3.5 [&_.vhb-cell-display]:!min-h-7 [&_.vhb-cell-display]:!px-1.5 [&_.vhb-cell-display]:!py-0 [&_.vhb-cell-display]:!text-[11px] [&_.vhb-cell-input]:!min-h-7 [&_.vhb-cell-input]:!px-1.5 [&_.vhb-cell-input]:!py-0 [&_.vhb-cell-input]:!text-[11px]">
@@ -1448,6 +2305,8 @@ export function TableView({
                 >
                   <button
                     draggable
+                    data-drag-preview-kind="column"
+                    data-drag-preview-label={f.name}
                     onDragStart={() => setDragColId(f.id)}
                     onClick={(e) => {
                       const r = e.currentTarget.getBoundingClientRect();
@@ -1505,47 +2364,144 @@ export function TableView({
           <tbody>
             {treeMode && renderTree(topLevel, 0, { i: -1 }, new Set())}
             {!treeMode &&
-              !groups &&
+              !groupFieldId &&
               visible.map((entity, idx) => renderEntity(entity, idx))}
             {!treeMode &&
-              groups &&
               groupFieldId &&
               (() => {
                 let i = -1;
-                return groups.map((g) => {
-                  const isCollapsed = collapsed.has(g.key);
+                const previewRank = new Map(
+                  (entityPreviewOrder ?? []).map((id, index) => [id, index]),
+                );
+                return groupDescriptors.map((group) => {
+                  const key = groupIdentity(group.key);
+                  const isCollapsed = collapsed.has(key);
+                  const state = groupPages[key];
+                  const groupSurface =
+                    conditionalColor.target === "rows"
+                      ? null
+                      : colorSurface(
+                          conditionalColorForGroup(
+                            byId[groupFieldId],
+                            group.key,
+                            conditionalColor,
+                          ),
+                        );
+                  let items = applyFilterTree(
+                    state?.items ?? [],
+                    byId,
+                    filterRoot,
+                  );
+                  if (searchActive && filterToMatches && matchedIds) {
+                    items = items.filter((entity) => matchedIds.has(entity.id));
+                  }
+                  if (entityPreviewOrder) {
+                    items = [...items].sort(
+                      (left, right) =>
+                        (previewRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+                        (previewRank.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+                    );
+                  }
                   return (
-                    <Fragment key={g.key}>
-                      <tr className="border-y bg-muted/40">
-                          <td colSpan={displayFields.length + 3} className="p-0">
-                          <button
-                            onClick={() =>
-                              setCollapsed((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(g.key)) next.delete(g.key);
-                                else next.add(g.key);
-                                return next;
-                              })
+                    <Fragment key={key}>
+                      <tr
+                        draggable
+                        data-drag-highlight
+                        onDragStart={() => setDragGroupKey(key)}
+                        onDragOver={(event) => {
+                          if (!dragGroupKey) return;
+                          event.preventDefault();
+                          previewGroupOrder(key);
+                        }}
+                        onDragEnd={() => setDragGroupKey(null)}
+                        className="sticky top-8 z-30 h-8 bg-muted"
+                      >
+                        <td
+                          colSpan={displayFields.length + 3}
+                          className="sticky left-0 z-30 border-y border-border bg-muted p-0"
+                        >
+                          <div
+                            className="flex h-8 min-w-[calc(100vw-var(--app-rail-width)-var(--context-sidebar-width)-36px)] items-center gap-1 bg-muted px-2"
+                            style={
+                              groupSurface
+                                ? {
+                                    backgroundColor:
+                                      groupSurface.backgroundColor,
+                                    borderColor: groupSurface.borderColor,
+                                  }
+                                : undefined
                             }
-                            className="sticky left-0 flex items-center gap-2 px-3 py-2 text-sm font-semibold"
+                          >
+                            <GripVertical className="size-3 cursor-grab text-muted-foreground" />
+                            <button
+                              type="button"
+                              onClick={() => toggleGroup(group)}
+                              className="flex h-7 items-center gap-2 text-[11px] font-semibold"
                           >
                             {isCollapsed ? (
-                              <ChevronRight className="size-4 text-muted-foreground" />
+                                <ChevronRight className="size-3 text-muted-foreground" />
                             ) : (
-                              <ChevronDown className="size-4 text-muted-foreground" />
+                                <ChevronDown className="size-3 text-muted-foreground" />
                             )}
-                            <ValueChip field={byId[groupFieldId]} value={g.value} />
-                            <span className="text-xs font-normal text-muted-foreground">
-                              {g.entities.length}
+                              <ValueChip
+                                field={byId[groupFieldId]}
+                                value={group.key}
+                              />
+                              <span className="text-[10px] font-normal tabular-nums text-muted-foreground">
+                                {group.total}
                             </span>
                           </button>
+                          </div>
                         </td>
                       </tr>
                       {!isCollapsed &&
-                        g.entities.map((entity) => {
+                        items.map((entity) => {
                           i += 1;
                           return renderEntity(entity, i);
                         })}
+                      {!isCollapsed && state?.loading && (
+                        <tr>
+                          <td
+                            colSpan={displayFields.length + 3}
+                            className="h-8 px-3 text-[10px] text-muted-foreground"
+                          >
+                            Loading group…
+                          </td>
+                        </tr>
+                      )}
+                      {!isCollapsed && state?.error && (
+                        <tr>
+                          <td
+                            colSpan={displayFields.length + 3}
+                            className="h-8 px-3 text-[10px] text-destructive"
+                          >
+                            {state.error}
+                          </td>
+                        </tr>
+                      )}
+                      {!isCollapsed &&
+                        state &&
+                        !state.loading &&
+                        state.page < state.pages && (
+                          <tr>
+                            <td
+                              colSpan={displayFields.length + 3}
+                              className="h-8 px-3"
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void loadGroupPage(group, state.page + 1)
+                                }
+                                className="h-5 rounded border px-2 text-[10px] font-medium text-primary hover:bg-primary/10"
+                              >
+                                Load more (
+                                {Math.max(group.total - state.items.length, 0)}{" "}
+                                left)
+                              </button>
+                            </td>
+                          </tr>
+                        )}
                     </Fragment>
                   );
                 });
@@ -1562,19 +2518,46 @@ export function TableView({
 
       {/* One compact footer keeps pagination, creation and calculations together. */}
       <div className="flex h-[26px] shrink-0 items-center gap-1.5 bg-background px-2 text-[10px]">
-        {entitiesQ.hasNextPage && (
+        {!groupFieldId &&
+          (invalidEntityIds
+            ? invalidEntitiesQ.hasNextPage
+            : entitiesQ.hasNextPage) && (
           <button
             type="button"
-            onClick={() => entitiesQ.fetchNextPage()}
-            disabled={entitiesQ.isFetchingNextPage}
+            onClick={() =>
+              invalidEntityIds
+                ? invalidEntitiesQ.fetchNextPage()
+                : entitiesQ.fetchNextPage()
+            }
+            disabled={
+              invalidEntityIds
+                ? invalidEntitiesQ.isFetchingNextPage
+                : entitiesQ.isFetchingNextPage
+            }
             className="flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
           >
             <ChevronDown
-              className={`size-2.5 ${entitiesQ.isFetchingNextPage ? "animate-bounce" : ""}`}
+              className={`size-2.5 ${
+                (
+                  invalidEntityIds
+                    ? invalidEntitiesQ.isFetchingNextPage
+                    : entitiesQ.isFetchingNextPage
+                )
+                  ? "animate-bounce"
+                  : ""
+              }`}
             />
-            {entitiesQ.isFetchingNextPage
+            {(invalidEntityIds
+              ? invalidEntitiesQ.isFetchingNextPage
+              : entitiesQ.isFetchingNextPage)
               ? "Loading…"
-              : `Load more (${Math.max(totalEntities - entityItems.length, 0)} left)`}
+              : `Load more (${Math.max(
+                  totalEntities -
+                    (invalidEntityIds
+                      ? invalidLoadedCount
+                      : entityItems.length),
+                  0,
+                )} left)`}
           </button>
         )}
         <button
@@ -1604,7 +2587,8 @@ export function TableView({
             );
           })}
           <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-            Showing {entityItems.length} of {totalEntities} records
+            Showing {groupFieldId ? groupLoadedItems.length : entityItems.length} of{" "}
+            {totalEntities} records
           </span>
         </div>
       </div>

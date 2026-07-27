@@ -126,6 +126,18 @@ async def test_data_source_rename_and_order(client: httpx.AsyncClient) -> None:
     sources = await client.get(f"/databases/{db_id}/data-sources", headers=headers)
     assert [s["name"] for s in sources.json()] == ["Primary", "Batch A (renamed)"]
 
+    reordered = await client.post(
+        f"/databases/{db_id}/data-sources/reorder",
+        json={"ids": [source_id, sources.json()[0]["id"]]},
+        headers=headers,
+    )
+    assert reordered.status_code == 204, reordered.text
+    sources = await client.get(f"/databases/{db_id}/data-sources", headers=headers)
+    assert [source["id"] for source in sources.json()] == [
+        source_id,
+        sources.json()[1]["id"],
+    ]
+
 
 @pytest.mark.asyncio
 async def test_delete_primary_data_source_rejected(client: httpx.AsyncClient) -> None:
@@ -133,6 +145,88 @@ async def test_delete_primary_data_source_rejected(client: httpx.AsyncClient) ->
     primary = (await client.get(f"/databases/{db_id}/data-sources", headers=headers)).json()[0]
     r = await client.delete(f"/data-sources/{primary['id']}", headers=headers)
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_merge_data_sources_moves_all_entities_and_removes_sources(
+    client: httpx.AsyncClient,
+) -> None:
+    headers, db_id = await _setup(client)
+    primary = (await client.get(f"/databases/{db_id}/data-sources", headers=headers)).json()[0]
+    source_a = (
+        await client.post(
+            f"/databases/{db_id}/data-sources",
+            json={"name": "Batch A"},
+            headers=headers,
+        )
+    ).json()
+    source_b = (
+        await client.post(
+            f"/databases/{db_id}/data-sources",
+            json={"name": "Batch B"},
+            headers=headers,
+        )
+    ).json()
+    for index, source in enumerate((source_a, source_b), start=1):
+        created = await client.post(
+            f"/databases/{db_id}/entities",
+            json={
+                "name": f"Merged entity {index}",
+                "data": {},
+                "data_source_id": source["id"],
+            },
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+    layout = await client.post(
+        f"/databases/{db_id}/layouts",
+        json={
+            "name": "Batch A board",
+            "type": "board",
+            "config": {"dataSourceId": source_a["id"]},
+        },
+        headers=headers,
+    )
+    assert layout.status_code == 201, layout.text
+
+    merged = await client.post(
+        f"/databases/{db_id}/data-sources/merge",
+        json={
+            "source_ids": [source_a["id"], source_b["id"]],
+            "destination_id": primary["id"],
+        },
+        headers=headers,
+    )
+    assert merged.status_code == 200, merged.text
+    assert merged.json()["id"] == primary["id"]
+    assert merged.json()["entity_count"] == 2
+
+    remaining = await client.get(f"/databases/{db_id}/data-sources", headers=headers)
+    assert [source["id"] for source in remaining.json()] == [primary["id"]]
+    entities = await client.get(f"/databases/{db_id}/entities", headers=headers)
+    assert {entity["data_source_id"] for entity in entities.json()} == {primary["id"]}
+    layouts = await client.get(f"/databases/{db_id}/layouts", headers=headers)
+    merged_layout = next(item for item in layouts.json() if item["id"] == layout.json()["id"])
+    assert merged_layout["config"]["dataSourceId"] == primary["id"]
+
+
+@pytest.mark.asyncio
+async def test_merge_rejects_primary_as_source(client: httpx.AsyncClient) -> None:
+    headers, db_id = await _setup(client)
+    primary = (await client.get(f"/databases/{db_id}/data-sources", headers=headers)).json()[0]
+    target = (
+        await client.post(
+            f"/databases/{db_id}/data-sources",
+            json={"name": "Target"},
+            headers=headers,
+        )
+    ).json()
+    merged = await client.post(
+        f"/databases/{db_id}/data-sources/merge",
+        json={"source_ids": [primary["id"]], "destination_id": target["id"]},
+        headers=headers,
+    )
+    assert merged.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -152,9 +246,16 @@ async def test_delete_data_source_blocked_while_nonempty(client: httpx.AsyncClie
     blocked = await client.delete(f"/data-sources/{source_id}", headers=headers)
     assert blocked.status_code == 409
 
-    await client.delete(f"/entities/{entity.json()['id']}", headers=headers)
-    freed = await client.delete(f"/data-sources/{source_id}", headers=headers)
+    primary = (await client.get(f"/databases/{db_id}/data-sources", headers=headers)).json()[0]
+    freed = await client.delete(
+        f"/data-sources/{source_id}",
+        params={"transfer_to_id": primary["id"]},
+        headers=headers,
+    )
     assert freed.status_code == 204
+    moved = await client.get(f"/databases/{db_id}/entities", headers=headers)
+    assert moved.json()[0]["id"] == entity.json()["id"]
+    assert moved.json()[0]["data_source_id"] == primary["id"]
 
 
 @pytest.mark.asyncio
@@ -197,13 +298,21 @@ async def test_import_creates_data_source_and_stamps_entities(client: httpx.Asyn
     app.dependency_overrides[get_object_storage] = lambda: storage
     headers, db_id = await _setup(client, "importer@example.com")
 
-    await client.post(
+    amount = await client.post(
         f"/databases/{db_id}/fields",
         json={"name": "Amount", "type": "number", "options": {}},
         headers=headers,
     )
+    created_time = await client.post(
+        f"/databases/{db_id}/fields",
+        json={"name": "Original created", "type": "created_time", "options": {}},
+        headers=headers,
+    )
 
-    csv_bytes = b"Name,Amount\r\nAcme,120\r\n"
+    csv_bytes = (
+        b"Name,Amount,Stage,Created at,Ignore me\r\n"
+        b"Acme,\"170,000,000 VND\",Qualified,2021-04-03T08:30:00Z,nope\r\n"
+    )
     upload = await client.post(
         "/assets/uploads",
         json={
@@ -219,13 +328,28 @@ async def test_import_creates_data_source_and_stamps_entities(client: httpx.Asyn
     storage.sizes[upload_key] = len(csv_bytes)
     completed = await client.post(f"/assets/{asset_id}/complete", headers=headers)
     assert completed.status_code == 200, completed.text
+    preview = await client.post(
+        f"/databases/{db_id}/imports/preview",
+        json={"asset_id": asset_id, "format": "csv", "name_column": "Name"},
+        headers=headers,
+    )
+    assert preview.status_code == 200, preview.text
+    stage_preview = next(
+        column for column in preview.json()["columns"] if column["header"] == "Stage"
+    )
+    assert stage_preview["generated_options"] == ["Qualified"]
 
     imported = await client.post(
         f"/databases/{db_id}/imports",
         json={
             "asset_id": asset_id,
             "format": "csv",
-            "mapping": {},
+            "mapping": {
+                "Amount": amount.json()["id"],
+                "Created at": created_time.json()["id"],
+            },
+            "field_types": {"Stage": "select"},
+            "skipped_columns": ["Ignore me"],
             "name_column": "Name",
             "create_missing_fields": True,
             "data_source_name": "Orders CSV",
@@ -257,3 +381,13 @@ async def test_import_creates_data_source_and_stamps_entities(client: httpx.Asyn
     assert len(entities.json()) == 1
     assert entities.json()[0]["data_source_id"] == data_source_id
     assert entities.json()[0]["name"] == "Acme"
+    fields = (await client.get(f"/databases/{db_id}/fields", headers=headers)).json()
+    assert all(field["name"] != "Ignore me" for field in fields)
+    stage = next(field for field in fields if field["name"] == "Stage")
+    stage_choice = stage["options"]["choices"][0]
+    entity = entities.json()[0]
+    assert entity["data"][amount.json()["id"]] == 170000000
+    assert entity["data"][stage["id"]] == stage_choice["id"]
+    assert entity["data"][created_time.json()["id"]].startswith(
+        "2021-04-03T08:30:00"
+    )

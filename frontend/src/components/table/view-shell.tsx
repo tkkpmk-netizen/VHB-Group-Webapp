@@ -1,27 +1,25 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpDown,
+  FaIcon,
   Group as GroupIcon,
   ListFilter,
+  LoaderCircle,
   RotateCcw,
   Save,
   SlidersHorizontal,
+  X,
 } from "@/components/ui/fa-icon";
 import { apiFetch } from "@/lib/api/client";
-import { BoardView } from "@/components/table/board-view";
-import { CalendarView } from "@/components/table/calendar-view";
-import { GalleryView } from "@/components/table/gallery-view";
-import { GanttView } from "@/components/table/gantt-view";
-import { ListView } from "@/components/table/list-view";
 import type { GanttScale } from "@/components/table/gantt-scale";
 import { Dropdown } from "@/components/ui/dropdown";
 import { SettingsSidebar } from "@/components/table/settings-sidebar";
-import { TableView } from "@/components/table/table-view";
 import { EntityDetailDialog } from "@/components/table/entity-detail-dialog";
 import {
   FilterGroupEditor,
@@ -35,6 +33,10 @@ import {
   type SortRule,
 } from "@/lib/view";
 import type { components } from "@/lib/api/schema";
+import {
+  DEFAULT_CONDITIONAL_COLOR,
+  type ConditionalColorConfig,
+} from "@/lib/conditional-colors";
 
 type Field = components["schemas"]["FieldOut"];
 type Layout = components["schemas"]["LayoutOut"];
@@ -42,17 +44,62 @@ export type ViewPresetT = components["schemas"]["ViewPresetOut"];
 type DataSourceT = components["schemas"]["DataSourceOut"];
 type Entity = components["schemas"]["EntityOut"];
 
+function ViewLoading() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
+      <LoaderCircle className="size-3 animate-spin" />
+      Loading view…
+    </div>
+  );
+}
+
+// Only download the active renderer. Once loaded, the browser keeps the
+// module in its own memory cache while users switch between layouts.
+const TableView = dynamic(
+  () => import("@/components/table/table-view").then((module) => module.TableView),
+  { loading: ViewLoading },
+);
+const BoardView = dynamic(
+  () => import("@/components/table/board-view").then((module) => module.BoardView),
+  { loading: ViewLoading },
+);
+const CalendarView = dynamic(
+  () =>
+    import("@/components/table/calendar-view").then(
+      (module) => module.CalendarView,
+    ),
+  { loading: ViewLoading },
+);
+const GalleryView = dynamic(
+  () =>
+    import("@/components/table/gallery-view").then(
+      (module) => module.GalleryView,
+    ),
+  { loading: ViewLoading },
+);
+const GanttView = dynamic(
+  () => import("@/components/table/gantt-view").then((module) => module.GanttView),
+  { loading: ViewLoading },
+);
+const ListView = dynamic(
+  () => import("@/components/table/list-view").then((module) => module.ListView),
+  { loading: ViewLoading },
+);
+
 /** Persisted per-layout config (everything except ephemeral UI like collapse). */
 export type LayoutConfig = {
   filter?: FilterGroup;
   sorts?: SortRule[];
   group?: string | null;
+  groupOrder?: string[];
   hideEmpty?: boolean;
   frozenUpTo?: number;
   calc?: Record<string, string>;
   hidden?: string[];
   boardField?: string | null;
   boardSubgroup?: string | null;
+  boardGroupSort?: "default" | "count_desc" | "count_asc" | "name_asc";
+  conditionalColor?: ConditionalColorConfig;
   ganttField?: string | null;
   ganttScale?: GanttScale | null;
   ganttLeftFields?: string[];
@@ -72,15 +119,23 @@ export type SharedViewProps = {
   setSorts: (s: SortRule[]) => void;
   groupFieldId: string | null;
   setGroupFieldId: (id: string | null) => void;
+  groupOrder: string[];
+  setGroupOrder: Dispatch<SetStateAction<string[]>>;
+  reportGroups: (groups: { key: string; label: string; total: number }[]) => void;
+  collapseGroupsNonce: number;
+  invalidEntityIds: Set<string> | null;
+  onManualReorder: () => void;
   hideEmpty: boolean;
   frozenUpTo: number;
   setFrozenUpTo: Dispatch<SetStateAction<number>>;
   calc: Record<string, string>;
   setCalc: Dispatch<SetStateAction<Record<string, string>>>;
   hidden: Set<string>;
+  conditionalColor: ConditionalColorConfig;
   limit: number;
   dataSourceId: string | null;
   search: string;
+  searchFieldId: string | null;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
   flashId: string | null;
@@ -108,6 +163,7 @@ export function ViewShell({
   activeId,
   setActiveId,
   search,
+  searchFieldId,
   filterToMatches,
   matchedIds,
   flashId,
@@ -118,6 +174,7 @@ export function ViewShell({
   activeId: string;
   setActiveId: (id: string) => void;
   search: string;
+  searchFieldId: string | null;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
   flashId: string | null;
@@ -129,6 +186,16 @@ export function ViewShell({
   const [filterRoot, setFilterRoot] = useState<FilterGroup>(cfg.filter ?? emptyGroup());
   const [sorts, setSorts] = useState<SortRule[]>(cfg.sorts ?? []);
   const [groupFieldId, setGroupFieldId] = useState<string | null>(cfg.group ?? null);
+  const [groupOrder, setGroupOrder] = useState<string[]>(cfg.groupOrder ?? []);
+  const [groupSummaries, setGroupSummaries] = useState<
+    { key: string; label: string; total: number }[]
+  >([]);
+  const [collapseGroupsNonce, setCollapseGroupsNonce] = useState(0);
+  const [invalidReview, setInvalidReview] = useState<{
+    fieldId: string;
+    entityIds: string[];
+  } | null>(null);
+  const [manualOrderCustomized, setManualOrderCustomized] = useState(false);
   const [hideEmpty, setHideEmpty] = useState(cfg.hideEmpty ?? false);
   const [frozenUpTo, setFrozenUpTo] = useState(cfg.frozenUpTo ?? -1);
   const [calc, setCalc] = useState<Record<string, string>>(cfg.calc ?? {});
@@ -137,6 +204,13 @@ export function ViewShell({
   const [boardSubgroup, setBoardSubgroup] = useState<string | null>(
     cfg.boardSubgroup ?? null,
   );
+  const [boardGroupSort, setBoardGroupSort] = useState<
+    "default" | "count_desc" | "count_asc" | "name_asc"
+  >(cfg.boardGroupSort ?? "default");
+  const [conditionalColor, setConditionalColor] =
+    useState<ConditionalColorConfig>(
+      cfg.conditionalColor ?? DEFAULT_CONDITIONAL_COLOR,
+    );
   const [ganttField, setGanttField] = useState<string | null>(cfg.ganttField ?? null);
   const [ganttScale, setGanttScale] = useState<GanttScale | null>(cfg.ganttScale ?? null);
   const [ganttLeftFields, setGanttLeftFields] = useState<string[]>(
@@ -178,6 +252,23 @@ export function ViewShell({
   });
   const dataSources = dataSourcesQ.data ?? [];
 
+  useEffect(() => {
+    const review = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        fieldId?: string;
+        entityIds?: string[];
+      }>).detail;
+      if (!detail?.fieldId || !Array.isArray(detail.entityIds)) return;
+      setInvalidReview({
+        fieldId: detail.fieldId,
+        entityIds: detail.entityIds,
+      });
+    };
+    window.addEventListener("vhb:review-invalid-field", review);
+    return () =>
+      window.removeEventListener("vhb:review-invalid-field", review);
+  }, []);
+
   // Persist config (debounced). No layouts-query invalidation → no save→refetch loop.
   const saveView = useMutation({
     mutationFn: (config: LayoutConfig) =>
@@ -196,12 +287,15 @@ export function ViewShell({
       filter: filterRoot,
       sorts,
       group: groupFieldId,
+      groupOrder,
       hideEmpty,
       frozenUpTo,
       calc,
       hidden: [...hidden],
       boardField,
       boardSubgroup,
+      boardGroupSort,
+      conditionalColor,
       ganttField,
       ganttScale,
       ganttLeftFields,
@@ -219,12 +313,15 @@ export function ViewShell({
     filterRoot,
     sorts,
     groupFieldId,
+    groupOrder,
     hideEmpty,
     frozenUpTo,
     calc,
     hidden,
     boardField,
     boardSubgroup,
+    boardGroupSort,
+    conditionalColor,
     ganttField,
     ganttScale,
     ganttLeftFields,
@@ -262,18 +359,37 @@ export function ViewShell({
     filterRoot,
     setFilterRoot,
     sorts,
-    setSorts,
+    setSorts: (next) => {
+      setManualOrderCustomized(false);
+      setSorts(next);
+    },
     groupFieldId,
-    setGroupFieldId,
+    setGroupFieldId: (id) => {
+      setGroupFieldId(id);
+      setGroupOrder([]);
+    },
+    groupOrder,
+    setGroupOrder,
+    reportGroups: setGroupSummaries,
+    collapseGroupsNonce,
+    invalidEntityIds: invalidReview
+      ? new Set(invalidReview.entityIds)
+      : null,
+    onManualReorder: () => {
+      setManualOrderCustomized(true);
+      setSorts([]);
+    },
     hideEmpty,
     frozenUpTo,
     setFrozenUpTo,
     calc,
     setCalc,
     hidden,
+    conditionalColor,
     limit,
     dataSourceId,
     search,
+    searchFieldId,
     filterToMatches,
     matchedIds,
     flashId,
@@ -300,7 +416,9 @@ export function ViewShell({
         hide_empty: baseline.hide_empty,
       }
     : { filter: emptyGroup(), sorts: [], group_field_id: null, hide_empty: false };
-  const dirty = JSON.stringify(curCfg) !== JSON.stringify(baseCfg);
+  const dirty =
+    manualOrderCustomized ||
+    JSON.stringify(curCfg) !== JSON.stringify(baseCfg);
 
   const applyPresetMut = useMutation({
     mutationFn: (id: string | null) =>
@@ -314,6 +432,7 @@ export function ViewShell({
     const p = id ? presets.find((x) => x.id === id) : null;
     setFilterRoot((p?.filter as FilterGroup) ?? emptyGroup());
     setSorts((p?.sorts as SortRule[]) ?? []);
+    setManualOrderCustomized(false);
     setGroupFieldId(p?.group_field_id ?? null);
     setHideEmpty(p?.hide_empty ?? false);
     applyPresetMut.mutate(id);
@@ -343,7 +462,10 @@ export function ViewShell({
         method: "PATCH",
         body: JSON.stringify(curCfg),
       }),
-    onSuccess: invalidatePresets,
+    onSuccess: () => {
+      invalidatePresets();
+      setManualOrderCustomized(false);
+    },
   });
   function savePreset() {
     if (activePresetId) {
@@ -373,7 +495,12 @@ export function ViewShell({
   // Group axis is the board-field on a Board (its columns), row-group elsewhere.
   const isBoard = view.type === "board";
   const grpId = isBoard ? boardField : groupFieldId;
-  const setGrpId = isBoard ? setBoardField : setGroupFieldId;
+  const setGrpId = isBoard
+    ? setBoardField
+    : (id: string | null) => {
+        setGroupFieldId(id);
+        setGroupOrder([]);
+      };
   const groupName = fields.find((f) => f.id === grpId)?.name;
   const nRules = countRules(filterRoot);
   const openQuick = (kind: "filter" | "sort" | "group") => (e: React.MouseEvent) => {
@@ -461,18 +588,50 @@ export function ViewShell({
         )}
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {invalidReview && (
+            <button
+              type="button"
+              onClick={() => {
+                setInvalidReview(null);
+                window.dispatchEvent(
+                  new CustomEvent("vhb:end-invalid-field-review"),
+                );
+              }}
+              className="flex h-6 items-center gap-1 rounded border border-amber-400/50 bg-amber-50 px-1.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100 dark:bg-amber-950/20 dark:text-amber-200"
+              title="Clear invalid-item review filter"
+            >
+              Invalid · {invalidReview.entityIds.length}
+              <X className="size-2.5" />
+            </button>
+          )}
           <button onClick={openQuick("filter")} className={quickCls(nRules > 0)}>
             <ListFilter className="size-3.5" />
             Filter{nRules > 0 ? ` · ${nRules}` : ""}
           </button>
-          <button onClick={openQuick("sort")} className={quickCls(sorts.length > 0)}>
+          <button
+            onClick={openQuick("sort")}
+            className={quickCls(manualOrderCustomized || sorts.length > 0)}
+          >
             <ArrowUpDown className="size-3.5" />
-            Sort{sorts.length > 0 ? ` · ${sorts.length}` : ""}
+            {manualOrderCustomized
+              ? "Sort: Custom"
+              : `Sort${sorts.length > 0 ? ` · ${sorts.length}` : ""}`}
           </button>
           <button onClick={openQuick("group")} className={quickCls(!!grpId)}>
             <GroupIcon className="size-3.5" />
             {groupName ? `Group: ${groupName}` : "Group"}
           </button>
+          {view.type === "table" && groupFieldId && (
+            <button
+              type="button"
+              onClick={() => setCollapseGroupsNonce((value) => value + 1)}
+              className={quickCls(false)}
+              title="Collapse every group"
+            >
+              <FaIcon name="compress-alt" className="size-3" />
+              Collapse all
+            </button>
+          )}
           {dirty && (
             <button
               onClick={() => applyPreset(activePresetId)}
@@ -544,7 +703,14 @@ export function ViewShell({
                 <FilterGroupEditor group={filterRoot} fields={fields} onChange={setFilterRoot} />
               )}
               {quick.kind === "sort" && (
-                <SortEditor fields={fields} sorts={sorts} setSorts={setSorts} />
+                <SortEditor
+                  fields={fields}
+                  sorts={sorts}
+                  setSorts={(next) => {
+                    setManualOrderCustomized(false);
+                    setSorts(next);
+                  }}
+                />
               )}
               {quick.kind === "group" && (
                 <GroupEditor
@@ -572,6 +738,10 @@ export function ViewShell({
           databaseId={databaseId}
           boardField={boardField}
           boardSubgroup={boardSubgroup}
+          boardGroupSort={boardGroupSort}
+          conditionalColor={conditionalColor}
+          search={search}
+          searchFieldId={searchFieldId}
           filterRoot={filterRoot}
           sorts={sorts}
           limit={limit}
@@ -598,8 +768,9 @@ export function ViewShell({
           sorts={sorts}
           limit={limit}
           dataSourceId={dataSourceId}
+          search={search}
+          searchFieldId={searchFieldId}
           filterToMatches={filterToMatches}
-          matchedIds={matchedIds}
           openEntity={setActiveEntity}
         />
       ) : view.type === "calendar" ? (
@@ -611,9 +782,11 @@ export function ViewShell({
           setCalendarMode={setCalendarMode}
           toolbarSlot={calendarToolbar}
           filterRoot={filterRoot}
+          sorts={sorts}
           dataSourceId={dataSourceId}
+          search={search}
+          searchFieldId={searchFieldId}
           filterToMatches={filterToMatches}
-          matchedIds={matchedIds}
           openEntity={setActiveEntity}
         />
       ) : view.type === "list" ? (
@@ -633,6 +806,7 @@ export function ViewShell({
           activeId={activeId}
           setActiveId={setActiveId}
           fields={fields}
+          dataSources={dataSources}
           hidden={hidden}
           setHidden={setHidden}
           hasSubItems={hasSubItems}
@@ -641,6 +815,10 @@ export function ViewShell({
           setBoardField={setBoardField}
           boardSubgroup={boardSubgroup}
           setBoardSubgroup={setBoardSubgroup}
+          boardGroupSort={boardGroupSort}
+          setBoardGroupSort={setBoardGroupSort}
+          conditionalColor={conditionalColor}
+          setConditionalColor={setConditionalColor}
           ganttDateFormat={ganttDateFormat}
           setGanttDateFormat={setGanttDateFormat}
           limit={limit}
@@ -648,11 +826,20 @@ export function ViewShell({
           filterRoot={filterRoot}
           setFilterRoot={setFilterRoot}
           sorts={sorts}
-          setSorts={setSorts}
+          setSorts={(next) => {
+            setManualOrderCustomized(false);
+            setSorts(next);
+          }}
           groupFieldId={groupFieldId}
-          setGroupFieldId={setGroupFieldId}
+          setGroupFieldId={(id) => {
+            setGroupFieldId(id);
+            setGroupOrder([]);
+          }}
           hideEmpty={hideEmpty}
           setHideEmpty={setHideEmpty}
+          groupOrder={groupOrder}
+          setGroupOrder={setGroupOrder}
+          groupSummaries={groupSummaries}
           frozenUpTo={frozenUpTo}
           setFrozenUpTo={setFrozenUpTo}
           calc={calc}
