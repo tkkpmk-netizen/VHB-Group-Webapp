@@ -20,7 +20,6 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  Download,
   GripVertical,
   LoaderCircle,
   Pencil,
@@ -73,12 +72,6 @@ type Entity = components["schemas"]["EntityOut"];
 type EntityPage = components["schemas"]["EntityPage"];
 type EntityGroup = components["schemas"]["EntityGroup"];
 type Db = components["schemas"]["DatabaseOut"];
-type TransferJob = {
-  id: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
-  result: Record<string, unknown> | null;
-  error: string | null;
-};
 
 type LoadedGroupPage = {
   items: Entity[];
@@ -201,6 +194,8 @@ export function TableView({
   filterToMatches,
   matchedIds,
   flashId,
+  onSelectionChange,
+  inspectEntity,
   openEntity,
   conditionalColor,
 }: { databaseId: string } & SharedViewProps) {
@@ -221,8 +216,6 @@ export function TableView({
   const [bulkFieldId, setBulkFieldId] = useState<string | null>(null);
   const [bulkValue, setBulkValue] = useState<unknown>(null);
   const [bulkMessage, setBulkMessage] = useState("");
-  const [exportJobId, setExportJobId] = useState<string | null>(null);
-  const exportDownloadedRef = useRef<string | null>(null);
   const [anchor, setAnchor] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragColId, setDragColId] = useState<string | null>(null);
@@ -274,38 +267,6 @@ export function TableView({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const exportJobQ = useQuery<TransferJob>({
-    queryKey: ["selected-export-job", exportJobId],
-    queryFn: () => apiFetch<TransferJob>(`/jobs/${exportJobId}`),
-    enabled: Boolean(exportJobId),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "queued" || status === "running" ? 800 : false;
-    },
-  });
-  useEffect(() => {
-    const job = exportJobQ.data;
-    const assetId = job?.result?.asset_id;
-    if (
-      !job ||
-      job.status !== "succeeded" ||
-      typeof assetId !== "string" ||
-      exportDownloadedRef.current === job.id
-    )
-      return;
-    exportDownloadedRef.current = job.id;
-    void apiFetch<{ download_url: string }>(`/assets/${assetId}/download`).then(
-      ({ download_url }) => {
-        const anchor = document.createElement("a");
-        anchor.href = download_url;
-        anchor.download = "";
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        setBulkMessage("Selected rows exported");
-      },
-    );
-  }, [exportJobQ.data]);
   const pageSize = Math.min(Math.max(limit, 1), 200);
   const fieldsById = new Map((fieldsQ.data ?? []).map((field) => [field.id, field]));
   const requestedAggregations = Object.entries(calc).flatMap(
@@ -697,29 +658,6 @@ export function TableView({
     },
   });
 
-  async function exportSelected() {
-    setBulkMessage("");
-    exportDownloadedRef.current = null;
-    try {
-      const result = await apiFetch<{ job: TransferJob }>(
-        `/databases/${databaseId}/exports`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            format: "xlsx",
-            entity_ids: [...selected],
-          }),
-        },
-      );
-      setExportJobId(result.job.id);
-      setBulkMessage(`Preparing ${selected.size} selected rows…`);
-    } catch (error) {
-      setBulkMessage(
-        error instanceof Error ? error.message : "Could not export selected rows",
-      );
-    }
-  }
-
   const updateWidth = useMutation({
     mutationFn: ({ field, width }: { field: Field; width: number }) =>
       apiFetch<Field>(`/fields/${field.id}`, {
@@ -934,6 +872,9 @@ export function TableView({
       subItemTreeQ.data,
     ],
   );
+  useEffect(() => {
+    onSelectionChange(entities.filter((entity) => selected.has(entity.id)));
+  }, [entities, onSelectionChange, selected]);
   const choiceType = ["select", "multi_select"].includes(fType);
   const subOwner = subOwnerField;
   const subParent = subParentField;
@@ -1746,6 +1687,7 @@ export function TableView({
               key={f.id}
               onMouseDown={() => {
                 if (isEditing) return; // editing this cell: let the input handle it
+                inspectEntity(entity);
                 setSelected(new Set());
                 setAnchor(null);
                 setCursor(null);
@@ -2077,23 +2019,6 @@ export function TableView({
             className="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
           >
             <Pencil className="size-3.5" /> Bulk change
-          </button>
-          <button
-            type="button"
-            onClick={() => void exportSelected()}
-            disabled={
-              exportJobQ.data?.status === "queued" ||
-              exportJobQ.data?.status === "running"
-            }
-            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-          >
-            {exportJobQ.data?.status === "queued" ||
-            exportJobQ.data?.status === "running" ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <Download className="size-3.5" />
-            )}
-            Export
           </button>
           <button
             onClick={() => duplicateEntities.mutate([...selected])}

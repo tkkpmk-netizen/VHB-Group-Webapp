@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     worker_lease_seconds: int = 300
     worker_max_attempts: int = 3
 
+    # One-shot isolated untrusted-file worker. Production/staging must pin a
+    # released GHCR image by digest; local development uses the explicit dev tag.
+    file_worker_image: str = "vhb-file-worker:dev"
+    file_worker_memory: str = "512m"
+    file_worker_cpus: float = 1.0
+    file_worker_pids_limit: int = 128
+    file_worker_tmpfs: str = "64m"
+
     # Redis-backed sessions, rate limits and short-lived cache values.
     redis_url: str = "redis://localhost:6379/0"
     auth_rate_limit_per_minute: int = 20
@@ -46,6 +54,10 @@ class Settings(BaseSettings):
 
     # Google Identity Services.
     google_client_id: str | None = None
+
+    # Commercial Data foundation. This is a deny-only kill switch: when false,
+    # the bootstrap returns no module destinations.
+    commercial_foundation_enabled: bool = True
 
     # Email notifications. Empty host keeps email delivery disabled.
     smtp_host: str | None = None
@@ -67,6 +79,8 @@ class Settings(BaseSettings):
                 raise ValueError("Production JWT_SECRET must be at least 32 secure characters")
             if self.storage_secret_key == "vhb_minio_secret":
                 raise ValueError("Production storage credentials must be overridden")
+            if "@sha256:" not in self.file_worker_image:
+                raise ValueError("Production FILE_WORKER_IMAGE must be pinned by digest")
         return self
 
     @property

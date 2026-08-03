@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileSpreadsheet, LoaderCircle, Upload, X } from "@/components/ui/fa-icon";
+import { FileSpreadsheet, LoaderCircle, Upload, X } from "@/components/ui/fa-icon";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api/client";
@@ -217,44 +217,12 @@ export function DatabaseTransfers({
     }
   }
 
-  async function exportFile(format: "csv" | "xlsx") {
-    setBusy(true);
-    setMessage("Preparing export…");
-    try {
-      const transfer = await apiFetch<TransferResult>(
-        `/databases/${databaseId}/exports`,
-        { method: "POST", body: JSON.stringify({ format }) },
-      );
-      setQueuedTooLong(false);
-      setJobId(transfer.job.id);
-      setMessage("Export queued");
-    } catch {
-      setMessage("Could not queue export");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function downloadResult() {
-    const assetId = job?.result?.asset_id;
-    if (typeof assetId !== "string") return;
-    const result = await apiFetch<{ download_url: string }>(
-      `/assets/${assetId}/download`,
-    );
-    const anchor = document.createElement("a");
-    anchor.href = result.download_url;
-    anchor.rel = "noopener";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-  }
-
   return (
     <>
       <button
         type="button"
-        aria-label="Import or export database"
-        title="Import / Export database"
+        aria-label="Import database"
+        title="Import database"
         onClick={() => setOpen(true)}
         className={
           compact
@@ -262,7 +230,7 @@ export function DatabaseTransfers({
             : "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
         }
       >
-        <FileSpreadsheet className="size-3.5" /> {!compact && "Import / Export"}
+        <FileSpreadsheet className="size-3.5" /> {!compact && "Import"}
       </button>
       {open && (
         <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/25 p-4 pt-[12vh]">
@@ -272,19 +240,19 @@ export function DatabaseTransfers({
             className="absolute inset-0"
             onClick={() => setOpen(false)}
           />
-          <section className="relative z-10 w-full max-w-4xl rounded-xl border bg-card shadow-2xl">
+          <section className="relative z-10 w-full max-w-3xl rounded-xl border bg-card shadow-2xl">
             <header className="flex items-center justify-between border-b px-5 py-4">
               <div>
-                <h2 className="font-semibold">Import / Export database</h2>
+                <h2 className="font-semibold">Import database</h2>
                 <p className="text-xs text-muted-foreground">
-                  CSV and XLSX run safely as durable background jobs.
+                  CSV and XLSX imports run safely as durable background jobs.
                 </p>
               </div>
               <button type="button" onClick={() => setOpen(false)}>
                 <X className="size-4" />
               </button>
             </header>
-            <div className="grid gap-4 p-5 sm:grid-cols-2">
+            <div className="p-5">
               <div className="rounded-lg border border-dashed p-6 text-center hover:bg-muted/40">
                 <label className="flex cursor-pointer flex-col items-center">
                   <Upload className="mb-2 size-5 text-primary" />
@@ -310,26 +278,6 @@ export function DatabaseTransfers({
                   disabled={busy}
                   className="mt-3 w-full rounded-md border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-ring"
                 />
-              </div>
-              <div className="rounded-lg border p-4">
-                <Download className="mb-2 size-5 text-emerald-600" />
-                <p className="text-sm font-medium">Export current database</p>
-                <div className="mt-4 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => exportFile("csv")}
-                    className="rounded-md border px-3 py-2 text-xs hover:bg-muted"
-                  >
-                    CSV
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => exportFile("xlsx")}
-                    className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-white"
-                  >
-                    Excel
-                  </button>
-                </div>
               </div>
             </div>
             {preview && (
@@ -557,16 +505,6 @@ export function DatabaseTransfers({
                       }`
                     : message}
                 </span>
-                {job?.status === "succeeded" &&
-                  typeof job.result?.asset_id === "string" && (
-                    <button
-                      type="button"
-                      onClick={downloadResult}
-                      className="rounded-md bg-emerald-600 px-3 py-1.5 font-medium text-white"
-                    >
-                      Download
-                    </button>
-                  )}
               </div>
             )}
           </section>

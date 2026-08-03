@@ -44,13 +44,11 @@ const shortcutFor: Partial<Record<LayoutType, string>> = {
 
 export function ViewsBar({
   databaseId,
-  placementId,
   views,
   activeId,
   setActiveId,
 }: {
   databaseId: string;
-  placementId?: string;
   views: Layout[];
   activeId: string;
   setActiveId: (id: string) => void;
@@ -71,7 +69,7 @@ export function ViewsBar({
   });
   const orderedViews = localViews.base === views ? localViews.value : views;
   const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["layouts", databaseId, placementId ?? "canonical"] });
+    qc.invalidateQueries({ queryKey: ["layouts", databaseId, "canonical"] });
 
   // Drag-reorder tabs: PATCH each layout's `order` to its new index.
   const patchOrder = useMutation({
@@ -100,7 +98,7 @@ export function ViewsBar({
   const addLayout = useMutation({
     mutationFn: (type: LayoutType) =>
       apiFetch<Layout>(
-        `/databases/${databaseId}/layouts${placementId ? `?placement_id=${placementId}` : ""}`,
+        `/databases/${databaseId}/layouts`,
         {
         method: "POST",
         body: JSON.stringify({
@@ -132,7 +130,7 @@ export function ViewsBar({
   const duplicateLayout = useMutation({
     mutationFn: (layout: Layout) =>
       apiFetch<Layout>(
-        `/databases/${databaseId}/layouts${placementId ? `?placement_id=${placementId}` : ""}`,
+        `/databases/${databaseId}/layouts`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -152,17 +150,6 @@ export function ViewsBar({
   });
   const deleteLayout = useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/layouts/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      setMenu(null);
-      invalidate();
-    },
-  });
-  const setPinned = useMutation({
-    mutationFn: ({ layout, pinned }: { layout: Layout; pinned: boolean }) =>
-      apiFetch<Layout>(`/layouts/${layout.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ config: { ...(layout.config ?? {}), pinned_to_space: pinned } }),
-      }),
     onSuccess: () => {
       setMenu(null);
       invalidate();
@@ -328,11 +315,6 @@ export function ViewsBar({
               <button type="button" onClick={() => duplicateLayout.mutate(menu.layout)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
                 <Copy className="size-3.5" /> Duplicate
               </button>
-              {placementId ? (
-                <button type="button" onClick={() => setPinned.mutate({ layout: menu.layout, pinned: !(menu.layout.config as { pinned_to_space?: boolean } | null)?.pinned_to_space })} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
-                  <FaIcon name="thumbtack" className="size-3.5" /> {(menu.layout.config as { pinned_to_space?: boolean } | null)?.pinned_to_space ? "Unpin from Space" : "Pin to Space"}
-                </button>
-              ) : null}
               <div className="my-1 border-t" />
               <button
                 type="button"

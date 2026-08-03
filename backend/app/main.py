@@ -16,10 +16,12 @@ from starlette.requests import Request
 
 from app import __version__
 from app.core.config import get_settings
+from app.core.problems import ProblemDetailsError, problem_details_handler
 from app.db.session import get_db
 from app.modules import all_routers
 from app.services.cache import CacheStore, get_cache_store
 from app.services.observability import (
+    job_queue_snapshot,
     render_prometheus,
     request_count,
     request_duration_seconds,
@@ -46,6 +48,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
+app.add_exception_handler(ProblemDetailsError, problem_details_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,6 +64,7 @@ async def observe_requests(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
     started = time.perf_counter()
     try:
         response = await call_next(request)
@@ -117,5 +121,9 @@ async def readiness(
 
 
 @app.get("/metrics", include_in_schema=False)
-async def metrics() -> Response:
-    return Response(render_prometheus(), media_type="text/plain; version=0.0.4")
+async def metrics(db: AsyncSession = Depends(get_db)) -> Response:
+    snapshot = await job_queue_snapshot(db)
+    return Response(
+        render_prometheus(snapshot),
+        media_type="text/plain; version=0.0.4",
+    )

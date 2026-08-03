@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,7 +26,7 @@ from app.schemas.transfer import (
     ImportPreviewColumn,
     TransferJobOut,
 )
-from app.services.jobs import enqueue_job
+from app.services.jobs import enqueue_job, operation_context_from_headers
 from app.services.spreadsheets import _infer_type, read_tabular
 from app.services.storage import ObjectStorage, get_object_storage
 
@@ -49,6 +49,7 @@ async def _database(database_id: uuid.UUID, workspace: Workspace, db: AsyncSessi
 async def import_database(
     database_id: uuid.UUID,
     payload: DatabaseImportCreate,
+    request: Request,
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -101,6 +102,13 @@ async def import_database(
             "existing_name_policy": payload.existing_name_policy,
         },
         max_attempts=settings.worker_max_attempts,
+        operation_context=operation_context_from_headers(
+            actor_id=current_user.id,
+            request_id=getattr(request.state, "request_id", None),
+            command_id=request.headers.get("X-Command-ID"),
+            correlation_id=request.headers.get("X-Correlation-ID"),
+            causation_id=request.headers.get("X-Causation-ID"),
+        ),
     )
     if not reused_source:
         data_source.origin_job_id = job.id
@@ -176,6 +184,7 @@ async def preview_database_import(
 async def export_database(
     database_id: uuid.UUID,
     payload: DatabaseExportCreate,
+    request: Request,
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -196,5 +205,12 @@ async def export_database(
             ),
         },
         max_attempts=settings.worker_max_attempts,
+        operation_context=operation_context_from_headers(
+            actor_id=current_user.id,
+            request_id=getattr(request.state, "request_id", None),
+            command_id=request.headers.get("X-Command-ID"),
+            correlation_id=request.headers.get("X-Correlation-ID"),
+            causation_id=request.headers.get("X-Causation-ID"),
+        ),
     )
     return TransferJobOut(job=JobOut.model_validate(job))

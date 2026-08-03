@@ -9,7 +9,6 @@ import {
   Table2,
   Trash2,
   X,
-  FaIcon,
   SlidersHorizontal,
 } from "@/components/ui/fa-icon";
 import { useMemo, useState } from "react";
@@ -18,17 +17,14 @@ import { ResourceAccess } from "@/components/access/resource-access";
 import { Dropdown } from "@/components/ui/dropdown";
 import type { components } from "@/lib/api/schema";
 import { apiFetch } from "@/lib/api/client";
-import { DEFAULT_ICONS } from "@/lib/icon-system";
 import { toText } from "@/lib/view";
 
 type Dashboard = {
   id: string;
-  space_id: string;
   name: string;
   description: string | null;
 };
 type Database = { id: string; name: string };
-type SpaceDatabase = { database: Database };
 type Field = components["schemas"]["FieldOut"];
 type WidgetType = "metric" | "bar" | "table";
 type Widget = {
@@ -194,12 +190,10 @@ function WidgetCard({
 
 function AddWidgetDialog({
   dashboardId,
-  spaceId,
   onClose,
   onCreated,
 }: {
   dashboardId: string;
-  spaceId: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -209,11 +203,10 @@ function AddWidgetDialog({
   const [groupBy, setGroupBy] = useState<string | null>(null);
   const [valueField, setValueField] = useState<string>("seq");
   const [aggregation, setAggregation] = useState("count");
-  const { data: placements = [] } = useQuery<SpaceDatabase[]>({
-    queryKey: ["space-databases", spaceId],
-    queryFn: () => apiFetch<SpaceDatabase[]>(`/spaces/${spaceId}/databases`),
+  const { data: databases = [] } = useQuery<Database[]>({
+    queryKey: ["databases"],
+    queryFn: () => apiFetch<Database[]>("/databases"),
   });
-  const databases = placements.map((placement) => placement.database);
   const { data: fields = [] } = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
@@ -389,18 +382,8 @@ function AddWidgetDialog({
 
 export function DashboardDesigner({
   dashboardId,
-  spaceId,
-  spaceName,
-  spaceIcon,
-  spaceColor,
-  hideContextHeader = false,
 }: {
   dashboardId: string;
-  spaceId?: string;
-  spaceName?: string;
-  spaceIcon?: string | null;
-  spaceColor?: string | null;
-  hideContextHeader?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -431,22 +414,8 @@ export function DashboardDesigner({
   }
   return (
     <div className="min-h-full bg-[#fafbfc]">
-      {!hideContextHeader && <header className="flex min-h-16 items-center gap-3 border-b bg-background px-5 py-2">
-        {spaceName ? (
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-selected)]">
-            <FaIcon
-              name={spaceIcon || DEFAULT_ICONS.space}
-              className="size-4"
-              style={{ color: spaceColor || "var(--icon-space)" }}
-            />
-          </span>
-        ) : null}
+      <header className="flex min-h-16 items-center gap-3 border-b bg-background px-5 py-2">
         <div className="min-w-0">
-          {spaceName && (
-            <p className="mb-0.5 text-sm font-semibold text-[#102447]">
-              {spaceName}
-            </p>
-          )}
           <input
             defaultValue={dashboard.name}
             aria-label="Dashboard name"
@@ -492,7 +461,7 @@ export function DashboardDesigner({
             resourceLabel="Dashboard"
           />
         </div>
-      </header>}
+      </header>
       <div className="flex h-10 items-end gap-1 border-b bg-white px-5">
         <button
           type="button"
@@ -540,7 +509,6 @@ export function DashboardDesigner({
       {adding && (
         <AddWidgetDialog
           dashboardId={dashboardId}
-          spaceId={spaceId ?? dashboard.space_id}
           onClose={() => setAdding(false)}
           onCreated={() => {
             setAdding(false);

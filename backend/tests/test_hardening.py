@@ -87,5 +87,6 @@ def test_production_config_accepts_overrides() -> None:
         environment="production",
         jwt_secret="secure-production-secret-that-is-long-enough",
         storage_secret_key="secure-storage-secret",
+        file_worker_image=f"ghcr.io/example/vhb-file-worker@sha256:{'a' * 64}",
     )
     assert settings.environment == "production"

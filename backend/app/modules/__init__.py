@@ -28,6 +28,7 @@ from app.api.sites import router as sites_router
 from app.api.transfers import router as transfers_router
 from app.api.view_presets import router as view_presets_router
 from app.api.workspaces import router as workspaces_router
+from app.modules.commercial import router as commercial_router
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,15 @@ MODULES = (
             "outbox_events",
             "notifications",
             "notification_preferences",
+        ),
+    ),
+    PlatformModule(
+        "commercial",
+        (commercial_router,),
+        (
+            "commercial_workspace_policies",
+            "commercial_capability_assignments",
+            "commercial_command_receipts",
         ),
     ),
 )

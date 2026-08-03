@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Database, FolderTree, ShieldCheck, Users } from "@/components/ui/fa-icon";
+import { ArrowRight, Database, ShieldCheck, Users } from "@/components/ui/fa-icon";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, getWorkspaceId } from "@/lib/api/client";
@@ -8,7 +8,6 @@ import type { components } from "@/lib/api/schema";
 
 type Workspace = components["schemas"]["WorkspaceOut"];
 type Db = components["schemas"]["DatabaseOut"];
-type Space = components["schemas"]["SpaceOut"];
 
 export function DashboardContent() {
   const workspaceId = getWorkspaceId();
@@ -20,13 +19,7 @@ export function DashboardContent() {
     queryKey: ["databases", workspaceId],
     queryFn: () => apiFetch<Db[]>("/databases"),
   });
-  const { data: spaces = [] } = useQuery<Space[]>({
-    queryKey: ["spaces", workspaceId],
-    queryFn: () => apiFetch<Space[]>("/spaces"),
-  });
-
   const stats = [
-    { label: "Spaces", value: spaces.length, icon: FolderTree, color: "text-violet-600 bg-violet-50" },
     { label: "Databases", value: databases.length, icon: Database, color: "text-blue-600 bg-blue-50" },
     { label: "Members", value: workspace?.member_count ?? "—", icon: Users, color: "text-emerald-600 bg-emerald-50" },
     { label: "Your role", value: workspace?.role ?? "—", icon: ShieldCheck, color: "text-amber-600 bg-amber-50" },
@@ -41,7 +34,7 @@ export function DashboardContent() {
         </p>
       </header>
       <div className="mx-auto max-w-6xl space-y-7 p-6">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {stats.map((stat) => (
             <div key={stat.label} className="rounded-lg border bg-card p-4">
               <div className={`mb-4 flex size-9 items-center justify-center rounded-lg ${stat.color}`}>

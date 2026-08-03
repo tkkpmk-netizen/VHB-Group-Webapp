@@ -148,6 +148,7 @@ export function BoardView({
   hidden,
   dataSourceId,
   filterToMatches,
+  inspectEntity,
   openEntity,
 }: {
   databaseId: string;
@@ -164,6 +165,7 @@ export function BoardView({
   dataSourceId: string | null;
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
+  inspectEntity: (entity: Entity) => void;
   openEntity: (entity: Entity) => void;
 }) {
   const qc = useQueryClient();
@@ -495,6 +497,7 @@ export function BoardView({
         data-drag-preview-label={cardTitle(entity)}
         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
         onDragStart={() => setDragEntity(entity.id)}
+        onClick={() => inspectEntity(entity)}
         style={surface ? { backgroundColor: surface.backgroundColor } : undefined}
         className="group cursor-grab space-y-1.5 rounded-lg border bg-card p-2 text-[11px] leading-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md active:cursor-grabbing"
       >

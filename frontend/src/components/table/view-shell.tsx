@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -139,6 +139,8 @@ export type SharedViewProps = {
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
   flashId: string | null;
+  onSelectionChange: (entities: Entity[]) => void;
+  inspectEntity: (entity: Entity) => void;
   openEntity: (entity: Entity) => void;
 };
 
@@ -167,6 +169,12 @@ export function ViewShell({
   filterToMatches,
   matchedIds,
   flashId,
+  onEntityInspect,
+  infoBarOpen,
+  mobileInfoBarOpen,
+  onToggleInfoBar,
+  onSelectionChange,
+  onVisibleFieldsChange,
 }: {
   databaseId: string;
   view: Layout;
@@ -178,6 +186,12 @@ export function ViewShell({
   filterToMatches: boolean;
   matchedIds: Set<string> | null;
   flashId: string | null;
+  onEntityInspect: (entity: Entity) => void;
+  infoBarOpen: boolean;
+  mobileInfoBarOpen: boolean;
+  onToggleInfoBar: () => void;
+  onSelectionChange: (entities: Entity[]) => void;
+  onVisibleFieldsChange: (fields: Field[]) => void;
 }) {
   const qc = useQueryClient();
   const cfg = (view.config ?? {}) as LayoutConfig;
@@ -245,12 +259,20 @@ export function ViewShell({
     queryKey: ["fields", databaseId],
     queryFn: () => apiFetch<Field[]>(`/databases/${databaseId}/fields`),
   });
-  const fields = fieldsQ.data ?? [];
+  const fields = useMemo(() => fieldsQ.data ?? [], [fieldsQ.data]);
   const dataSourcesQ = useQuery<DataSourceT[]>({
     queryKey: ["data-sources", databaseId],
     queryFn: () => apiFetch<DataSourceT[]>(`/databases/${databaseId}/data-sources`),
   });
   const dataSources = dataSourcesQ.data ?? [];
+
+  useEffect(() => {
+    onVisibleFieldsChange(fields.filter((field) => !hidden.has(field.id)));
+  }, [fields, hidden, onVisibleFieldsChange]);
+
+  useEffect(() => {
+    if (view.type !== "table") onSelectionChange([]);
+  }, [onSelectionChange, view.type]);
 
   useEffect(() => {
     const review = (event: Event) => {
@@ -355,6 +377,11 @@ export function ViewShell({
     }
   }
 
+  const openEntity = (entity: Entity) => {
+    onEntityInspect(entity);
+    setActiveEntity(entity);
+  };
+
   const shared: SharedViewProps = {
     filterRoot,
     setFilterRoot,
@@ -393,7 +420,9 @@ export function ViewShell({
     filterToMatches,
     matchedIds,
     flashId,
-    openEntity: setActiveEntity,
+    onSelectionChange,
+    inspectEntity: onEntityInspect,
+    openEntity,
   };
 
   // --- View presets (named, server-persisted snapshots of filter/sort/group) ---
@@ -650,6 +679,32 @@ export function ViewShell({
           >
             <SlidersHorizontal className="size-3" /> Customize
           </button>
+          <button
+            type="button"
+            aria-pressed={infoBarOpen}
+            onClick={onToggleInfoBar}
+            title={infoBarOpen ? "Hide information panel" : "Show information panel"}
+            className={`hidden h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium xl:flex ${
+              infoBarOpen
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-transparent bg-background text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <FaIcon name="info-circle" className="size-3" /> Info
+          </button>
+          <button
+            type="button"
+            aria-pressed={mobileInfoBarOpen}
+            onClick={onToggleInfoBar}
+            title={mobileInfoBarOpen ? "Hide information panel" : "Show information panel"}
+            className={`flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] font-medium xl:hidden ${
+              mobileInfoBarOpen
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-transparent bg-background text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <FaIcon name="info-circle" className="size-3" /> Info
+          </button>
         </div>
       </div>
 
@@ -749,7 +804,8 @@ export function ViewShell({
           dataSourceId={dataSourceId}
           filterToMatches={filterToMatches}
           matchedIds={matchedIds}
-          openEntity={setActiveEntity}
+          inspectEntity={onEntityInspect}
+          openEntity={openEntity}
         />
       ) : view.type === "gantt" ? (
         <GanttView
@@ -771,7 +827,7 @@ export function ViewShell({
           search={search}
           searchFieldId={searchFieldId}
           filterToMatches={filterToMatches}
-          openEntity={setActiveEntity}
+          openEntity={openEntity}
         />
       ) : view.type === "calendar" ? (
         <CalendarView
@@ -787,7 +843,7 @@ export function ViewShell({
           search={search}
           searchFieldId={searchFieldId}
           filterToMatches={filterToMatches}
-          openEntity={setActiveEntity}
+          openEntity={openEntity}
         />
       ) : view.type === "list" ? (
         <ListView databaseId={databaseId} {...shared} />

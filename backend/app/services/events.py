@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.event import AuditEvent, OutboxEvent
 from app.models.job import Job
 from app.models.notification import NotificationPreference
+from app.services.jobs import build_operation_context
 
 
 def record_event(
@@ -85,6 +86,11 @@ async def publish_next_outbox_event(db: AsyncSession) -> OutboxEvent | None:
                         payload={"notification_id": str(notification_id)},
                         max_attempts=3,
                         idempotency_key=f"notification-email:{notification_id}",
+                        operation_context=build_operation_context(
+                            actor_id=parsed_user_id,
+                            causation_id=str(event.id),
+                            correlation_id=str(event.id),
+                        ).model_dump(mode="json"),
                     )
                 )
     event.published_at = datetime.now(UTC)

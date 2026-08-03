@@ -1,5 +1,6 @@
 """F5 object storage and F6 durable job integration tests."""
 
+import hashlib
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -7,10 +8,18 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.file_worker.protocol import (
+    ArtifactDescriptor,
+    FileWorkerManifest,
+    FileWorkerResult,
+    FileWorkerStatus,
+)
 from app.main import app
 from app.models.job import JobStatus
+from app.services.file_worker import ValidatedFileWorkerOutput
 from app.services.jobs import claim_next_job, complete_job, fail_job
 from app.services.storage import StoredObjectNotFoundError, get_object_storage
+from app.worker import execute_job
 
 
 class FakeStorage:
@@ -178,3 +187,99 @@ async def test_job_rejects_unknown_type(client: httpx.AsyncClient) -> None:
     headers, _ = await _register(client, "job-type@example.com")
     response = await client.post("/jobs", json={"type": "unknown.task"}, headers=headers)
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_file_inspect_job_uses_isolated_result_before_artifact_promotion(
+    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = FakeStorage()
+    app.dependency_overrides[get_object_storage] = lambda: storage
+    headers, _ = await _register(client, "file-inspect@example.com")
+    source = b"name,sku\nCoffee,SKU-1\n"
+    upload = await client.post(
+        "/assets/uploads",
+        json={
+            "filename": "intake.csv",
+            "content_type": "text/csv",
+            "size_bytes": len(source),
+        },
+        headers=headers,
+    )
+    asset = upload.json()["asset"]
+    upload_key = upload.json()["upload_url"].split("/upload/", 1)[1].split("?", 1)[0]
+    storage.objects[upload_key] = source
+    storage.sizes[upload_key] = len(source)
+    assert (
+        await client.post(f"/assets/{asset['id']}/complete", headers=headers)
+    ).status_code == 200
+    queued = await client.post(
+        "/jobs",
+        json={
+            "type": "file.inspect",
+            "payload": {
+                "asset_id": asset["id"],
+                "operation": "tabular.inspect",
+            },
+        },
+        headers=headers,
+    )
+    assert queued.status_code == 202, queued.text
+
+    artifact = b'{"headers":["name","sku"],"row_count":1}'
+
+    async def fake_isolated(
+        *,
+        manifest: FileWorkerManifest,
+        input_data: bytes,
+    ) -> ValidatedFileWorkerOutput:
+        assert input_data == source
+        descriptor = ArtifactDescriptor(
+            path="tabular-inspection.json",
+            content_type="application/json",
+            size_bytes=len(artifact),
+            sha256=hashlib.sha256(artifact).hexdigest(),
+        )
+        return ValidatedFileWorkerOutput(
+            result=FileWorkerResult(
+                job_id=manifest.job_id,
+                status=FileWorkerStatus.succeeded,
+                input_sha256=manifest.input.sha256,
+                security_passed=True,
+                detected_content_type="text/csv",
+                artifacts=[descriptor],
+                tool_versions={
+                    "file_worker": "1.0.0",
+                    "protocol": "1.0",
+                    "python": "3.12",
+                },
+            ),
+            artifacts={descriptor.path: artifact},
+        )
+
+    monkeypatch.setattr(
+        "app.services.job_handlers.run_isolated_file_worker",
+        fake_isolated,
+    )
+    override = app.dependency_overrides[get_db]
+    generator: AsyncGenerator[AsyncSession] = override()
+    session = await anext(generator)
+    try:
+        job = await claim_next_job(session, worker_id="file-worker-test", lease_seconds=60)
+        assert job is not None
+        result = await execute_job(session, job, storage)
+        await complete_job(session, job, result)
+    finally:
+        await generator.aclose()
+
+    promoted = [
+        (key, value)
+        for key, value in storage.objects.items()
+        if "/file-worker/" in key
+    ]
+    assert len(promoted) == 1
+    assert promoted[0][1] == artifact
+    completed = await client.get(f"/jobs/{queued.json()['id']}", headers=headers)
+    assert completed.json()["status"] == "succeeded"
+    assert completed.json()["result"]["security_passed"] is True

@@ -122,3 +122,18 @@ export function formatNumberValue(
     ? `${formatted} ${options.unit_code}`
     : formatted;
 }
+
+export function formatComputedValue(
+  value: unknown,
+  options: {
+    format?: string;
+    currency_code?: string;
+    precision?: number;
+    unit_code?: string;
+  },
+): string {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "number") return formatNumberValue(value, options);
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
+}

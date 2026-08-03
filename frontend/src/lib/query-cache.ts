@@ -23,13 +23,10 @@ export function createAppQueryClient(): QueryClient {
     },
   });
 
-  // Workspace structure changes relatively rarely and is explicitly
-  // invalidated after creates, moves, renames, and deletes.
+  // Database structure changes relatively rarely and is explicitly
+  // invalidated after creates, renames, and deletes.
   for (const key of [
-    "spaces",
     "databases",
-    "folders",
-    "space-databases",
     "fields",
     "layouts",
     "data-sources",

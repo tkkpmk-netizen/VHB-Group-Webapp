@@ -10,12 +10,11 @@ export default async function DatabaseDetailPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
-  const placementId = typeof query.placement === "string" ? query.placement : undefined;
   const layoutId = typeof query.layout === "string" ? query.layout : undefined;
   return (
     <AppShell>
       <div className="flex h-full min-h-0 w-full flex-col">
-        <DatabaseView databaseId={id} placementId={placementId} initialLayoutId={layoutId} />
+        <DatabaseView databaseId={id} initialLayoutId={layoutId} />
       </div>
     </AppShell>
   );

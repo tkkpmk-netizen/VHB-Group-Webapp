@@ -821,6 +821,54 @@ async def test_formula(client: httpx.AsyncClient) -> None:
     rows = await client.get(f"/databases/{db}/entities", headers=headers)
     assert rows.json()[0]["data"][bad_id] is None
 
+    origin = await _add_field(
+        client,
+        headers,
+        db,
+        "Origin",
+        "select",
+        {
+            "choices": [
+                {"id": "vn-option-id", "label": "Vietnam Origin"},
+                {"id": "us-option-id", "label": "US Origin"},
+            ]
+        },
+    )
+    divisor = await _add_field(client, headers, db, "Divisor", "number")
+    conditional = await _add_field(
+        client,
+        headers,
+        db,
+        "Vietnam price",
+        "formula",
+        {
+            "expression": (
+                'if(prop("Origin") == "Vietnam Origin", '
+                'prop("Price") / prop("Divisor"), 0)'
+            )
+        },
+    )
+    outside_branch = await client.post(
+        f"/databases/{db}/entities",
+        json={
+            "name": "US product",
+            "data": {price: 10, divisor: 0, origin: "us-option-id"},
+        },
+        headers=headers,
+    )
+    assert outside_branch.status_code == 201, outside_branch.text
+    assert outside_branch.json()["data"][conditional] == 0
+    selected_branch = await client.post(
+        f"/databases/{db}/entities",
+        json={
+            "name": "Vietnam product",
+            "data": {price: 10, divisor: 2, origin: "vn-option-id"},
+        },
+        headers=headers,
+    )
+    assert selected_branch.status_code == 201, selected_branch.text
+    assert selected_branch.json()["data"][conditional] == 5
+
 
 @pytest.mark.asyncio
 async def test_engine_isolated_per_workspace(client: httpx.AsyncClient) -> None:

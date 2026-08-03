@@ -40,13 +40,22 @@ Notion business model rather than the ClickUp demo data.
 6. Web/design tooling integrates focused open-source components rather than
    rebuilding Figma, Penpot, or a browser engine.
 7. Editor source data and generated deployment artifacts remain separate.
+8. Commercial decisions use typed, idempotent commands with server-authoritative
+   capabilities, optimistic versions and durable audit evidence.
+9. Untrusted files are scanned and parsed only in a credential-free,
+   network-denied, resource-bounded released container; trusted services
+   validate checksums and tool versions before accepting artifacts.
+10. Sensitive commercial attributes live in typed modules or explicit datasets
+    and are authorized before query construction or serialization. Protected
+    arbitrary dynamic Fields are not supported.
 
 ## Delivered capability baseline
 
-- Workspace, Space, Folder, member roles, and generic resource grants
-- Workspace-level Database inventory plus Space-specific Database placements:
-  a Database can appear in multiple Spaces, with an optional Folder, ordering,
-  independently cloned Layout collection, and display settings stored per Space
+- Workspace, member roles, and generic resource grants. Space, Folder, and
+  placement models remain only as a legacy compatibility boundary and are no
+  longer exposed by the active product UI.
+- A standalone Database mini app provides the canonical workspace inventory;
+  every Database opens directly into its layouts and structured work area.
 - Dynamic databases (Entities/Fields/Cells) with Table, Board, List, Calendar,
   Gallery, and Gantt Layouts; Form and a Dashboard-as-a-Layout integration are
   planned (see [Production Plan](obsidian://open?vault=VHB%20Group%20Webapp&file=PRODUCTION_PLAN))
@@ -59,10 +68,8 @@ Notion business model rather than the ClickUp demo data.
   Field without creating a second identity column.
 - Named, server-persisted View Presets (saved filter/sort/group snapshots)
   per Layout, with one markable as the Layout's active preset
-- FTP-style Space Management with stable drop-target reordering and a
-  canonical Database bar; placement Layout edits never affect another Space
-- Per-user Database Favorites pinned to the Context Sidebar without changing
-  canonical inventory or Space placements
+- Direct Database create, rename, duplicate, delete, sharing, and per-user
+  favorites without a Space hierarchy or Database context sidebar
 - Relations, rollups, formulas, system fields, filters, sorts, grouping, and
   bounded server queries
 - Grouped Tables use server totals, independent lazy loading per expanded group,
@@ -84,13 +91,12 @@ Notion business model rather than the ClickUp demo data.
 - Documents can be created from an Entity, retain a workspace-scoped
   `source_entity_id`, and open as Notion-style pages with editable, hideable
   Entity metadata in a popup editor above the Entity editor
-- Persisted Font Awesome 5 and Material Design icons for Spaces, Folders,
-  Databases, Layouts, Fields, and Documents. The shared searchable picker
+- Persisted Font Awesome 5 and Material Design icons for Databases, Layouts,
+  Fields, and Documents. The shared searchable picker
   exposes all supplied styles (filled, outlined, rounded, sharp and two-tone)
   and preserves legacy solid-icon identifiers.
-- Space-owned Dashboards with one default Dashboard per Space and query-bound
-  editable `Overview`, plus query-bound Metric, Bar, and Table widgets sourced
-  only from Databases placed in that Space
+- Legacy Dashboards can still resolve existing records, while widget source
+  selection now uses the canonical workspace Database inventory
 - Searchable Relation, Country, Select and Multi-select popovers, with the full
   country/territory catalog and plain numeric Entity IDs unless a prefix is set
 - Email/password and Google identity with explicit account linking

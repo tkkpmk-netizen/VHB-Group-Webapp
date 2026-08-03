@@ -1,5 +1,6 @@
 """Per-field-type value validation/coercion + Notion-like formula evaluation."""
 
+import ast
 import math
 import re
 import uuid
@@ -162,6 +163,44 @@ FORMULA_FUNCS: dict[str, Any] = {
 _RESERVED_CALL = re.compile(r"\b(if|and|or|not)\s*\(")
 
 
+class _LazyFormulaCalls(ast.NodeTransformer):
+    """Turn Notion logic calls into Python's lazy expression nodes.
+
+    Mapping ``if()`` to a normal helper function evaluates both branches before
+    the helper is called.  Notion evaluates only the selected branch, which is
+    important when the unused branch divides by an empty/zero value.
+    """
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:  # noqa: N802 - ast API name
+        visited = self.generic_visit(node)
+        if not isinstance(visited, ast.Call) or not isinstance(visited.func, ast.Name):
+            return visited
+        node = visited
+        func_id = visited.func.id
+        if func_id == "_if" and len(node.args) == 3 and not node.keywords:
+            return ast.copy_location(
+                ast.IfExp(test=node.args[0], body=node.args[1], orelse=node.args[2]), node
+            )
+        if func_id == "_and" and node.args and not node.keywords:
+            return ast.copy_location(ast.BoolOp(op=ast.And(), values=node.args), node)
+        if func_id == "_or" and node.args and not node.keywords:
+            return ast.copy_location(ast.BoolOp(op=ast.Or(), values=node.args), node)
+        if func_id == "_not" and len(node.args) == 1 and not node.keywords:
+            return ast.copy_location(ast.UnaryOp(op=ast.Not(), operand=node.args[0]), node)
+        return node
+
+
+def _lazy_formula_expression(expression: str) -> str:
+    rewritten = _RESERVED_CALL.sub(lambda match: f"_{match.group(1)}(", expression)
+    try:
+        tree = ast.parse(rewritten, mode="eval")
+    except SyntaxError:
+        return rewritten
+    tree = _LazyFormulaCalls().visit(tree)
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree)
+
+
 def evaluate_formula(expression: str, value_lookup: dict[str, Any]) -> Any:
     """Evaluate a Notion-like formula in a sandbox (asteval).
 
@@ -176,7 +215,7 @@ def evaluate_formula(expression: str, value_lookup: dict[str, Any]) -> Any:
 
 def check_formula(expression: str, value_lookup: dict[str, Any]) -> tuple[Any, str | None]:
     """Evaluate and also return a human-readable error (for the editor preview)."""
-    expr = _RESERVED_CALL.sub(lambda m: f"_{m.group(1)}(", expression)
+    expr = _lazy_formula_expression(expression)
     interp = Interpreter()
     interp.symtable["prop"] = lambda name: value_lookup.get(name)
     for name, fn in FORMULA_FUNCS.items():

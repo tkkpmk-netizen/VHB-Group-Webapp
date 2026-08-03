@@ -2,6 +2,121 @@
 
 ---
 
+## 2026-08-03 — UI Reviewable Foundation tranche
+
+- Removed Space, folder, placement, and Space Management flows from the active
+  frontend. Database is now a standalone mini app on the global rail with a
+  canonical inventory, direct create/rename/duplicate/delete actions, and no
+  context sidebar; legacy backend Space data remains untouched for compatibility.
+- Replaced the separate Product, Customer, and Supplier master screens with
+  dedicated mini apps backed by the full dynamic Database engine. Each now
+  supports configurable fields, bulk import/export, data sources, six layouts,
+  filters, sorts, groups, view presets, and reversible database history.
+- Promoted Products, Customers, Suppliers, and Order List to the global app
+  rail, removed their context sidebars, and retained redirects from the former
+  Commercial Data routes.
+- Added a reviewable Order List Render Lab with JSON import/manual editing,
+  live document preview, isolated render jobs, job status, and authorized
+  XLSX/PDF artifact downloads.
+- Expanded Data Quality Control into a dense queue/detail workbench with batch
+  staging, immutable source evidence, append-only remapping, conflict creation
+  and resolution, verification, promotion, and per-batch reconciliation.
+- Added actionable Product, Supplier, Customer, Legal Party, Contact, and
+  Address master-data workspaces with versioned edits, merge/retire lifecycle,
+  customer profiles, and audit history.
+- Added the Pricing Workspace for purchasing input, FX, logistics, tax, margin,
+  live selling-price preview, approve/reject decisions, and explicit oral-price
+  confirmation/dispute.
+- Added a Commercial background-job tray, structured version-conflict UI, a
+  Render capability/navigation destination, customer-address migration, and
+  integration coverage for the reviewable workflows.
+
+---
+
+## 2026-08-03 — T2 Order List rendering spike and T3/T4 audit
+
+- Added an isolated `document.order_list.render` operation producing
+  checksummed XLSX/PDF artifacts from a bounded immutable snapshot, with
+  Vietnamese fonts, A4 pagination, merged sections, headers/footers, Decimal
+  values, formula-injection rejection, and a 120-line regression case.
+- Added LibreOffice Calc and explicit Liberation/Noto fonts to the T0F image so
+  PDF rendering uses the production-like network-denied container.
+- Enforced Product, Customer, and Pricing capabilities on direct APIs and
+  restricted price approval to owner/admin workspace managers.
+- Recorded the remaining T3/T4 production-gate gaps and the real-template,
+  100-plus-line owner approval still required to close T2.
+
+## 2026-08-03 — T3 Data Quality Control Center
+
+- Added workspace-scoped immutable migration batches, source-row locators and
+  checksums, versioned normalized candidates, conflict ownership, trust tiers,
+  review decisions, and durable verified-promotion receipts.
+- Added authorized, idempotent Quality APIs for source staging, review, conflict
+  resolution, promotion, and a bounded queue/summary projection.
+- Replaced the Commercial Data Quality placeholder with an operational review
+  queue, source-batch context, trust/freshness counts, and Verify/Promote actions.
+- Added migration quality contract tests covering replay, immutable staging,
+  verified promotion, and conflict-blocked promotion.
+
+---
+
+## 2026-07-30 — Isolated Files & Attribute Policy Foundation
+
+- Added the versioned T0F file-worker manifest/result protocol, static hostile
+  file inspection, checksummed artifacts, trusted result validation, bounded
+  Docker launcher, timeout/cancellation cleanup, and a credential-free,
+  network-denied Linux/amd64 image profile.
+- Added CI image build, network/credential assertions, hostile tests, SBOM,
+  critical vulnerability scan, versioned GHCR publishing, and immutable digest
+  output plus release/rollback runbook.
+- Added the T1 `PolicyDecisionService` contract, selected typed commercial
+  policies with explicit datasets, and retained a bounded unified-policy spike
+  only for threat-model comparison.
+- Added negative prototypes for query inference, derived sensitivity,
+  relation search, export projection, and separate file preview/download
+  decisions, with an enforcement inventory and threat model.
+
+---
+
+## 2026-07-30 — Durable Jobs & Observability Foundation
+
+- Replaced conditional worker dispatch with a typed handler registry covering
+  all existing jobs and rejecting unknown job types before enqueue.
+- Added durable parent/chunk identity, bounded priority aging, progress,
+  resumable checkpoints, cooperative cancellation, structured errors, and
+  request/command/correlation/causation context propagation.
+- Added metadata-only structured worker logs and Prometheus job lifecycle,
+  failure, duration, queue-age, progress, backlog, and oldest-age metrics with
+  sensitive payload redaction.
+- Added database constraints and regression coverage for context propagation,
+  chunk idempotency, starvation prevention, retry resume, cancellation,
+  structured redaction, and metric label safety.
+
+---
+
+## 2026-07-30 — Commercial Data Foundation
+
+- Added a workspace-scoped Commercial bootstrap endpoint with an explicit
+  Foundation capability cohort, ordered server-declared destinations, and a
+  deny-only kill switch. Capability and cohort overrides are now persisted,
+  versioned, audited and resolved with user-over-role precedence.
+- Added an atomic PostgreSQL Commercial command boundary with durable
+  idempotency receipts, payload-mismatch protection and structured optimistic
+  version conflicts using `application/problem+json`.
+- Registered Commercial Data through the shared module registry and AppShell,
+  including remote navigation resolution without embedding commercial-domain
+  rules in the shell.
+- Added stable Quality, Product Master, Customer Master, and Pricing routes
+  with first-use empty states, contextual Vietnamese help, responsive
+  navigation, and per-workspace navigation checkpoints.
+- Preserved typed API Problem Details for future commercial conflict handling
+  and generated the matching frontend OpenAPI contracts.
+- Added an isolated Chromium Playwright lane using migrated `vhb_test`, with
+  deterministic login, Commercial shell routing and cross-workspace denial
+  coverage plus retained failure artifacts in CI.
+
+---
+
 ## 2026-07-27 — Query-before-pagination across every Database layout
 
 - Entity Filter, Search, Sort, Group summaries and aggregate calculations now

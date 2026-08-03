@@ -350,19 +350,38 @@ async def _inject_rollups(db: AsyncSession, fields: list[Field], entities: list[
             r.data = {**r.data, str(f.id): _aggregate(func, values)}
 
 
+def _formula_cell_value(field: Field, value: Any) -> Any:
+    """Expose select labels to formulas while keeping option ids in storage."""
+    if value is None:
+        return None
+    choices = (field.options or {}).get("choices", [])
+    if field.type in (FieldType.select, FieldType.status, FieldType.priority):
+        choice = next((item for item in choices if item.get("id") == value), None)
+        return choice.get("label") if choice is not None else value
+    if field.type is FieldType.multi_select and isinstance(value, list):
+        labels = {item.get("id"): item.get("label") for item in choices}
+        return [labels.get(item, item) for item in value]
+    return value
+
+
+def _formula_lookup(fields: list[Field], data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        field.name: _formula_cell_value(field, data.get(str(field.id))) for field in fields
+    }
+
+
 def _inject_formulas(fields: list[Field], entities: list[Entity]) -> None:
     """Compute formula fields. Requires relations + rollups injected first."""
     formula_fields = [f for f in fields if f.type == FieldType.formula]
     if not formula_fields or not entities:
         return
-    name_by_id = {str(f.id): f.name for f in fields}
     for f in formula_fields:
         expr = (f.options or {}).get("expression")
         for r in entities:
             if not expr:
                 r.data = {**r.data, str(f.id): None}
                 continue
-            lookup = {name: r.data.get(fid) for fid, name in name_by_id.items()}
+            lookup = _formula_lookup(fields, r.data)
             r.data = {**r.data, str(f.id): evaluate_formula(expr, lookup)}
 
 
@@ -419,7 +438,7 @@ async def formula_preview(
     await _inject_rollups(db, fields, entities)
     lookup: dict[str, Any] = {}
     if entities:
-        lookup = {f.name: entities[0].data.get(str(f.id)) for f in fields}
+        lookup = _formula_lookup(fields, entities[0].data)
     value, error = check_formula(payload.expression, lookup)
     if error:
         return FormulaPreviewResult(value=None, type="error", error=error)
@@ -1049,7 +1068,10 @@ def _field_expression(field_id: str, fields: dict[str, Field]) -> Any:
             f"Unknown query field: {field_id}",
         )
     if (field.options or {}).get("system_key") == "uid":
-        return Entity.uid
+        # UID is stored as text for display/compatibility, while seq is the
+        # immutable numeric identity behind it. Sorting by UID lexicographically
+        # puts 9999 ahead of 10000 in descending order.
+        return Entity.seq
     if (field.options or {}).get("system_key") == "name":
         return Entity.name
     if field.type == FieldType.created_time:

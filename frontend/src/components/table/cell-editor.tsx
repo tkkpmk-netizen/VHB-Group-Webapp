@@ -21,7 +21,7 @@ import { Dropdown, MultiDropdown } from "@/components/ui/dropdown";
 import { API_BASE_URL, apiFetch, getWorkspaceId } from "@/lib/api/client";
 import { getToken } from "@/lib/auth";
 import { chipColor } from "@/lib/field-colors";
-import { formatNumberValue } from "@/lib/number-formats";
+import { formatComputedValue, formatNumberValue } from "@/lib/number-formats";
 import {
   COUNTRY_OPTIONS,
   countryByCode,
@@ -929,12 +929,7 @@ function RelationCell({
 }
 
 function RollupCell({ field, value }: CellProps) {
-  const text =
-    value === null || value === undefined || value === ""
-      ? ""
-      : Array.isArray(value)
-        ? value.join(", ")
-        : String(value);
+  const text = formatComputedValue(value, (field.options as NumberOptions) ?? {});
   return <div className={`${displayCls(field)} font-medium`}>{text || dash}</div>;
 }
 

@@ -41,6 +41,7 @@ export function ListView({
   search,
   searchFieldId,
   filterToMatches,
+  inspectEntity,
   openEntity,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
@@ -159,6 +160,7 @@ export function ListView({
     <div
       key={entity.id}
       data-entity-id={entity.id}
+      onClick={() => inspectEntity(entity)}
       className="group flex h-[30px] items-center gap-2 border-b px-2 text-[11px] leading-4 transition-colors hover:bg-muted/40"
     >
       {idField && (

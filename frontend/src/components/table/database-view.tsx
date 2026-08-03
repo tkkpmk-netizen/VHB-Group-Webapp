@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FaIcon, MoreHorizontal, Search, Star, Workflow } from "@/components/ui/fa-icon";
@@ -11,7 +11,8 @@ import { ViewsBar } from "@/components/table/views-bar";
 import { ViewShell } from "@/components/table/view-shell";
 import { ResourceAccess } from "@/components/access/resource-access";
 import { DatabaseTransfers } from "@/components/table/database-transfers";
-import { DatabaseHistory } from "@/components/table/database-history";
+import { DatabaseInfoBar } from "@/components/table/database-info-bar";
+import { SelectionQuickActions } from "@/components/table/selection-quick-actions";
 import { matchedEntityIds, searchHits } from "@/lib/search";
 import type { components } from "@/lib/api/schema";
 import { DEFAULT_ICONS } from "@/lib/icon-system";
@@ -20,17 +21,13 @@ type Layout = components["schemas"]["LayoutOut"];
 type Db = components["schemas"]["DatabaseOut"];
 type Field = components["schemas"]["FieldOut"];
 type EntityPage = components["schemas"]["EntityPage"];
-type Space = components["schemas"]["SpaceOut"];
-type Folder = components["schemas"]["FolderOut"];
-type Placement = components["schemas"]["SpaceDatabaseOut"];
+type Entity = components["schemas"]["EntityOut"];
 
 export function DatabaseView({
   databaseId,
-  placementId,
   initialLayoutId,
 }: {
   databaseId: string;
-  placementId?: string;
   initialLayoutId?: string;
 }) {
   const [activeId, setActiveId] = useState<string | null>(initialLayoutId ?? null);
@@ -43,6 +40,11 @@ export function DatabaseView({
   const [editingDescription, setEditingDescription] = useState(false);
   const [undoNonce, setUndoNonce] = useState(0);
   const [undoMessage, setUndoMessage] = useState("");
+  const [inspectedEntity, setInspectedEntity] = useState<Entity | null>(null);
+  const [infoBarOpen, setInfoBarOpen] = useState(true);
+  const [mobileInfoOpen, setMobileInfoOpen] = useState(false);
+  const [selectedEntities, setSelectedEntities] = useState<Entity[]>([]);
+  const [infoFields, setInfoFields] = useState<Field[]>([]);
   const qc = useQueryClient();
   const workspaceId = getWorkspaceId();
 
@@ -51,11 +53,8 @@ export function DatabaseView({
     queryFn: () => apiFetch<Db[]>("/databases"),
   });
   const layoutsQ = useQuery<Layout[]>({
-    queryKey: ["layouts", databaseId, placementId ?? "canonical"],
-    queryFn: () =>
-      apiFetch<Layout[]>(
-        `/databases/${databaseId}/layouts${placementId ? `?placement_id=${placementId}` : ""}`,
-      ),
+    queryKey: ["layouts", databaseId, "canonical"],
+    queryFn: () => apiFetch<Layout[]>(`/databases/${databaseId}/layouts`),
   });
   const fieldsQ = useQuery<Field[]>({
     queryKey: ["fields", databaseId],
@@ -76,38 +75,6 @@ export function DatabaseView({
       }),
     enabled: search.trim().length > 0,
   });
-  const spacesQ = useQuery<Space[]>({
-    queryKey: workspaceQueryKeys.spaces(workspaceId),
-    queryFn: () => apiFetch<Space[]>("/spaces"),
-  });
-  const spaceIds = (spacesQ.data ?? []).map((space) => space.id);
-  const foldersQ = useQuery<Record<string, Folder[]>>({
-    queryKey: workspaceQueryKeys.folders(workspaceId, spaceIds),
-    queryFn: async () =>
-      Object.fromEntries(
-        await Promise.all(
-          (spacesQ.data ?? []).map(async (space) => [
-            space.id,
-            await apiFetch<Folder[]>(`/spaces/${space.id}/folders`),
-          ]),
-        ),
-      ),
-    enabled: Boolean(spacesQ.data?.length),
-  });
-  const placementsQ = useQuery<Record<string, Placement[]>>({
-    queryKey: workspaceQueryKeys.placements(workspaceId, spaceIds),
-    queryFn: async () =>
-      Object.fromEntries(
-        await Promise.all(
-          (spacesQ.data ?? []).map(async (space) => [
-            space.id,
-            await apiFetch<Placement[]>(`/spaces/${space.id}/databases`),
-          ]),
-        ),
-      ),
-    enabled: Boolean(spacesQ.data?.length),
-  });
-
   const database = dbQ.data?.find((d) => d.id === databaseId);
   const dbName = database?.name ?? "Database";
   const [description, setDescription] = useState("");
@@ -115,29 +82,6 @@ export function DatabaseView({
   const active = layouts.find((v) => v.id === activeId) ?? layouts[0];
   const fields = fieldsQ.data ?? [];
   const entities = entitiesQ.data?.items ?? [];
-  const locationPaths = useMemo(() => {
-    const paths: { space: Space; folders: Folder[] }[] = [];
-    for (const space of spacesQ.data ?? []) {
-      const placement = (placementsQ.data?.[space.id] ?? []).find(
-        (candidate) =>
-          candidate.database_id === databaseId &&
-          (!placementId || candidate.id === placementId),
-      );
-      if (!placement) continue;
-      const folders = foldersQ.data?.[space.id] ?? [];
-      const chain: Folder[] = [];
-      let current = folders.find((folder) => folder.id === placement.folder_id);
-      const visited = new Set<string>();
-      while (current && !visited.has(current.id)) {
-        visited.add(current.id);
-        chain.unshift(current);
-        current = folders.find((folder) => folder.id === current?.parent_id);
-      }
-      paths.push({ space, folders: chain });
-    }
-    return paths;
-  }, [databaseId, foldersQ.data, placementId, placementsQ.data, spacesQ.data]);
-
   // Search over all entities; scope narrows to one field.
   const byId = Object.fromEntries(fields.map((f) => [f.id, f]));
   const searchActive = search.trim().length > 0;
@@ -165,25 +109,25 @@ export function DatabaseView({
   });
   const toggleFavorite = useMutation({
     mutationFn: (favorite: boolean) =>
-      placementId
-        ? apiFetch<void>(`/space-databases/${placementId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ settings: { ...(activePlacement?.settings ?? {}), favorite: !favorite } }),
-          })
-        : apiFetch<void>(`/databases/${databaseId}/favorite`, {
-            method: favorite ? "DELETE" : "PUT",
-          }),
+      apiFetch<void>(`/databases/${databaseId}/favorite`, {
+        method: favorite ? "DELETE" : "PUT",
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["databases"] });
-      qc.invalidateQueries({ queryKey: ["space-databases"] });
     },
   });
-  const activePlacement = Object.values(placementsQ.data ?? {})
-    .flat()
-    .find((item) => item.id === placementId);
-  const isFavorite = placementId
-    ? (activePlacement?.settings as { favorite?: boolean } | undefined)?.favorite === true
-    : database?.is_favorite;
+  const isFavorite = database?.is_favorite;
+
+  const handleSelectionChange = useCallback((entities: Entity[]) => {
+    setSelectedEntities(entities);
+    setInspectedEntity((current) => {
+      if (entities.length === 0) return null;
+      if (entities.length === 1) return entities[0];
+      return current && entities.some((entity) => entity.id === current.id)
+        ? current
+        : entities[0];
+    });
+  }, []);
 
   const undo = useMutation({
     mutationFn: () =>
@@ -281,48 +225,13 @@ export function DatabaseView({
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-white">
       <header className="shrink-0 border-b">
         <div className="flex h-7 min-w-0 items-center gap-1.5 overflow-x-auto px-4 text-[10px] text-muted-foreground lg:px-5">
-          {locationPaths.length ? (
-            locationPaths.map((path) => (
-              <span key={path.space.id} className="flex shrink-0 items-center gap-1">
-                <Link
-                  href={`/databases?space=${path.space.id}`}
-                  className="flex items-center gap-1 font-medium text-[#1264d7] hover:underline"
-                >
-                  <FaIcon
-                    name={path.space.icon || DEFAULT_ICONS.space}
-                    className="size-3"
-                    style={{ color: path.space.color ?? "var(--icon-space)" }}
-                  />
-                  {path.space.name}
-                </Link>
-                {path.folders.map((folder) => (
-                  <span key={folder.id} className="flex items-center gap-1">
-                    <span>/</span>
-                    <FaIcon
-                      name={folder.icon || DEFAULT_ICONS.folder}
-                      className="size-3 text-[var(--icon-folder)]"
-                    />
-                    <span>{folder.name}</span>
-                  </span>
-                ))}
-                <span>/</span>
-                <span className="max-w-40 truncate text-foreground">{dbName}</span>
-                {locationPaths.length > 1 ? (
-                  <span className="mx-1 text-[var(--border-strong)]">•</span>
-                ) : null}
-              </span>
-            ))
-          ) : (
-            <>
-              <Link href="/databases?view=all" className="font-medium text-[#1264d7] hover:underline">
-                All Database
-              </Link>
-              <span>/</span>
-              <span className="truncate text-foreground">{dbName}</span>
-            </>
-          )}
+          <Link href="/databases" className="font-medium text-[#1264d7] hover:underline">
+            Database
+          </Link>
+          <span>/</span>
+          <span className="truncate text-foreground">{dbName}</span>
         </div>
-        {!placementId && <div className="flex items-start gap-2.5 border-t px-4 py-2 lg:px-5">
+        <div className="flex items-start gap-2.5 border-t px-4 py-2 lg:px-5">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-[var(--surface-selected)]">
             <FaIcon name={database?.icon || DEFAULT_ICONS.database} className="size-4" style={{ color: database?.icon_color || "var(--icon-database)" }} />
           </span>
@@ -331,7 +240,7 @@ export function DatabaseView({
               <h1 className="truncate text-base font-semibold tracking-[-0.02em] text-[#102447]">{dbName}</h1>
               <button
                 type="button"
-                title={isFavorite ? "Remove this Space view from favorites" : "Add this Space view to favorites"}
+                title={isFavorite ? "Remove database from favorites" : "Add database to favorites"}
                 aria-pressed={isFavorite ?? false}
                 disabled={!database || toggleFavorite.isPending}
                 onClick={() => toggleFavorite.mutate(isFavorite ?? false)}
@@ -375,7 +284,7 @@ export function DatabaseView({
               <MoreHorizontal className="size-4" />
             </button>
           </div>
-        </div>}
+        </div>
       </header>
 
       {active ? (
@@ -384,7 +293,6 @@ export function DatabaseView({
             <div className="min-w-0 flex-1 self-end overflow-x-auto overflow-y-hidden">
               <ViewsBar
                 databaseId={databaseId}
-                placementId={placementId}
                 views={layouts}
                 activeId={active.id}
                 setActiveId={setActiveId}
@@ -433,22 +341,47 @@ export function DatabaseView({
                 compact
               />
               <DatabaseTransfers databaseId={databaseId} compact />
-              <DatabaseHistory databaseId={databaseId} compact />
+              <SelectionQuickActions entities={selectedEntities} fields={fields} />
             </div>
           </div>
-          <div className="flex min-h-0 flex-1 flex-col">
-            <ViewShell
-              key={`${active.id}:${undoNonce}`}
+          <div className="flex min-h-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <ViewShell
+                key={`${active.id}:${undoNonce}`}
+                databaseId={databaseId}
+                view={active}
+                views={layouts}
+                activeId={active.id}
+                setActiveId={setActiveId}
+                search={search}
+                searchFieldId={scopeFieldId}
+                filterToMatches={filterToMatches}
+                matchedIds={matchedIds}
+                flashId={flashId}
+                onEntityInspect={setInspectedEntity}
+                infoBarOpen={infoBarOpen}
+                mobileInfoBarOpen={mobileInfoOpen}
+                onToggleInfoBar={() => {
+                  if (window.innerWidth < 1280) {
+                    setMobileInfoOpen((open) => !open);
+                  } else {
+                    setInfoBarOpen((open) => !open);
+                  }
+                }}
+                onSelectionChange={handleSelectionChange}
+                onVisibleFieldsChange={setInfoFields}
+              />
+            </div>
+            <DatabaseInfoBar
               databaseId={databaseId}
-              view={active}
-              views={layouts}
-              activeId={active.id}
-              setActiveId={setActiveId}
-              search={search}
-              searchFieldId={scopeFieldId}
-              filterToMatches={filterToMatches}
-              matchedIds={matchedIds}
-              flashId={flashId}
+              fields={infoFields}
+              entity={inspectedEntity}
+              desktopOpen={infoBarOpen}
+              mobileOpen={mobileInfoOpen}
+              onClose={() => {
+                setInfoBarOpen(false);
+                setMobileInfoOpen(false);
+              }}
             />
           </div>
         </>

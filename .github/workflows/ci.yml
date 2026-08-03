@@ -4,6 +4,11 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["file-worker-v*"]
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   backend:
@@ -57,3 +62,120 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+  commercial-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vhb
+          POSTGRES_PASSWORD: vhb
+          POSTGRES_DB: vhb_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vhb -d vhb_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://vhb:vhb@localhost:5432/vhb_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: cd ../backend && uv sync --locked
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: commercial-e2e-artifacts
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
+
+  file-worker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: cd backend && uv sync --locked
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build hostile-file test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/file-worker.Dockerfile
+          load: true
+          tags: vhb-file-worker:test
+          build-args: VCS_REF=${{ github.sha }}
+      - name: Assert credential-free and deny-by-default network runtime
+        run: |
+          test -z "$(docker run --rm --entrypoint env vhb-file-worker:test | grep -E 'DATABASE_URL|REDIS_URL|AWS_ACCESS_KEY|STORAGE_SECRET|JWT_SECRET' || true)"
+          docker run --rm --network none --entrypoint python vhb-file-worker:test -c \
+            "import socket; s=socket.socket(); s.settimeout(1); exit(1) if s.connect_ex(('1.1.1.1', 53)) == 0 else exit(0)"
+      - name: Run isolated worker contract and hostile-file tests
+        run: |
+          docker run --rm --entrypoint python vhb-file-worker:test -m compileall -q /opt/app
+          cd backend
+          uv run pytest tests/test_file_worker.py -q
+      - name: Generate image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: vhb-file-worker:test
+          artifact-name: file-worker-sbom.spdx.json
+          output-file: ./file-worker-sbom.spdx.json
+      - name: Scan released contents
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: vhb-file-worker:test
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Publish versioned image
+        id: publish
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/file-worker.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/vhb-file-worker:sha-${{ github.sha }}
+          build-args: VCS_REF=${{ github.sha }}
+      - name: Record immutable deployment reference
+        if: github.event_name == 'push'
+        run: |
+          echo "FILE_WORKER_IMAGE=ghcr.io/${{ github.repository_owner }}/vhb-file-worker@${{ steps.publish.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"

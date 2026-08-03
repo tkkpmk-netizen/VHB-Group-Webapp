@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function DashboardsPage() {
-  redirect("/databases?view=management");
+  redirect("/databases");
 }

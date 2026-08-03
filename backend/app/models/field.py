@@ -46,6 +46,12 @@ class Field(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("database_id", "name", name="uq_field_database_name"),
         Index(
+            "uq_field_database_name_ci",
+            "database_id",
+            text("lower(btrim(name))"),
+            unique=True,
+        ),
+        Index(
             "uq_field_single_name_type",
             "database_id",
             unique=True,
@@ -107,6 +113,12 @@ class Entity(Base, TimestampMixin):
         UniqueConstraint("database_id", "seq", name="uq_entity_database_seq"),
         UniqueConstraint("database_id", "uid", name="uq_entity_database_uid"),
         UniqueConstraint("database_id", "name", name="uq_entity_database_name"),
+        Index(
+            "uq_entity_database_name_ci",
+            "database_id",
+            text("lower(name)"),
+            unique=True,
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)

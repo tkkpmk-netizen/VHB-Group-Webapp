@@ -63,7 +63,7 @@ from app.services.authorization import (
 )
 from app.services.cache import CacheStore, get_cache_store
 from app.services.events import record_event
-from app.services.jobs import enqueue_job
+from app.services.jobs import enqueue_job, operation_context_from_headers
 from app.services.site_build import next_site_deployment_version
 from app.services.site_design import default_grapesjs_content, imported_grapesjs_content
 from app.services.storage import ObjectStorage, StoredObjectNotFoundError, get_object_storage
@@ -405,6 +405,7 @@ async def list_site_deployments(
 )
 async def create_site_deployment(
     site_id: uuid.UUID,
+    request: Request,
     payload: SiteDeploymentCreate | None = None,
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(get_current_user),
@@ -446,6 +447,13 @@ async def create_site_deployment(
         },
         max_attempts=3,
         idempotency_key=f"site-build:{deployment.id}",
+        operation_context=operation_context_from_headers(
+            actor_id=current_user.id,
+            request_id=getattr(request.state, "request_id", None),
+            command_id=request.headers.get("X-Command-ID"),
+            correlation_id=request.headers.get("X-Correlation-ID"),
+            causation_id=request.headers.get("X-Causation-ID"),
+        ),
     )
     deployment.job_id = job.id
     site.updated_by_id = current_user.id

@@ -1,0 +1,30 @@
+services:
+  file-worker:
+    image: ${FILE_WORKER_IMAGE:-vhb-file-worker:dev}
+    build:
+      context: ..
+      dockerfile: docker/file-worker.Dockerfile
+      args:
+        VCS_REF: ${VCS_REF:-local}
+    profiles: ["file-worker"]
+    network_mode: none
+    read_only: true
+    user: "65532:65532"
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    volumes:
+      - ${FILE_WORKER_INPUT_DIR:?set FILE_WORKER_INPUT_DIR}:/work/input:ro
+      - ${FILE_WORKER_OUTPUT_DIR:?set FILE_WORKER_OUTPUT_DIR}:/work/output:rw
+    command:
+      - --manifest
+      - /work/input/manifest.json
+      - --input-root
+      - /work/input
+      - --output-root
+      - /work/output

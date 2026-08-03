@@ -41,6 +41,7 @@ export function GalleryView({
   search,
   searchFieldId,
   filterToMatches,
+  inspectEntity,
   openEntity,
 }: { databaseId: string } & SharedViewProps) {
   const qc = useQueryClient();
@@ -157,6 +158,7 @@ export function GalleryView({
     <div
       key={entity.id}
       data-entity-id={entity.id}
+      onClick={() => inspectEntity(entity)}
       className="group flex min-h-28 flex-col gap-2 rounded-lg border bg-card p-3 text-[11px] leading-4 transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-primary/30 hover:shadow-sm"
     >
       <div className="flex items-start justify-between gap-2">

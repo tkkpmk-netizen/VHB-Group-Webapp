@@ -411,9 +411,11 @@ export function FieldConfig({
             </label>
           </div>
         )}
-        {field.type === "number" && (
+        {(field.type === "number" || field.type === "formula") && (
           <div className="space-y-2">
-            <label className="text-xs font-medium">Number format</label>
+            <label className="text-xs font-medium">
+              {field.type === "formula" ? "Result format" : "Number format"}
+            </label>
             <Dropdown
               value={
                 (opts.format as string) === "plain"

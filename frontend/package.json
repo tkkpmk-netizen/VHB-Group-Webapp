@@ -9,6 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "e2e:prepare": "cd ../backend && uv run python scripts/prepare_commercial_e2e.py",
+    "e2e": "pnpm e2e:prepare && playwright test",
     "gen:api": "openapi-typescript http://localhost:8000/openapi.json -o src/lib/api/schema.ts"
   },
   "dependencies": {
@@ -33,6 +35,7 @@
     "world-countries": "^5.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

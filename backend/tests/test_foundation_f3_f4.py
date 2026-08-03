@@ -306,6 +306,103 @@ async def test_row_sort_runs_before_pagination_across_old_load_limit(
 
 
 @pytest.mark.asyncio
+async def test_unique_id_sort_uses_numeric_sequence(client: httpx.AsyncClient) -> None:
+    token, workspace_id = await _register(client, "numeric-id-sort@example.com")
+    headers = _headers(token, workspace_id)
+    database = await client.post(
+        "/databases", json={"name": "Numeric IDs"}, headers=headers
+    )
+    database_id = database.json()["id"]
+    fields = await client.get(f"/databases/{database_id}/fields", headers=headers)
+    id_field = next(
+        field
+        for field in fields.json()
+        if field["options"].get("system_key") == "uid"
+    )
+    created = await client.post(
+        f"/databases/{database_id}/entities/bulk",
+        json={"names": [f"Item {index}" for index in range(1, 11)]},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+
+    descending = await client.post(
+        f"/databases/{database_id}/entities/query",
+        json={
+            "page": 1,
+            "page_size": 10,
+            "sorts": [{"field_id": id_field["id"], "direction": "desc"}],
+        },
+        headers=headers,
+    )
+
+    assert descending.status_code == 200, descending.text
+    assert [item["seq"] for item in descending.json()["items"]] == list(
+        range(10, 0, -1)
+    )
+
+
+@pytest.mark.asyncio
+async def test_database_history_can_be_scoped_to_one_entity(
+    client: httpx.AsyncClient,
+) -> None:
+    token, workspace_id = await _register(client, "entity-history@example.com")
+    headers = _headers(token, workspace_id)
+    database = await client.post(
+        "/databases", json={"name": "Entity history"}, headers=headers
+    )
+    database_id = database.json()["id"]
+    price = await client.post(
+        f"/databases/{database_id}/fields",
+        json={"name": "Price", "type": "number", "options": {}},
+        headers=headers,
+    )
+    price_id = price.json()["id"]
+    first = await client.post(
+        f"/databases/{database_id}/entities",
+        json={"name": "First item", "data": {price_id: 100}},
+        headers=headers,
+    )
+    second = await client.post(
+        f"/databases/{database_id}/entities",
+        json={"name": "Second item", "data": {}},
+        headers=headers,
+    )
+    updated = await client.patch(
+        f"/entities/{first.json()['id']}",
+        json={"name": "First item updated", "data": {price_id: 120}},
+        headers=headers,
+    )
+    assert updated.status_code == 200, updated.text
+
+    history = await client.get(
+        f"/databases/{database_id}/history",
+        params={"entity_id": first.json()["id"]},
+        headers=headers,
+    )
+
+    assert history.status_code == 200, history.text
+    assert [item["action"] for item in history.json()] == [
+        "entity.updated",
+        "entity.created",
+    ]
+    assert all("Second item" not in item["summary"] for item in history.json())
+    price_change = next(
+        change
+        for change in history.json()[0]["field_changes"]
+        if change["field_id"] == price_id
+    )
+    assert price_change == {
+        "field_id": price_id,
+        "field_name": "Price",
+        "before_value": 100,
+        "after_value": 120,
+    }
+    assert history.json()[0]["actor_email"] == "entity-history@example.com"
+    assert second.status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_row_query_evaluates_nested_filter_tree_before_pagination(
     client: httpx.AsyncClient,
 ) -> None:

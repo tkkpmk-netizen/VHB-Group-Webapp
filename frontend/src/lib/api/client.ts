@@ -23,35 +23,72 @@ export function clearWorkspaceSelection(): void {
   window.localStorage.removeItem(WORKSPACE_KEY);
 }
 
+export type ConflictPayload = {
+  code: "VERSION_CONFLICT";
+  expected_version: string | number;
+  current_version: string | number;
+  changed_fields: Array<{
+    path: string;
+    current_value?: unknown;
+    snapshot_ref?: string;
+  }>;
+  rebase_actions: Array<"refresh" | "compare" | "rebase" | "retry">;
+  request_id: string;
+};
+
+export type ProblemDetails = {
+  type?: string;
+  title?: string;
+  status?: number;
+  detail?: string | Array<{ msg?: string }>;
+  code?: string;
+  conflict?: ConflictPayload;
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public problem?: ProblemDetails,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-/** Surface FastAPI's `detail` (string or validation-error list) to the UI. */
-export async function extractErrorMessage(
+export async function extractApiError(
   res: Response,
   path: string,
-): Promise<string> {
+): Promise<{ message: string; problem?: ProblemDetails }> {
   const fallback = `Request to ${path} failed (${res.status})`;
   try {
-    const detail = (await res.json())?.detail;
-    if (typeof detail === "string" && detail) return detail;
+    const problem = (await res.json()) as ProblemDetails;
+    const detail = problem.detail;
+    if (typeof detail === "string" && detail) {
+      return { message: detail, problem };
+    }
     if (Array.isArray(detail)) {
       const msgs = detail
         .map((d) => (typeof d?.msg === "string" ? d.msg : null))
         .filter(Boolean);
-      if (msgs.length) return msgs.join("; ");
+      if (msgs.length) return { message: msgs.join("; "), problem };
     }
+    if (typeof problem.title === "string" && problem.title) {
+      return { message: problem.title, problem };
+    }
+    return { message: fallback, problem };
   } catch {
     // Non-JSON body — keep the generic message.
   }
-  return fallback;
+  return { message: fallback };
+}
+
+/** Surface FastAPI detail while retaining typed Problem Details in apiFetch. */
+export async function extractErrorMessage(
+  res: Response,
+  path: string,
+): Promise<string> {
+  return (await extractApiError(res, path)).message;
 }
 
 export async function apiFetch<T>(
@@ -80,7 +117,8 @@ export async function apiFetch<T>(
       clearToken();
       clearWorkspaceSelection();
     }
-    throw new ApiError(res.status, await extractErrorMessage(res, path));
+    const extracted = await extractApiError(res, path);
+    throw new ApiError(res.status, extracted.message, extracted.problem);
   }
 
   // 204 No Content (e.g. DELETE) or empty body → nothing to parse.
