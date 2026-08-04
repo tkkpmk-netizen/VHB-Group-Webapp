@@ -11,14 +11,10 @@
             "id": "a14b4af4203bd1b5",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "docs/crm-order-operations-design.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "crm-order-operations-design"
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
             }
           }
         ]
@@ -201,25 +197,27 @@
   },
   "active": "a14b4af4203bd1b5",
   "lastOpenFiles": [
+    "docs/crm-order-operations-design.md",
+    "backend/alembic/versions/__pycache__/f7c9e1b3d5a7_commercial_master_references.cpython-312.pyc",
+    "backend/alembic/versions/f7c9e1b3d5a7_commercial_master_references.py",
+    "docs/t5-t6-order-management.md",
+    "frontend/src/app/order-management/page.tsx",
+    "frontend/src/app/order-management",
+    "frontend/src/modules/commercial/order-management.tsx",
+    "backend/tests/commercial/__pycache__/test_order_management.cpython-312-pytest-9.1.1.pyc",
+    "backend/tests/commercial/test_order_management.py",
+    "backend/alembic/versions/__pycache__/f6b8d0a2c4e6_t5_t6_order_management.cpython-312.pyc",
+    "backend/app/modules/commercial/order_management/__pycache__/schemas.cpython-312.pyc",
+    "backend/app/modules/commercial/order_management/__pycache__/api.cpython-312.pyc",
     "docs/design/product-audit-detail.png",
     "docs/adr/0030-stabilized-product-field-versioning.md",
     "docs/design/product-info-bar-refined.png",
-    "frontend/test-results/commercial-shell-Commercia-59240-nd-stable-destination-route-commercial-chromium 2",
-    "frontend/test-results/commercial-shell-Commercia-59240-nd-stable-destination-route-commercial-chromium/video.webm",
-    "frontend/test-results/commercial-shell-Commercia-59240-nd-stable-destination-route-commercial-chromium/trace.zip",
     "frontend/test-results/commercial-shell-Commercia-59240-nd-stable-destination-route-commercial-chromium/test-failed-1.png",
     "frontend/test-results/commercial-shell-Commercia-59240-nd-stable-destination-route-commercial-chromium/error-context.md",
-    "frontend/test-results/commercial-shell-Commercia-59240-nd-stable-destination-route-commercial-chromium",
-    "frontend/src/components/table/selection-quick-actions.tsx",
     "docs/design/product-info-bar.png",
-    "frontend/src/components/table/database-info-bar.tsx",
     "docs/design/database-mini-app.png",
     "frontend/public/icons/fa5-solid/envelope.svg",
     "docs/design/catalog-database-mini-app.png",
-    "backend/alembic/versions/__pycache__/e5a3c9d7f2b4_commercial_catalog_databases.cpython-312.pyc",
-    "backend/alembic/versions/__pycache__/d4f2a8c6e1b3_customer_addresses.cpython-312.pyc",
-    "frontend/src/app/order-list/page.tsx",
-    "frontend/src/app/order-list",
     "docs/design/ui-reviewable-foundation-render-lab.png",
     "docs/design/commercial-reviewable-foundation-concept.png",
     "docs/t2-order-list-rendering-spike.md",
@@ -236,7 +234,6 @@
     "frontend/CLAUDE.md",
     "AGENTS.md",
     "frontend/public/window.svg",
-    "frontend/public/vercel.svg",
     "docker/CLAUDE.md",
     "design-system/vhb-super-app/MASTER.md",
     "docs/adr/0026-commercial-foundation-command-and-capability-contract.md",
@@ -245,7 +242,6 @@
     "docs/adr/0025-client-first-runtime-cache.md",
     "docs/adr/0016-realtime-collaboration-contract.md",
     "docs/ux-guidelines.md",
-    "docs/ui-system.md",
-    "docs/product-context.md"
+    "docs/ui-system.md"
   ]
 }

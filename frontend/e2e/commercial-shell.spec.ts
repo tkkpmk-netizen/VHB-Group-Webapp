@@ -154,7 +154,7 @@ test.describe("Commercial Foundation shell", () => {
     await selectionActions.click();
     await expect(page.getByRole("menuitem", { name: /Create Inquiry/ })).toBeDisabled();
     await page.getByRole("menuitem", { name: "Create Order List" }).click();
-    await expect(page).toHaveURL("/order-list?source=products");
+    await expect(page).toHaveURL("/order-management?tab=render&source=products");
     await expect(page.locator(`input[value="${productName}"]`)).toBeVisible();
     await expect(page.locator(`input[value="${secondProductName}"]`)).toBeVisible();
 
@@ -182,10 +182,10 @@ test.describe("Commercial Foundation shell", () => {
       await expect(page.getByLabel("Import database")).toBeVisible();
     }
 
-    await page.getByRole("link", { name: "Order List", exact: true }).click();
-    await expect(page).toHaveURL("/order-list");
+    await page.getByRole("link", { name: "Orders", exact: true }).click();
+    await expect(page).toHaveURL("/order-management");
     await expect(
-      page.getByRole("heading", { name: "Order List", exact: true }),
+      page.getByRole("heading", { name: "Order Management", exact: true }),
     ).toBeVisible();
     expect(consoleErrors).toEqual([]);
   });

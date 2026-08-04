@@ -10,7 +10,7 @@ export default async function CommercialSectionPage({
   const moved: Record<string, string> = {
     products: "/products",
     customers: "/customers",
-    render: "/order-list",
+    render: "/order-management?tab=render",
   };
   if (moved[section]) redirect(moved[section]);
   return <CommercialFoundationWorkspace section={section} />;

@@ -51,7 +51,7 @@ export type ProductModule = {
     | "products"
     | "customers"
     | "suppliers"
-    | "order-list"
+    | "order-management"
     | "documents"
     | "sites"
     | "people"
@@ -100,9 +100,10 @@ export const PRODUCT_MODULES: ProductModule[] = [
     contextNavigation: { kind: "none" },
   },
   {
-    id: "order-list",
-    label: "Order List",
-    href: "/order-list",
+    id: "order-management",
+    label: "Order Management",
+    railLabel: "Orders",
+    href: "/order-management",
     icon: FileSpreadsheet,
     contextNavigation: { kind: "none" },
   },

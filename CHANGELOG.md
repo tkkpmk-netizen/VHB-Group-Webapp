@@ -2,6 +2,30 @@
 
 ---
 
+## 2026-08-04 — T5/T6 Order Management MVP
+
+- Reframed Order List as one document-rendering capability inside the new
+  Order Management mini app for Sales, Purchasing, Documentation, and managers.
+- Added typed, workspace-scoped Inquiry and immutable Quotation Version
+  transactions with explicit approve, sent, accepted, rejected, and superseded
+  lifecycle events.
+- Added immutable email/document evidence capture, versioned legal document
+  requirement profiles, and a legal-evidence gate before Sales Order creation.
+- Added snapshotted Sales Orders, versioned Payment Terms and milestones,
+  confirmed Payment Receipts, partial and multi-order allocations, append-only
+  reversals, and confirmed-funds commercial release gates.
+- Added Order Management overview, work queues, creation dialogs, governance
+  controls, payment operations, and the existing XLSX/PDF Render feature as an
+  in-app tab. `/order-list` remains a compatibility redirect.
+- Added API acceptance coverage for the full Inquiry-to-release path, including
+  multi-order allocation and reversal behavior.
+- Connected Inquiry, Quotation, and Sales Order transactions to the dynamic
+  Customers, Products, and Suppliers masters through restrictive Entity
+  references. Free-text products are now allowed only as provisional Inquiry
+  requests; Quotation and Sales Order APIs reject manual or cross-catalog IDs.
+
+---
+
 ## 2026-08-03 — UI Reviewable Foundation tranche
 
 - Removed Space, folder, placement, and Space Management flows from the active

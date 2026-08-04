@@ -40,6 +40,22 @@ from app.models.field import Entity, EntityLink, Field, FieldType
 from app.models.job import Job, JobStatus
 from app.models.layout import Layout, LayoutType
 from app.models.notification import Notification, NotificationPreference
+from app.models.order_management import (
+    CommercialEvidence,
+    CommercialInquiry,
+    CommercialMasterReference,
+    CommercialQuotation,
+    CommercialQuotationVersion,
+    CommercialSalesOrder,
+    DocumentRequirementProfile,
+    InquiryStatus,
+    PaymentAllocation,
+    PaymentReceipt,
+    PaymentReceiptStatus,
+    PaymentTermsVersion,
+    QuotationStatus,
+    SalesOrderStatus,
+)
 from app.models.permission import ResourceGrant, ResourceRole, ResourceType
 from app.models.resource import Folder, Space, SpaceDatabasePlacement
 from app.models.site import (
@@ -110,6 +126,20 @@ __all__ = [
     "OutboxEvent",
     "Notification",
     "NotificationPreference",
+    "CommercialEvidence",
+    "CommercialInquiry",
+    "CommercialMasterReference",
+    "CommercialQuotation",
+    "CommercialQuotationVersion",
+    "CommercialSalesOrder",
+    "DocumentRequirementProfile",
+    "InquiryStatus",
+    "PaymentAllocation",
+    "PaymentReceipt",
+    "PaymentReceiptStatus",
+    "PaymentTermsVersion",
+    "QuotationStatus",
+    "SalesOrderStatus",
     "Space",
     "SpaceDatabasePlacement",
     "Site",

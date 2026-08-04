@@ -47,7 +47,7 @@ export function SelectionQuickActions({
       unit_price: 0,
     }));
     window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-    router.push("/order-list?source=products");
+    router.push("/order-management?tab=render&source=products");
   };
 
   return (

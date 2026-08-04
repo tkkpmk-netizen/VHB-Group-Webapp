@@ -2344,6 +2344,286 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/commercial/order-management/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_commercial_order_management_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/master-options/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Master Options */
+        get: operations["list_master_options_commercial_order_management_master_options__kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/inquiries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Inquiries */
+        get: operations["list_inquiries_commercial_order_management_inquiries_get"];
+        put?: never;
+        /** Create Inquiry */
+        post: operations["create_inquiry_commercial_order_management_inquiries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/inquiries/{inquiry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Inquiry */
+        patch: operations["update_inquiry_commercial_order_management_inquiries__inquiry_id__patch"];
+        trace?: never;
+    };
+    "/commercial/order-management/quotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Quotations */
+        get: operations["list_quotations_commercial_order_management_quotations_get"];
+        put?: never;
+        /** Create Quotation */
+        post: operations["create_quotation_commercial_order_management_quotations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/quotations/{quotation_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Quotation Version */
+        post: operations["create_quotation_version_commercial_order_management_quotations__quotation_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/quotation-versions/{version_id}/transition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transition Quotation */
+        post: operations["transition_quotation_commercial_order_management_quotation_versions__version_id__transition_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Evidence */
+        get: operations["list_evidence_commercial_order_management_evidence_get"];
+        put?: never;
+        /** Capture Evidence */
+        post: operations["capture_evidence_commercial_order_management_evidence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/requirement-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Requirement Profiles */
+        get: operations["list_requirement_profiles_commercial_order_management_requirement_profiles_get"];
+        put?: never;
+        /** Create Requirement Profile */
+        post: operations["create_requirement_profile_commercial_order_management_requirement_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/payment-terms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Payment Terms */
+        get: operations["list_payment_terms_commercial_order_management_payment_terms_get"];
+        put?: never;
+        /** Create Payment Terms */
+        post: operations["create_payment_terms_commercial_order_management_payment_terms_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Orders */
+        get: operations["list_orders_commercial_order_management_orders_get"];
+        put?: never;
+        /** Create Order */
+        post: operations["create_order_commercial_order_management_orders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/orders/{order_id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Release Order */
+        post: operations["release_order_commercial_order_management_orders__order_id__release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Receipts */
+        get: operations["list_receipts_commercial_order_management_receipts_get"];
+        put?: never;
+        /** Create Receipt */
+        post: operations["create_receipt_commercial_order_management_receipts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/receipts/{receipt_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Receipt */
+        post: operations["confirm_receipt_commercial_order_management_receipts__receipt_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Allocations */
+        get: operations["list_allocations_commercial_order_management_allocations_get"];
+        put?: never;
+        /** Allocate Receipt */
+        post: operations["allocate_receipt_commercial_order_management_allocations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commercial/order-management/allocations/{allocation_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reverse Allocation */
+        post: operations["reverse_allocation_commercial_order_management_allocations__allocation_id__reverse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -2409,6 +2689,28 @@ export interface components {
              * @default false
              */
             is_default: boolean;
+        };
+        /** AllocationCreate */
+        AllocationCreate: {
+            /**
+             * Receipt Id
+             * Format: uuid
+             */
+            receipt_id: string;
+            /**
+             * Sales Order Id
+             * Format: uuid
+             */
+            sales_order_id: string;
+            /** Milestone Id */
+            milestone_id: string;
+            /** Amount */
+            amount: number | string;
+        };
+        /** AllocationReverse */
+        AllocationReverse: {
+            /** Reason */
+            reason: string;
         };
         /** AssetDownloadOut */
         AssetDownloadOut: {
@@ -3324,6 +3626,40 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** EvidenceCreate */
+        EvidenceCreate: {
+            /**
+             * Record Type
+             * @enum {string}
+             */
+            record_type: "inquiry" | "quotation_version" | "sales_order" | "payment_receipt";
+            /**
+             * Record Id
+             * Format: uuid
+             */
+            record_id: string;
+            /** Evidence Type */
+            evidence_type: string;
+            /** Source Key */
+            source_key: string;
+            /** Subject */
+            subject?: string | null;
+            /** Sender */
+            sender?: string | null;
+            /** Recipient */
+            recipient?: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Asset Id */
+            asset_id?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
         /** FieldCreate */
         FieldCreate: {
             /** Name */
@@ -3562,6 +3898,65 @@ export interface components {
             samples: unknown[];
             /** Generated Options */
             generated_options?: string[];
+        };
+        /** InquiryCreate */
+        InquiryCreate: {
+            /** Number */
+            number: string;
+            /** Title */
+            title: string;
+            /**
+             * Customer Entity Id
+             * Format: uuid
+             */
+            customer_entity_id: string;
+            /** Supplier Entity Ids */
+            supplier_entity_ids?: string[];
+            /** Product Requests */
+            product_requests: components["schemas"]["InquiryProductRequest"][];
+            /** Source */
+            source?: string | null;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Due At */
+            due_at?: string | null;
+            /** Notes */
+            notes?: string | null;
+        };
+        /** InquiryProductRequest */
+        InquiryProductRequest: {
+            /**
+             * Mode
+             * @default catalog
+             * @enum {string}
+             */
+            mode: "catalog" | "manual";
+            /** Product Entity Id */
+            product_entity_id?: string | null;
+            /** Manual Description */
+            manual_description?: string | null;
+            /** Quantity */
+            quantity: number | string;
+            /** Unit */
+            unit: string;
+            /** Target Price */
+            target_price?: number | string | null;
+        };
+        /** InquiryUpdate */
+        InquiryUpdate: {
+            /** Expected Version */
+            expected_version: number;
+            /** Title */
+            title?: string | null;
+            /** Status */
+            status?: ("draft" | "open" | "sourcing" | "quoted" | "closed") | null;
+            /** Due At */
+            due_at?: string | null;
+            /** Notes */
+            notes?: string | null;
         };
         /** JobCreate */
         JobCreate: {
@@ -4092,6 +4487,38 @@ export interface components {
             /** Note */
             note: string;
         };
+        /** PaymentMilestone */
+        PaymentMilestone: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Percentage */
+            percentage: number | string;
+            /** Due Rule */
+            due_rule: string;
+            /**
+             * Release Gate
+             * @default false
+             */
+            release_gate: boolean;
+        };
+        /** PaymentTermsCreate */
+        PaymentTermsCreate: {
+            /** Name */
+            name: string;
+            /** Payment Method */
+            payment_method: string;
+            /** Currency */
+            currency: string;
+            /** Milestones */
+            milestones: components["schemas"]["PaymentMilestone"][];
+            /**
+             * Allow Partial
+             * @default true
+             */
+            allow_partial: boolean;
+        };
         /** PriceApprovalIn */
         PriceApprovalIn: {
             /** Expected Version */
@@ -4231,10 +4658,142 @@ export interface components {
             /** Pages */
             pages: components["schemas"]["PublicPageSummary"][];
         };
+        /** QuotationCreate */
+        QuotationCreate: {
+            /**
+             * Inquiry Id
+             * Format: uuid
+             */
+            inquiry_id: string;
+            /** Number */
+            number: string;
+            /** Currency */
+            currency: string;
+            /**
+             * Issue Date
+             * Format: date
+             */
+            issue_date: string;
+            /** Valid Until */
+            valid_until?: string | null;
+            /**
+             * Legal Profile
+             * @enum {string}
+             */
+            legal_profile: "VIHABA" | "DP";
+            /** Lines */
+            lines: components["schemas"]["QuotationLine"][];
+            /** Terms */
+            terms?: {
+                [key: string]: unknown;
+            };
+            /** Source Intake */
+            source_intake?: {
+                [key: string]: unknown;
+            };
+            /** Notes */
+            notes?: string | null;
+        };
+        /** QuotationLine */
+        QuotationLine: {
+            /**
+             * Product Entity Id
+             * Format: uuid
+             */
+            product_entity_id: string;
+            /** Supplier Entity Id */
+            supplier_entity_id?: string | null;
+            /** Specification */
+            specification?: string | null;
+            /** Packing */
+            packing?: string | null;
+            /** Quantity */
+            quantity: number | string;
+            /** Unit */
+            unit: string;
+            /** Unit Price */
+            unit_price: number | string;
+            /** Price Version Id */
+            price_version_id?: string | null;
+        };
+        /** QuotationTransition */
+        QuotationTransition: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "internally_approved" | "sent" | "accepted" | "rejected";
+        };
+        /** QuotationVersionCreate */
+        QuotationVersionCreate: {
+            /** Currency */
+            currency: string;
+            /**
+             * Issue Date
+             * Format: date
+             */
+            issue_date: string;
+            /** Valid Until */
+            valid_until?: string | null;
+            /**
+             * Legal Profile
+             * @enum {string}
+             */
+            legal_profile: "VIHABA" | "DP";
+            /** Lines */
+            lines: components["schemas"]["QuotationLine"][];
+            /** Terms */
+            terms?: {
+                [key: string]: unknown;
+            };
+            /** Source Intake */
+            source_intake?: {
+                [key: string]: unknown;
+            };
+            /** Notes */
+            notes?: string | null;
+        };
+        /** ReceiptConfirm */
+        ReceiptConfirm: {
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** ReceiptCreate */
+        ReceiptCreate: {
+            /** Bank Reference */
+            bank_reference: string;
+            /** Amount */
+            amount: number | string;
+            /** Currency */
+            currency: string;
+            /**
+             * Value Date
+             * Format: date
+             */
+            value_date: string;
+            /** Receiving Account */
+            receiving_account: string;
+            /** Evidence Id */
+            evidence_id?: string | null;
+        };
         /** ReorderRequest */
         ReorderRequest: {
             /** Ids */
             ids: string[];
+        };
+        /** RequirementProfileCreate */
+        RequirementProfileCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Legal Profile
+             * @enum {string}
+             */
+            legal_profile: "VIHABA" | "DP";
+            /** Transaction Type */
+            transaction_type: string;
+            /** Required Evidence Types */
+            required_evidence_types: string[];
         };
         /** ResourceGrantOut */
         ResourceGrantOut: {
@@ -4280,6 +4839,33 @@ export interface components {
          * @enum {string}
          */
         ResourceType: "database" | "document" | "dashboard" | "site";
+        /** SalesOrderCreate */
+        SalesOrderCreate: {
+            /** Number */
+            number: string;
+            /**
+             * Quotation Version Id
+             * Format: uuid
+             */
+            quotation_version_id: string;
+            /**
+             * Requirement Profile Id
+             * Format: uuid
+             */
+            requirement_profile_id: string;
+            /**
+             * Payment Terms Id
+             * Format: uuid
+             */
+            payment_terms_id: string;
+            /** Supplier Entity Ids */
+            supplier_entity_ids: string[];
+        };
+        /** SalesOrderRelease */
+        SalesOrderRelease: {
+            /** Expected Version */
+            expected_version: number;
+        };
         /** SignupRequest */
         SignupRequest: {
             /**
@@ -11080,6 +11666,889 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summary_commercial_order_management_summary_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_master_options_commercial_order_management_master_options__kind__get: {
+        parameters: {
+            query?: {
+                search?: string | null;
+                limit?: number;
+            };
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                kind: components["schemas"]["CommercialCatalogKind"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_inquiries_commercial_order_management_inquiries_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_inquiry_commercial_order_management_inquiries_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InquiryCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_inquiry_commercial_order_management_inquiries__inquiry_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                inquiry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InquiryUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quotations_commercial_order_management_quotations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_quotation_commercial_order_management_quotations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_quotation_version_commercial_order_management_quotations__quotation_id__versions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                quotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotationVersionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transition_quotation_commercial_order_management_quotation_versions__version_id__transition_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotationTransition"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_evidence_commercial_order_management_evidence_get: {
+        parameters: {
+            query: {
+                record_type: string;
+                record_id: string;
+                limit?: number;
+            };
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    capture_evidence_commercial_order_management_evidence_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_requirement_profiles_commercial_order_management_requirement_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_requirement_profile_commercial_order_management_requirement_profiles_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequirementProfileCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_payment_terms_commercial_order_management_payment_terms_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_payment_terms_commercial_order_management_payment_terms_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentTermsCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_orders_commercial_order_management_orders_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_order_commercial_order_management_orders_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesOrderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_order_commercial_order_management_orders__order_id__release_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesOrderRelease"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_receipts_commercial_order_management_receipts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_receipt_commercial_order_management_receipts_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReceiptCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_receipt_commercial_order_management_receipts__receipt_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                receipt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReceiptConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_allocations_commercial_order_management_allocations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    allocate_receipt_commercial_order_management_allocations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AllocationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reverse_allocation_commercial_order_management_allocations__allocation_id__reverse_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-Workspace-ID"?: string | null;
+            };
+            path: {
+                allocation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AllocationReverse"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -109,6 +109,11 @@ Notion business model rather than the ClickUp demo data.
 - Deployment environments, custom domains, and rollback/promote controls
 - Realtime collaboration presence/events for Documents and Web Designer
 - Audit trail, Redis sessions/cache, observability, backups, and CI
+- Typed Order Management transactions from Sales-created Inquiry through
+  immutable Quotation versions, acceptance evidence, governed Sales Orders,
+  Payment Terms/milestones, confirmed receipts, multi-order allocations,
+  reversals, and commercial release. Order List XLSX/PDF rendering is one tab
+  inside this mini app rather than a standalone application.
 
 ## Active roadmap
 

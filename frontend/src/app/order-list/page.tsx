@@ -1,7 +1,5 @@
-import { AppShell } from "@/components/layout/app-shell";
-import { RenderLabWorkspace } from "@/modules/commercial/render-lab";
-import { JobTray } from "@/modules/commercial/workbench";
+import { redirect } from "next/navigation";
 
 export default function OrderListPage() {
-  return <AppShell><RenderLabWorkspace /><JobTray /></AppShell>;
+  redirect("/order-management");
 }
